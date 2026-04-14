@@ -1,0 +1,37 @@
+# Core framework
+agno>=2.0.0
+
+# LLM Providers
+openai>=1.50.0
+groq
+
+# Future providers (uncomment when keys available)
+# anthropic
+# google-generativeai
+
+# Config
+pyyaml
+pydantic-settings
+
+# Telegram
+python-telegram-bot>=21.0
+
+# Database
+psycopg2-binary
+
+# Cache
+redis
+
+# CLI interface
+rich
+prompt-toolkit
+
+# Web framework (JarvisOS)
+fastapi
+uvicorn[standard]
+
+# HTTP client
+httpx
+
+# Utilities
+python-dotenv

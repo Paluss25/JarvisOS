@@ -1,0 +1,61 @@
+# workspace/config/agent-models.yaml — Per-Agent Model Assignment
+# Day 1: only jarvis active. Others stubbed for future phases.
+
+agents:
+
+  jarvis:
+    role: "CEO / Executive Assistant"
+    primary:
+      provider: openai-codex
+      model: "gpt-5.4"
+    fallback:
+      - provider: groq
+        model: "llama-3.3-70b-versatile"
+    # Uncomment when keys are available:
+    # - provider: anthropic
+    #   model: "claude-sonnet-4-6"
+    # - provider: google
+    #   model: "gemini-2.5-pro"
+    notes: "GPT-5.4 via Codex OAuth. Groq as fast fallback."
+
+  # --- Future agents (Phase 11) ---
+
+  # researcher:
+  #   role: "Deep Research Agent"
+  #   primary:
+  #     provider: anthropic
+  #     model: "claude-sonnet-4-6"
+  #   fallback:
+  #     - provider: openai-codex
+  #       model: "gpt-5.4"
+  #     - provider: google
+  #       model: "gemini-2.5-pro"
+
+  # coder:
+  #   role: "Code Generation & Review"
+  #   primary:
+  #     provider: anthropic
+  #     model: "claude-sonnet-4-6"
+  #   fallback:
+  #     - provider: openai-codex
+  #       model: "gpt-5.4"
+  #     - provider: groq
+  #       model: "llama-3.3-70b-versatile"
+
+  # scheduler:
+  #   role: "Task Scheduling & Reminders"
+  #   primary:
+  #     provider: openai-codex
+  #     model: "gpt-5.4-mini"
+  #   fallback:
+  #     - provider: groq
+  #       model: "llama-3.3-70b-versatile"
+
+  # ops:
+  #   role: "DevOps & Infrastructure"
+  #   primary:
+  #     provider: openai-codex
+  #     model: "gpt-5.4"
+  #   fallback:
+  #     - provider: anthropic
+  #       model: "claude-sonnet-4-6"

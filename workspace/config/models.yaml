@@ -1,0 +1,69 @@
+# workspace/config/models.yaml — LLM Provider Registry
+
+providers:
+
+  openai-codex:
+    type: openai
+    auth: codex-oauth          # Reads ~/.codex/auth.json access_token directly
+    models:
+      - id: "gpt-5.4"
+        context_window: 256000
+        supports_streaming: true
+        supports_vision: true
+        cost_tier: subscription  # Flat rate via ChatGPT subscription
+      - id: "gpt-5.4-mini"
+        context_window: 128000
+        supports_streaming: true
+        supports_vision: true
+        cost_tier: subscription
+
+  anthropic:
+    type: anthropic
+    auth: api-key              # ANTHROPIC_API_KEY env var — wired, inactive Day 1
+    models:
+      - id: "claude-sonnet-4-6"
+        context_window: 200000
+        supports_streaming: true
+        supports_vision: true
+        cost_tier: pay-per-token
+      - id: "claude-haiku-4-5"
+        context_window: 200000
+        supports_streaming: true
+        supports_vision: true
+        cost_tier: pay-per-token
+
+  google:
+    type: google
+    auth: api-key              # GOOGLE_API_KEY env var — wired, inactive Day 1
+    models:
+      - id: "gemini-2.5-pro"
+        context_window: 1000000
+        supports_streaming: true
+        supports_vision: true
+        cost_tier: pay-per-token
+      - id: "gemini-2.5-flash"
+        context_window: 1000000
+        supports_streaming: true
+        supports_vision: true
+        cost_tier: pay-per-token
+
+  groq:
+    type: groq
+    auth: api-key              # GROQ_API_KEY env var (aliased from GROK_API_KEY in config.py)
+    models:
+      - id: "llama-3.3-70b-versatile"
+        context_window: 128000
+        supports_streaming: true
+        supports_vision: false
+        cost_tier: pay-per-token
+
+  ollama:                       # Future: local models
+    type: ollama
+    auth: none
+    base_url: "http://host.docker.internal:11434"
+    models:
+      - id: "llama3.3:70b"
+        context_window: 128000
+        supports_streaming: true
+        supports_vision: false
+        cost_tier: free
