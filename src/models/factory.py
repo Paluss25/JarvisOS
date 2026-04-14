@@ -115,3 +115,18 @@ def build_agent_model(agent_name: str) -> FallbackModel:
         retry_delay=1.5,
         on_fallback=on_fallback,
     )
+
+
+def build_agent_model_native(agent_name: str):
+    """Return (primary_model, fallback_models_list) for use with Agno's
+    native fallback_models Agent parameter.
+
+    The primary model is a real Agno Model instance.  The fallbacks list
+    may be empty if no fallback is configured.
+
+    Uses the same YAML config as build_agent_model().
+    """
+    fm = build_agent_model(agent_name)
+    primary = fm.models[0]
+    fallbacks = fm.models[1:] if len(fm.models) > 1 else []
+    return primary, fallbacks
