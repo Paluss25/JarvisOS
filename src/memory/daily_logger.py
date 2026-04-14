@@ -87,6 +87,14 @@ class DailyLogger:
         except FileNotFoundError:
             return ""
 
+    def read_date(self, d: date) -> str:
+        """Return the memory file content for a specific date (empty string if absent)."""
+        p = self.workspace_path / "memory" / f"{d.isoformat()}.md"
+        try:
+            return p.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return ""
+
     # ------------------------------------------------------------------ #
     #  Module-level convenience (used by factory.py on_fallback)          #
     # ------------------------------------------------------------------ #

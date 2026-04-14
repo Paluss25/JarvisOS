@@ -38,6 +38,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 _agent = None
 _session_manager = None
 _telegram_task: asyncio.Task | None = None
+_scheduler_task: asyncio.Task | None = None
 _start_time: float = time.time()
 
 
@@ -61,7 +62,7 @@ class ChatResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
-    global _agent, _session_manager, _telegram_task
+    global _agent, _session_manager, _telegram_task, _scheduler_task
 
     # ---- Startup --------------------------------------------------------
     logger.info("JarvisOS: starting up…")
@@ -86,17 +87,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     else:
         logger.info("JarvisOS: TELEGRAM_JARVIS_TOKEN not set — skipping Telegram")
 
+    # Start heartbeat scheduler if agent is available
+    if _agent:
+        try:
+            from src.scheduler.heartbeat import HeartbeatScheduler
+            scheduler = HeartbeatScheduler(agent=_agent)
+            _scheduler_task = asyncio.create_task(scheduler.start())
+            logger.info("JarvisOS: heartbeat scheduler started")
+        except Exception as exc:
+            logger.warning("JarvisOS: heartbeat scheduler failed to start — %s", exc)
+
     yield  # ← application runs here
 
     # ---- Shutdown -------------------------------------------------------
     logger.info("JarvisOS: shutting down…")
 
-    if _telegram_task and not _telegram_task.done():
-        _telegram_task.cancel()
-        try:
-            await _telegram_task
-        except asyncio.CancelledError:
-            pass
+    for task in (_telegram_task, _scheduler_task):
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     if _session_manager:
         try:
@@ -166,6 +178,7 @@ async def status():
         "uptime_seconds": int(time.time() - _start_time),
         "session_id": _session_manager.session_id if _session_manager else None,
         "telegram": "running" if (_telegram_task and not _telegram_task.done()) else "stopped",
+        "scheduler": "running" if (_scheduler_task and not _scheduler_task.done()) else "stopped",
     }
 
 
