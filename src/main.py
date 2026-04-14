@@ -29,6 +29,9 @@ from src.memory.daily_logger import DailyLogger
 
 logger = logging.getLogger(__name__)
 
+# Suppress httpx URL logging — Telegram bot token is embedded in request URLs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 # ---------------------------------------------------------------------------
 # Module-level state — populated during lifespan startup
 # ---------------------------------------------------------------------------
