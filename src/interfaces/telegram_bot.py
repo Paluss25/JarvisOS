@@ -18,6 +18,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -106,6 +107,41 @@ async def _cmd_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 # ---------------------------------------------------------------------------
+# Permission gate callback handler
+# ---------------------------------------------------------------------------
+
+async def _handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Approve / Deny responses from the permission gate inline keyboard."""
+    query = update.callback_query
+    if not is_authorized(query.message.chat.id):
+        await query.answer("Not authorised.")
+        return
+
+    await query.answer()  # remove the loading spinner
+
+    # Expected pattern: gate:approve:<request_id> or gate:deny:<request_id>
+    parts = (query.data or "").split(":")
+    if len(parts) != 3 or parts[0] != "gate":
+        return
+
+    _, action, request_id = parts
+    approved = action == "approve"
+
+    from src.tools import permission_gate
+    permission_gate.resolve(request_id, approved)
+
+    label = "✅ Approved" if approved else "❌ Denied"
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.edit_message_text(
+            query.message.text + f"\n\n*{label}*",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Message handler
 # ---------------------------------------------------------------------------
 
@@ -178,10 +214,19 @@ async def start_polling(agent: Any, session_manager: Any) -> None:
     app.bot_data["agent"] = agent
     app.bot_data["session_manager"] = session_manager
 
+    # Wire the permission gate so tools can send approval requests
+    from src.tools import permission_gate as _gate
+    _gate.configure(
+        bot=app.bot,
+        event_loop=asyncio.get_event_loop(),
+        allowed_chat_id=settings.TELEGRAM_ALLOWED_CHAT_ID,
+    )
+
     app.add_handler(CommandHandler("start", _cmd_start))
     app.add_handler(CommandHandler("status", _cmd_status))
     app.add_handler(CommandHandler("session", _cmd_session))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
+    app.add_handler(CallbackQueryHandler(_handle_callback, pattern=r"^gate:"))
 
     logger.info(
         "telegram: starting polling (allowed_chat_id=%s)",

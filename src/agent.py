@@ -4,8 +4,7 @@ Creates an Agno Agent wired to:
 - FallbackModel chain loaded from workspace/config/agent-models.yaml
 - PostgreSQL session store (Agno's built-in PgAgentStorage)
 - OpenClaw workspace instructions (SOUL.md, AGENTS.md, USER.md, …)
-- DailyLogger as an Agno tool for memory writes
-- Empty tool list (tools added in P7)
+- Full tool suite: web search, shell, file ops, code execution
 """
 
 import logging
@@ -78,9 +77,22 @@ def create_jarvis_agent() -> Agent:
         session_table="jarvis_sessions",
     )
 
-    # DailyLogger is available as a standalone tool (added to tools in P7)
     daily_logger = DailyLogger(workspace_path)
-    daily_logger.log(f"[AGENT INIT] model chain ready")
+    daily_logger.log("[AGENT INIT] model chain ready")
+
+    # --- Tool suite ----------------------------------------------------------
+    from src.tools.code_executor import CodeExecutorTools
+    from src.tools.file_tools import WorkspaceFileTools
+    from src.tools.perplexity_search import PerplexitySearchTools
+    from src.tools.shell_tools import ShellTools
+
+    tools = [
+        PerplexitySearchTools(),
+        ShellTools(),
+        WorkspaceFileTools(workspace_path=str(workspace_path)),
+        CodeExecutorTools(),
+        daily_logger,
+    ]
 
     agent = Agent(
         name="Jarvis",
@@ -88,7 +100,7 @@ def create_jarvis_agent() -> Agent:
         fallback_models=fallback_models if fallback_models else None,
         instructions=instructions,
         db=storage,
-        tools=None,  # tools wired in P7
+        tools=tools,
         # --- Context & history -----------------------------------------------
         add_datetime_to_context=True,
         num_history_runs=5,
