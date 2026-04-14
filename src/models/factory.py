@@ -25,6 +25,23 @@ def _build_single_model(provider: str, model_id: str):
             auth_path=settings.codex_auth_path,
         )
 
+    elif provider == "xai":
+        from agno.models.xai import xAI
+        from src.config import settings
+        return xAI(id=model_id, api_key=settings.GROK_API_KEY)
+
+    elif provider == "litellm":
+        # Use LiteLLM self-hosted gateway via OpenAI-compatible API
+        from agno.models.openai import OpenAILike
+        from src.config import settings
+        return OpenAILike(
+            id=model_id,
+            name=f"LiteLLM/{model_id}",
+            provider="LiteLLM",
+            api_key=settings.LITELLM_API_KEY,
+            base_url=settings.LITELLM_API_URL + "/v1",
+        )
+
     elif provider == "groq":
         from agno.models.groq import Groq
         from src.config import settings

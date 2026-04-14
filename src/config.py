@@ -35,10 +35,15 @@ class Settings(BaseSettings):
     # Token read from file at runtime (bind-mounted from host ~/.codex/auth.json)
     CODEX_AUTH_PATH: str = "/root/.codex/auth.json"
 
-    # --- Groq ---
-    # Existing ~/docker/.env uses GROK_API_KEY — alias both names
+    # --- xAI / Grok ---
+    GROK_API_KEY: str = ""  # xAI Grok API key (xai-...)
+
+    # --- Groq (groq.com inference — distinct from xAI Grok) ---
     GROQ_API_KEY: str = ""
-    GROK_API_KEY: str = ""  # legacy name in shared .env
+
+    # --- LiteLLM (self-hosted unified gateway in K3s) ---
+    LITELLM_API_URL: str = "https://litellm.prova9x.com"
+    LITELLM_API_KEY: str = ""
 
     # --- Optional future providers ---
     ANTHROPIC_API_KEY: str = ""
@@ -57,8 +62,8 @@ class Settings(BaseSettings):
 
     @property
     def groq_key(self) -> str:
-        """Return Groq key, checking both GROQ_API_KEY and legacy GROK_API_KEY."""
-        return self.GROQ_API_KEY or self.GROK_API_KEY
+        """Return Groq.com inference key (GROQ_API_KEY, starts with gsk_)."""
+        return self.GROQ_API_KEY
 
     @property
     def codex_auth_path(self) -> Path:
