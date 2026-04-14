@@ -1,0 +1,34 @@
+# Secrets
+.env
+*.key
+*.pem
+auth.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.eggs/
+*.egg-info/
+dist/
+build/
+
+# Runtime data (appdata volumes — NOT tracked in git)
+/pgdata/
+/redis/
+
+# Workspace runtime memory (auto-generated, too noisy for git)
+workspace/memory/
+workspace/knowledge/uploads/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
