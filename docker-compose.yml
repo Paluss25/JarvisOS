@@ -15,7 +15,7 @@ services:
     env_file: /home/paluss/docker/.env
     volumes:
       - /home/paluss/docker/appdata/jarvis-workspace:/app/workspace
-      - /home/paluss/docker/appdata/codex-auth:/root/.codex:ro
+      - /home/paluss/.codex:/root/.codex:ro
     depends_on:
       postgres:
         condition: service_healthy

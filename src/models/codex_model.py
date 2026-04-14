@@ -4,14 +4,16 @@ The `codex-auth` Python library is NOT used. Instead we read the token
 that the Codex CLI (Node.js @openai/codex) stores at ~/.codex/auth.json
 and pass it directly as the API key to the OpenAI Python SDK.
 
-auth.json structure (chatgpt auth_mode):
-  {
-    "auth_mode": "chatgpt",
-    "access_token": "ey...",
-    "refresh_token": "...",
-    "expires_at": "...",
-    ...
-  }
+Supported auth.json layouts:
+
+  chatgpt OAuth (tokens nested):
+    { "auth_mode": "chatgpt", "tokens": { "access_token": "ey...", ... } }
+
+  Legacy flat layout:
+    { "auth_mode": "chatgpt", "access_token": "ey...", ... }
+
+  Direct API key:
+    { "OPENAI_API_KEY": "sk-...", ... }
 """
 
 import json
@@ -29,11 +31,25 @@ def _read_access_token(auth_path: Path | None = None) -> str | None:
     try:
         with open(path) as f:
             data = json.load(f)
+        # Layout 1: tokens nested dict (current Codex CLI format)
+        tokens = data.get("tokens")
+        if isinstance(tokens, dict):
+            token = tokens.get("access_token")
+            if token:
+                return token
+
+        # Layout 2: flat access_token at root (legacy)
         token = data.get("access_token")
-        if not token:
-            logger.warning("codex_model: auth.json exists but has no access_token")
-            return None
-        return token
+        if token:
+            return token
+
+        # Layout 3: direct OpenAI API key
+        token = data.get("OPENAI_API_KEY")
+        if token:
+            return token
+
+        logger.warning("codex_model: auth.json exists but has no recognisable token field")
+        return None
     except FileNotFoundError:
         logger.warning("codex_model: auth.json not found at %s", path)
         return None
