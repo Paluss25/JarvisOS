@@ -11,7 +11,7 @@ services:
     container_name: jarvis-agent
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8800:8000"
     env_file: /home/paluss/docker/.env
     volumes:
       - /home/paluss/docker/appdata/jarvis-workspace:/app/workspace
