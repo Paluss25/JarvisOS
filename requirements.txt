@@ -1,38 +1,44 @@
-# Core framework
-agno>=2.0.0
+# Core
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
 
-# LLM Providers
-openai>=1.50.0
-groq
-
-# Future providers (uncomment when keys available)
-# anthropic
-# google-generativeai
-
-# Config
-pyyaml
-pydantic-settings
+# Claude SDK
+claude-agent-sdk>=0.1.0
 
 # Telegram
 python-telegram-bot>=21.0
 
-# Database
-psycopg2-binary
-sqlalchemy
+# Redis
+redis>=5.0.0
 
-# Cache
-redis
+# PostgreSQL
+asyncpg>=0.30.0
+
+# HTTP
+httpx>=0.27.0
+
+# YAML
+pyyaml>=6.0
+
+# Memory pipeline
+rapidfuzz>=3.0.0
+google-genai>=1.0.0
+
+# Auth
+pyjwt>=2.9.0
+bcrypt>=4.2.0
+
+# Supervisor XML-RPC
+supervisor>=4.2.0
 
 # CLI interface
 rich
 prompt-toolkit
 
-# Web framework (JarvisOS)
-fastapi
-uvicorn[standard]
-
-# HTTP client
-httpx
+# Parquet (Roger/Strava)
+pyarrow>=17.0.0
 
 # Utilities
 python-dotenv
