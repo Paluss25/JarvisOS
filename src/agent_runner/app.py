@@ -15,6 +15,8 @@ from agent_runner.config import AgentConfig
 from agent_runner.client import create_agent_client, BaseAgentClient
 from agent_runner.memory.daily_logger import DailyLogger
 from agent_runner.memory.session_manager import SessionManager
+from agent_runner.memory.pipeline import run_pipeline
+from agent_runner.memory.pipeline.queue import PipelineItem, PipelineQueue
 
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -44,6 +46,7 @@ def create_app(config: AgentConfig) -> FastAPI:
         "session_manager": None,
         "telegram_task": None,
         "scheduler_task": None,
+        "pipeline_task": None,
         "start_time": time.time(),
     }
 
@@ -54,9 +57,12 @@ def create_app(config: AgentConfig) -> FastAPI:
         try:
             agent = create_agent_client(config)
             await agent.connect()
+            pipeline_queue = PipelineQueue()
+            agent.set_pipeline_queue(pipeline_queue)
             state["agent"] = agent
             state["session_manager"] = SessionManager(workspace_path=config.workspace_path)
-            logger.info("%s: agent ready", config.name)
+            state["pipeline_task"] = asyncio.create_task(run_pipeline(pipeline_queue, config))
+            logger.info("%s: agent + pipeline ready", config.name)
         except Exception as exc:
             logger.error("%s: agent init failed — %s", config.name, exc, exc_info=True)
 
@@ -86,7 +92,7 @@ def create_app(config: AgentConfig) -> FastAPI:
 
         # Shutdown
         logger.info("%s: shutting down…", config.name)
-        for key in ("telegram_task", "scheduler_task"):
+        for key in ("telegram_task", "scheduler_task", "pipeline_task"):
             task = state.get(key)
             if task and not task.done():
                 task.cancel()
@@ -198,7 +204,7 @@ def create_app(config: AgentConfig) -> FastAPI:
         except Exception:
             pass
         try:
-            content = await agent.query(prefixed, session_id=session_id)
+            content = await agent.query(prefixed, session_id=session_id, source="a2a")
             return ChatResponse(response=content, session_id=session_id)
         except Exception as exc:
             logger.error("a2a: error — %s", exc, exc_info=True)

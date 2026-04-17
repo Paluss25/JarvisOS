@@ -24,6 +24,7 @@ from claude_agent_sdk import (
 
 from src.agent_runner.config import AgentConfig
 from src.agent_runner.memory.daily_logger import DailyLogger
+from src.agent_runner.memory.pipeline.queue import PipelineItem, PipelineQueue
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,11 @@ class BaseAgentClient:
         self._sdk: ClaudeSDKClient | None = None
         self._lock = asyncio.Lock()
         self._daily = DailyLogger(config.workspace_path)
+        self._pipeline_queue: PipelineQueue | None = None
+
+    def set_pipeline_queue(self, queue: PipelineQueue) -> None:
+        """Attach the memory pipeline queue. Called by the lifespan before serving."""
+        self._pipeline_queue = queue
 
     # -- Lifecycle ----------------------------------------------------------
 
@@ -143,7 +149,11 @@ class BaseAgentClient:
             except Exception as exc:
                 logger.warning("agent[%s]: cannot update thinking — %s", self.config.id, exc)
                 return
-        await self._reconnect()
+
+        # Fix Issue 3: acquire lock before reconnect to prevent races with
+        # in-flight query()/stream() calls that also mutate self._sdk.
+        async with self._lock:
+            await self._reconnect()
         logger.info("agent[%s]: thinking mode set to %s", self.config.id, mode)
 
     # -- Response processing helpers ----------------------------------------
@@ -197,53 +207,88 @@ class BaseAgentClient:
             return True
         return False
 
+    # -- Private stream helper ----------------------------------------------
+
+    async def _iter_stream_response(self):
+        """Iterate SDK response, yielding text chunks. Side-effects via _process_message.
+
+        Must be called *outside* self._lock so that early cancellation / break
+        by the caller does not permanently hold the lock.
+        """
+        yielded_any = False
+        async for msg in self._sdk.receive_response():
+            if isinstance(msg, StreamEvent):
+                event = msg.event
+                if event.get("type") == "content_block_delta":
+                    delta = event.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text", "")
+                        if text:
+                            yielded_any = True
+                            yield text
+            elif not yielded_any and hasattr(msg, "content") and msg.content:
+                for block in msg.content:
+                    if hasattr(block, "text") and block.text:
+                        yielded_any = True
+                        yield block.text
+            dummy: list[str] = []
+            if self._process_message(msg, dummy):
+                break
+
     # -- Public interface ---------------------------------------------------
 
-    async def query(self, message: str, session_id: str | None = None) -> str:
+    async def query(self, message: str, session_id: str | None = None, source: str = "user") -> str:
         if not self._sdk:
             raise RuntimeError(f"{self.name} not connected")
+        # Fix Issue 2: guard the retry path with a null-check and wrap the
+        # second query() call in its own try/except.
         async with self._lock:
             try:
                 await self._sdk.query(message, session_id=session_id or "default")
             except Exception as exc:
                 logger.warning("agent[%s]: subprocess error on query — %s", self.config.id, exc)
                 await self._reconnect()
-                await self._sdk.query(message, session_id=session_id or "default")
+                if not self._sdk:
+                    raise RuntimeError(f"{self.name} reconnect failed") from exc
+                try:
+                    await self._sdk.query(message, session_id=session_id or "default")
+                except Exception as retry_exc:
+                    logger.error("agent[%s]: query failed after reconnect — %s", self.config.id, retry_exc)
+                    raise
             text_parts: list[str] = []
             async for msg in self._sdk.receive_response():
                 if self._process_message(msg, text_parts):
                     break
-        return "".join(text_parts)
+        response_text = "".join(text_parts)
+        if self._pipeline_queue:
+            priority = 0 if source == "a2a" else 1
+            await self._pipeline_queue.put(PipelineItem(
+                priority=priority,
+                agent_id=self.config.id,
+                message=message,
+                response=response_text,
+                source=source,
+            ))
+        return response_text
 
     async def stream(self, message: str, session_id: str | None = None):
         if not self._sdk:
             raise RuntimeError(f"{self.name} not connected")
+        # Fix Issue 1: only hold the lock for the query dispatch, not across
+        # yields — an early break / cancellation by the caller would otherwise
+        # permanently hold the lock and deadlock future query() calls.
         async with self._lock:
             try:
                 await self._sdk.query(message, session_id=session_id or "default")
             except Exception as exc:
                 logger.warning("agent[%s]: subprocess error on stream — %s", self.config.id, exc)
                 await self._reconnect()
+                if not self._sdk:
+                    raise RuntimeError(f"{self.name} reconnect failed")
                 await self._sdk.query(message, session_id=session_id or "default")
-            yielded_any = False
-            async for msg in self._sdk.receive_response():
-                if isinstance(msg, StreamEvent):
-                    event = msg.event
-                    if event.get("type") == "content_block_delta":
-                        delta = event.get("delta", {})
-                        if delta.get("type") == "text_delta":
-                            text = delta.get("text", "")
-                            if text:
-                                yielded_any = True
-                                yield text
-                elif not yielded_any and hasattr(msg, "content") and msg.content:
-                    for block in msg.content:
-                        if hasattr(block, "text") and block.text:
-                            yielded_any = True
-                            yield block.text
-                dummy: list[str] = []
-                if self._process_message(msg, dummy):
-                    break
+        # Iterate outside the lock — safe because only one caller can dispatch at a time.
+        async for chunk in self._iter_stream_response():
+            yield chunk
 
     async def stream_image(
         self,
@@ -270,32 +315,19 @@ class BaseAgentClient:
 
         if not self._sdk:
             raise RuntimeError(f"{self.name} not connected")
+        # Fix Issue 1 (stream_image): same pattern — lock only covers dispatch.
         async with self._lock:
             try:
                 await self._sdk.query(_prompt_stream(), session_id=session_id or "default")
             except Exception as exc:
                 logger.warning("agent[%s]: subprocess error on stream_image — %s", self.config.id, exc)
                 await self._reconnect()
+                if not self._sdk:
+                    raise RuntimeError(f"{self.name} reconnect failed")
                 await self._sdk.query(_prompt_stream(), session_id=session_id or "default")
-            yielded_any = False
-            async for msg in self._sdk.receive_response():
-                if isinstance(msg, StreamEvent):
-                    event = msg.event
-                    if event.get("type") == "content_block_delta":
-                        delta = event.get("delta", {})
-                        if delta.get("type") == "text_delta":
-                            text = delta.get("text", "")
-                            if text:
-                                yielded_any = True
-                                yield text
-                elif not yielded_any and hasattr(msg, "content") and msg.content:
-                    for block in msg.content:
-                        if hasattr(block, "text") and block.text:
-                            yielded_any = True
-                            yield block.text
-                dummy2: list[str] = []
-                if self._process_message(msg, dummy2):
-                    break
+        # Iterate outside the lock — deduplicated via _iter_stream_response.
+        async for chunk in self._iter_stream_response():
+            yield chunk
 
 
 def create_agent_client(config: AgentConfig) -> "BaseAgentClient":
