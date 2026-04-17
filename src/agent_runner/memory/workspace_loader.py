@@ -5,7 +5,7 @@ Missing optional files are returned as empty strings (never raise).
 """
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 _REQUIRED = ["SOUL.md", "AGENTS.md", "USER.md"]
 
 # Optional files (silently empty if missing)
-_OPTIONAL = ["TOOLS.md", "MEMORY.md", "HEARTBEAT.md", "IDENTITY.md"]
+_OPTIONAL = ["TOOLS.md", "MEMORY.md", "HEARTBEAT.md", "IDENTITY.md", "ARCHITECTURE.md"]
 
 
 def _read(path: Path) -> str:
@@ -33,14 +33,16 @@ def load_workspace_context(workspace_path: str | Path) -> dict:
 
     Returns:
         dict with keys:
-        - soul       — SOUL.md
-        - agents     — AGENTS.md
-        - user       — USER.md
-        - tools_md   — TOOLS.md
-        - memory     — MEMORY.md
-        - heartbeat  — HEARTBEAT.md
-        - identity   — IDENTITY.md
-        - daily      — memory/YYYY-MM-DD.md (today; empty string if not yet created)
+        - soul         — SOUL.md
+        - agents       — AGENTS.md
+        - user         — USER.md
+        - tools_md     — TOOLS.md
+        - memory       — MEMORY.md
+        - heartbeat    — HEARTBEAT.md
+        - identity     — IDENTITY.md
+        - daily        — memory/YYYY-MM-DD.md (today)
+        - yesterday    — memory/YYYY-MM-DD.md (yesterday)
+        - architecture — ARCHITECTURE.md (optional; technical self-knowledge)
     """
     root = Path(workspace_path)
 
@@ -58,6 +60,8 @@ def load_workspace_context(workspace_path: str | Path) -> dict:
         "heartbeat": _read(root / "HEARTBEAT.md"),
         "identity":  _read(root / "IDENTITY.md"),
         "daily":     _read(root / "memory" / f"{date.today().isoformat()}.md"),
+        "yesterday": _read(root / "memory" / f"{(date.today() - timedelta(days=1)).isoformat()}.md"),
+        "architecture": _read(root / "ARCHITECTURE.md"),
     }
 
     loaded = [k for k, v in ctx.items() if v]

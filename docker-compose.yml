@@ -12,6 +12,8 @@ services:
     restart: unless-stopped
     ports:
       - "8800:8000"   # Jarvis agent (Telegram webhook, direct API)
+      - "8801:8001"   # Roger agent (Chief of Sport)
+      - "8802:8002"   # Timothy agent (CIO)
       - "8900:8900"   # Platform API (dashboard, management)
     env_file: /home/paluss/docker/.env
     labels:

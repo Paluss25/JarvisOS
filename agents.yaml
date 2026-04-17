@@ -27,3 +27,13 @@ agents:
     capabilities: [sport-analysis, training-plans, nutrition, race-strategy]
     memory:
       backend: filesystem
+
+  - id: timothy
+    port: 8002
+    workspace: workspace/timothy
+    telegram_token_env: TELEGRAM_TIMOTHY_TOKEN
+    telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
+    domains: [infrastructure, security, devops, it-operations]
+    capabilities: [infra-monitoring, security-audit, docker-management, log-analysis]
+    memory:
+      backend: filesystem
