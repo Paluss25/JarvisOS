@@ -83,4 +83,9 @@ def build_roger_config(workspace_root: Path = Path("/app/workspace/roger")) -> A
         memory_backend="filesystem",
         mcp_server_factory=create_chief_mcp_server,
         builtin_crons=ROGER_BUILTIN_CRONS,
+        allowed_tools=[
+            "Bash", "Read", "Write", "Edit",
+            "WebSearch", "WebFetch", "Glob", "Grep",
+            "Agent",
+        ],
     )
