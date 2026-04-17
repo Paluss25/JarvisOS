@@ -2,7 +2,7 @@
 import os
 import pytest
 from pathlib import Path
-from src.agent_runner.config import AgentConfig
+from src.agent_runner import AgentConfig
 
 
 def test_agent_config_minimal():
@@ -114,3 +114,18 @@ def test_agent_config_thinking_flag(monkeypatch):
         telegram_token_env="T", telegram_chat_id_env="C",
     )
     assert config.thinking is False
+
+
+def test_agent_config_budget_invalid(monkeypatch):
+    """budget raises ValueError with a descriptive message for non-numeric values."""
+    monkeypatch.setenv("CLAUDE_MAX_BUDGET_USD", "not-a-number")
+    config = AgentConfig(
+        id="j",
+        name="J",
+        port=8000,
+        workspace_path=Path("/tmp"),
+        telegram_token_env="T",
+        telegram_chat_id_env="C",
+    )
+    with pytest.raises(ValueError, match="AgentConfig 'j'.*expected a number.*not-a-number"):
+        _ = config.budget

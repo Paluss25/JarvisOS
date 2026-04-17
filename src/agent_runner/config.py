@@ -44,38 +44,44 @@ class AgentConfig:
                 return val
         return os.environ.get(key, "")
 
+    def _resolve(self, env_key: str) -> str:
+        """Strip own prefix from a stored env key, then resolve via env()."""
+        bare = env_key.removeprefix(self.env_prefix) if self.env_prefix else env_key
+        return self.env(bare)
+
     @property
     def model(self) -> str:
-        base_key = self.model_env.removeprefix(self.env_prefix) if self.env_prefix else self.model_env
-        return self.env(base_key)
+        return self._resolve(self.model_env)
 
     @property
     def fallback_model(self) -> str:
-        base_key = self.fallback_model_env.removeprefix(self.env_prefix) if self.env_prefix else self.fallback_model_env
-        return self.env(base_key)
+        return self._resolve(self.fallback_model_env)
 
     @property
     def budget(self) -> float | None:
-        base_key = self.budget_env.removeprefix(self.env_prefix) if self.env_prefix else self.budget_env
-        val = self.env(base_key)
-        return float(val) if val else None
+        val = self._resolve(self.budget_env)
+        if not val:
+            return None
+        try:
+            return float(val)
+        except ValueError:
+            raise ValueError(
+                f"AgentConfig '{self.id}': invalid value for {self.budget_env!r}: "
+                f"expected a number, got {val!r}"
+            )
 
     @property
     def effort(self) -> str:
-        base_key = self.effort_env.removeprefix(self.env_prefix) if self.env_prefix else self.effort_env
-        return self.env(base_key)
+        return self._resolve(self.effort_env)
 
     @property
     def thinking(self) -> bool:
-        base_key = self.thinking_env.removeprefix(self.env_prefix) if self.env_prefix else self.thinking_env
-        return self.env(base_key).lower() in ("true", "1", "yes")
+        return self._resolve(self.thinking_env).lower() in ("true", "1", "yes")
 
     @property
     def context_1m(self) -> bool:
-        base_key = self.context_1m_env.removeprefix(self.env_prefix) if self.env_prefix else self.context_1m_env
-        return self.env(base_key).lower() in ("true", "1", "yes")
+        return self._resolve(self.context_1m_env).lower() in ("true", "1", "yes")
 
     @property
     def log_level(self) -> str:
-        base_key = self.log_level_env.removeprefix(self.env_prefix) if self.env_prefix else self.log_level_env
-        return self.env(base_key) or "INFO"
+        return self._resolve(self.log_level_env) or "INFO"
