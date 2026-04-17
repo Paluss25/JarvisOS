@@ -13,9 +13,12 @@ Provides:
   - build_pre_compact_matchers(): SDK PreCompact hook → daily memory log
 """
 import asyncio
+import json
 import logging
 import re
+import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from claude_agent_sdk import (
@@ -25,6 +28,33 @@ from claude_agent_sdk import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _audit_stdout(action: str, agent_id: str, detail: dict) -> None:
+    """Emit a single structured audit line to stdout (Grafana Alloy picks it up).
+
+    Agent-runner processes cannot reach platform.db, so we use stdout-only audit.
+    The Platform API's AuditLogger handles the PostgreSQL sink for platform events.
+    """
+    try:
+        line = json.dumps(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "level": "info",
+                "logger": "audit",
+                "category": "agent",
+                "agent_id": agent_id,
+                "user_id": None,
+                "action": action,
+                "source": "agent",
+                "detail": detail,
+            },
+            separators=(",", ":"),
+        )
+        print(line, file=sys.stdout, flush=True)
+    except Exception:
+        pass
+
 
 _DEFAULT_TIMEOUT = 120
 
@@ -188,6 +218,12 @@ def build_pre_tool_use_matchers(
             DailyLogger(workspace_path).log(f"[PRE_TOOL] {tool_name}: {summary}")
         except Exception:
             pass
+
+        _audit_stdout(
+            action="tool_called",
+            agent_id=workspace_path.name,
+            detail={"tool": tool_name, "summary": summary, "tool_use_id": tool_use_id},
+        )
         return {}
 
     return [HookMatcher(hooks=[_log_pre])]
@@ -235,6 +271,12 @@ def build_post_tool_use_matchers(workspace_path: Path) -> list[HookMatcher]:
             DailyLogger(workspace_path).log(f"[TOOL] {tool_name}: {summary}")
         except Exception:
             pass
+
+        _audit_stdout(
+            action="tool_completed",
+            agent_id=workspace_path.name,
+            detail={"tool": tool_name, "summary": summary, "tool_use_id": tool_use_id},
+        )
         return {}
 
     return [HookMatcher(hooks=[_log_tool])]
@@ -260,6 +302,12 @@ def build_post_tool_use_failure_matchers(workspace_path: Path) -> list[HookMatch
             DailyLogger(workspace_path).log(f"[TOOL_FAIL] {tool_name}: {summary}")
         except Exception:
             pass
+
+        _audit_stdout(
+            action="tool_failed",
+            agent_id=workspace_path.name,
+            detail={"tool": tool_name, "error": error[:300], "tool_use_id": tool_use_id},
+        )
 
         if _send_notification:
             try:

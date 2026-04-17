@@ -12,6 +12,7 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from platform.audit import audit, AuditEvent
 from platform.db import get_pool
 from platform.models import LoginRequest, RefreshRequest, TokenResponse, UserProfile
 
@@ -73,9 +74,22 @@ async def login(req: LoginRequest):
     pool = await get_pool()
     row = await pool.fetchrow("SELECT * FROM users WHERE email = $1", req.email)
     if not row:
+        await audit.log(AuditEvent(
+            category="security",
+            action="login_failed",
+            source="api",
+            detail={"email": req.email, "reason": "user_not_found"},
+        ))
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     if not bcrypt.checkpw(req.password.encode(), row["password"].encode()):
+        await audit.log(AuditEvent(
+            category="security",
+            action="login_failed",
+            source="api",
+            user_id=str(row["id"]),
+            detail={"email": req.email, "reason": "wrong_password"},
+        ))
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Update last_login
@@ -87,6 +101,13 @@ async def login(req: LoginRequest):
     access_token = _create_token(payload, _ACCESS_TTL_MINUTES * 60)
     refresh_token = _create_token({**payload, "type": "refresh"}, _REFRESH_TTL_DAYS * 86400)
 
+    await audit.log(AuditEvent(
+        category="security",
+        action="login_success",
+        source="api",
+        user_id=str(row["id"]),
+        detail={"email": row["email"], "role": row["role"]},
+    ))
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 

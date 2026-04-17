@@ -7,6 +7,7 @@ from uuid import UUID
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from platform.audit import audit, AuditEvent
 from platform.auth import get_current_user
 from platform.db import get_pool
 from platform.models import TaskCreate, TaskPatch, TaskResponse
@@ -93,6 +94,19 @@ async def create_task(req: TaskCreate, _user=Depends(get_current_user)):
     )
     task = dict(row)
     await _publish_event("platform:events", f"task_created:{task['id']}")
+    await audit.log(AuditEvent(
+        category="task",
+        action="task_created",
+        source="api",
+        user_id=_user.get("sub") if hasattr(_user, "get") else None,
+        detail={
+            "task_id": str(task["id"]),
+            "title": task["title"],
+            "assigned_to": assigned_to,
+            "assignment_mode": assignment_mode,
+            "priority": req.priority,
+        },
+    ))
     return task
 
 
@@ -150,6 +164,19 @@ async def update_task(task_id: UUID, patch: TaskPatch, _user=Depends(get_current
     task = dict(updated)
     await _publish_event(f"tasks:{task_id}", f"updated:{patch.status or 'patched'}")
     await _publish_event("platform:events", f"task_updated:{task_id}")
+
+    audit_action = (
+        "task_completed" if patch.status == "done"
+        else "task_failed" if patch.status == "failed"
+        else "task_updated"
+    )
+    await audit.log(AuditEvent(
+        category="task",
+        action=audit_action,
+        source="api",
+        user_id=_user.get("sub") if hasattr(_user, "get") else None,
+        detail={"task_id": str(task_id), "status": patch.status, "assigned_to": patch.assigned_to},
+    ))
 
     # Retry logic on failure
     if patch.status == "failed":
@@ -226,4 +253,11 @@ async def assign_task(task_id: UUID, body: dict, _user=Depends(get_current_user)
         task_id,
     )
     await _publish_event(f"tasks:{task_id}", f"assigned:{agent_id}")
+    await audit.log(AuditEvent(
+        category="task",
+        action="task_assigned",
+        source="api",
+        user_id=_user.get("sub") if hasattr(_user, "get") else None,
+        detail={"task_id": str(task_id), "agent_id": agent_id},
+    ))
     return dict(updated)

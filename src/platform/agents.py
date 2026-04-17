@@ -8,6 +8,7 @@ import yaml
 from fastapi import APIRouter, HTTPException, Depends
 
 from agent_runner.registry import list_agents, load_registry, _REGISTRY_PATH
+from platform.audit import audit, AuditEvent
 from platform.auth import get_current_user
 from platform.models import AgentCreateRequest, AgentStatus
 from platform.supervisord_rpc import SupervisorClient
@@ -122,6 +123,14 @@ async def create_agent(req: AgentCreateRequest, _user=Depends(get_current_user))
     except Exception as exc:
         logger.warning("create_agent: supervisord update failed — %s", exc)
 
+    await audit.log(AuditEvent(
+        category="platform",
+        action="agent_created",
+        source="api",
+        agent_id=req.id,
+        user_id=_user.get("sub"),
+        detail={"port": req.port, "workspace": req.workspace, "domains": req.domains},
+    ))
     return entry
 
 
@@ -144,6 +153,14 @@ async def delete_agent(agent_id: str, _user=Depends(get_current_user)):
     data["agents"] = [a for a in agents if a["id"] != agent_id]
     _write_registry(data)
 
+    await audit.log(AuditEvent(
+        category="platform",
+        action="agent_deleted",
+        source="api",
+        agent_id=agent_id,
+        user_id=_user.get("sub"),
+    ))
+
 
 # ---------------------------------------------------------------------------
 # POST /api/agents/{id}/restart
@@ -160,6 +177,13 @@ async def restart_agent(agent_id: str, _user=Depends(get_current_user)):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+    await audit.log(AuditEvent(
+        category="platform",
+        action="agent_restarted",
+        source="api",
+        agent_id=agent_id,
+        user_id=_user.get("sub"),
+    ))
     return {"status": "restarted", "agent_id": agent_id}
 
 
