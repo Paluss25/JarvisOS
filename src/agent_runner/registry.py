@@ -1,6 +1,12 @@
-"""Load and parse agents.yaml registry."""
+"""Load and parse agents.yaml registry.
 
+Supports hot-reload: subscribe_to_config_changes() starts a background
+Redis subscriber that re-reads agents.yaml on platform:config_changed.
+"""
+
+import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -37,3 +43,40 @@ def list_agents(path: Path = _REGISTRY_PATH) -> list[dict[str, Any]]:
     """Return all agent entries."""
     data = load_registry(path)
     return data.get("agents", [])
+
+
+async def subscribe_to_config_changes(on_change: callable | None = None) -> None:
+    """Subscribe to platform:config_changed Redis channel.
+
+    Logs whenever agents.yaml is updated. Calls on_change() if provided.
+    Run as a background asyncio task from the agent lifespan.
+    """
+    import redis.asyncio as aioredis
+
+    redis_url = os.environ.get("REDIS_URL", "")
+    if not redis_url:
+        logger.debug("registry: REDIS_URL not set — skipping config change subscription")
+        return
+
+    try:
+        r = aioredis.from_url(redis_url)
+        pubsub = r.pubsub()
+        await pubsub.subscribe("platform:config_changed")
+        logger.info("registry: listening for config changes on platform:config_changed")
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                logger.info("registry: config_changed — agents.yaml reloaded")
+                if on_change:
+                    try:
+                        on_change()
+                    except Exception as exc:
+                        logger.warning("registry: on_change callback failed — %s", exc)
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        logger.warning("registry: config change subscriber error — %s", exc)
+    finally:
+        try:
+            await r.aclose()
+        except Exception:
+            pass
