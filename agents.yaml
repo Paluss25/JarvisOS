@@ -1,0 +1,29 @@
+# agents.yaml — JarvisOS agent registry
+# Read by supervisord config generator + Platform API
+
+platform:
+  pipeline_model: gemini-2.5-flash
+  pipeline_fallback: haiku
+  postgresql_url_env: JARVIOS_POSTGRES_URL
+  redis_url_env: REDIS_URL
+
+agents:
+  - id: jarvis
+    port: 8000
+    workspace: workspace/jarvis
+    telegram_token_env: TELEGRAM_JARVIS_TOKEN
+    telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
+    domains: ["*"]
+    capabilities: [delegation, planning, coordination, general-knowledge]
+    memory:
+      backend: filesystem
+
+  - id: roger
+    port: 8001
+    workspace: workspace/roger
+    telegram_token_env: TELEGRAM_CHIEF_TOKEN
+    telegram_chat_id_env: TELEGRAM_SPORT_CHAT_ID
+    domains: [sport, health]
+    capabilities: [sport-analysis, training-plans, nutrition, race-strategy]
+    memory:
+      backend: filesystem
