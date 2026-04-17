@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 def create_platform_app() -> FastAPI:
     from platform.agents import router as agents_router
+    from platform.audit_endpoints import router as audit_router
     from platform.auth import router as auth_router
     from platform.domains import router as domains_router
     from platform.events import router as events_router
@@ -59,6 +60,7 @@ def create_platform_app() -> FastAPI:
     app.include_router(tasks_router)
     app.include_router(domains_router)
     app.include_router(events_router)
+    app.include_router(audit_router)
 
     # Health endpoint (no auth required)
     @app.get("/health")
