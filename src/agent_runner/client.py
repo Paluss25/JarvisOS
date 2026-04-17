@@ -330,8 +330,14 @@ class BaseAgentClient:
             yield chunk
 
 
-def create_agent_client(config: AgentConfig) -> "BaseAgentClient":
-    """Build and return a configured BaseAgentClient (not yet connected)."""
+def create_agent_client(config: AgentConfig, redis_a2a=None) -> "BaseAgentClient":
+    """Build and return a configured BaseAgentClient (not yet connected).
+
+    Args:
+        config: Per-agent configuration.
+        redis_a2a: Optional RedisA2A instance — passed to the MCP server factory
+                   so tools like send_message can be wired up at creation time.
+    """
     from src.agent_runner.memory.workspace_loader import load_workspace_context
 
     workspace_path = config.workspace_path
@@ -342,7 +348,7 @@ def create_agent_client(config: AgentConfig) -> "BaseAgentClient":
     mcp_servers = {}
     if config.mcp_server_factory:
         try:
-            mcp_servers = {f"{config.id}-tools": config.mcp_server_factory(workspace_path)}
+            mcp_servers = {f"{config.id}-tools": config.mcp_server_factory(workspace_path, redis_a2a=redis_a2a)}
         except Exception as exc:
             logger.warning("agent[%s]: mcp_server_factory failed — %s", config.id, exc)
 

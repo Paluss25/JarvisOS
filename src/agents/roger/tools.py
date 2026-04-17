@@ -1,15 +1,15 @@
 """Chief Of Sport (Roger) MCP server — custom tools exposed to the Claude agent.
 
 Tools:
-  daily_log         — Append entry to today's memory log
-  memory_search     — Text search across MEMORY.md + memory/*.md
-  memory_get        — Read a specific memory file from workspace
-  sport_query       — SELECT queries against sport_metrics PostgreSQL DB
-  sport_execute     — INSERT/UPDATE/DELETE operations on sport_metrics
-  run_rules_engine  — Deterministic rules evaluation (load, adherence, plateau)
-  consult_jarvis    — Send a message to Jarvis (CEO) and get a response
+  daily_log          — Append entry to today's memory log
+  memory_search      — Text search across MEMORY.md + memory/*.md
+  memory_get         — Read a specific memory file from workspace
+  sport_query        — SELECT queries against sport_metrics PostgreSQL DB
+  sport_execute      — INSERT/UPDATE/DELETE operations on sport_metrics
+  run_rules_engine   — Deterministic rules evaluation (load, adherence, plateau)
+  send_message       — Send a message to another agent via Redis pub/sub
   strava_list_recent — List recent Strava activities
-  strava_download   — Download + store a Strava activity
+  strava_download    — Download + store a Strava activity
   cron_create/list/update/delete — Scheduled task management
 """
 
@@ -20,8 +20,6 @@ import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
-
-import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -286,7 +284,7 @@ async def _evaluate_rules(check_type: str, workspace_path: Path) -> dict:
 # MCP server factory
 # ---------------------------------------------------------------------------
 
-def create_chief_mcp_server(workspace_path: Path):
+def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
     if not _SDK_AVAILABLE or create_sdk_mcp_server is None:
         logger.warning("mcp_server: claude_agent_sdk MCP API not available — custom tools disabled")
         return None
@@ -468,32 +466,24 @@ def create_chief_mcp_server(workspace_path: Path):
             logger.error("run_rules_engine: error — %s", exc)
             return {"content": [{"type": "text", "text": f"Rules engine error: {exc}"}], "is_error": True}
 
-    @sdk_tool(
-        "consult_jarvis",
-        "Send a message to Jarvis (CEO) and receive a response. Use for escalations, "
-        "cross-domain coordination, or when the issue is outside the sport domain. "
-        "Jarvis is the CEO of the C-level structure.",
-        {"message": str, "session_id": str},
-    )
-    async def consult_jarvis(args: dict) -> dict:
-        args = _parse_args(args)
-        message = (args.get("message") or "").strip()
-        if not message:
-            return {"content": [{"type": "text", "text": "No message provided."}]}
-        session_id = args.get("session_id") or "chief-to-jarvis"
-        jarvis_url = os.environ.get("JARVIS_URL", "http://jarvis-agent:8000").rstrip("/")
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(
-                    f"{jarvis_url}/chat",
-                    json={"message": message, "session_id": session_id},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return {"content": [{"type": "text", "text": data.get("response", "(empty response from Jarvis)")}]}
-        except Exception as exc:
-            logger.error("consult_jarvis: error calling Jarvis — %s", exc)
-            return {"content": [{"type": "text", "text": f"Could not reach Jarvis: {exc}"}], "is_error": True}
+    # --- A2A send_message (Redis pub/sub) -----------------------------------
+
+    if redis_a2a is not None:
+        from agent_runner.tools.send_message import create_send_message_tool
+        _send_message_fn = create_send_message_tool("roger", redis_a2a)
+
+        @sdk_tool(
+            "send_message",
+            "Send a message to another agent and wait for their response. "
+            "Use 'to' to specify the target agent ID (e.g. 'jarvis'). "
+            "'message' is the natural language request to send.",
+            {"to": str, "message": str},
+        )
+        async def send_message(args: dict) -> str:
+            args = _parse_args(args)
+            return await _send_message_fn(args)
+    else:
+        send_message = None  # Redis not configured
 
     @sdk_tool(
         "strava_list_recent",
@@ -651,16 +641,16 @@ def create_chief_mcp_server(workspace_path: Path):
     all_tools = [
         daily_log, memory_search, memory_get,
         sport_query, sport_execute, run_rules_engine,
-        consult_jarvis, strava_list_recent, strava_download,
+        strava_list_recent, strava_download,
         cron_create, cron_list, cron_update, cron_delete,
     ]
+    if send_message is not None:
+        all_tools.append(send_message)
     try:
         server = create_sdk_mcp_server(name="chief-tools", tools=all_tools)
         logger.info(
-            "mcp_server: Chief Of Sport tools registered "
-            "(daily_log, memory_search, memory_get, sport_query, sport_execute, "
-            "run_rules_engine, consult_jarvis, strava_list_recent, strava_download, "
-            "cron_create, cron_list, cron_update, cron_delete)"
+            "mcp_server: Chief Of Sport tools registered (%d tools)",
+            len(all_tools),
         )
         return server
     except Exception as exc:

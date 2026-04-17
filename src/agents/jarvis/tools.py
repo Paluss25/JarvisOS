@@ -1,15 +1,15 @@
 """In-process MCP server exposing Jarvis custom tools to the claude-agent-sdk.
 
 Tools:
-  perplexity_search      — Web search via Perplexity AI
-  daily_log              — Append to today's memory log
-  memory_search          — Text search across MEMORY.md + memory/*.md
-  memory_get             — Read a specific memory file from workspace
-  consult_chief_of_sport — Send a message to Chief Of Sport and get a response
-  cron_create            — Create a scheduled task
-  cron_list              — List scheduled tasks
-  cron_update            — Update a scheduled task
-  cron_delete            — Delete a scheduled task
+  perplexity_search — Web search via Perplexity AI
+  daily_log         — Append to today's memory log
+  memory_search     — Text search across MEMORY.md + memory/*.md
+  memory_get        — Read a specific memory file from workspace
+  send_message      — Send a message to another agent via Redis pub/sub
+  cron_create       — Create a scheduled task
+  cron_list         — List scheduled tasks
+  cron_update       — Update a scheduled task
+  cron_delete       — Delete a scheduled task
 """
 
 import json
@@ -17,7 +17,7 @@ import logging
 import os
 from pathlib import Path
 
-import httpx
+import httpx  # used by perplexity_search
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ except ImportError:
     sdk_tool = None
 
 
-def create_jarvis_mcp_server(workspace_path: Path):
+def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
     """Build and return the in-process MCP server with Jarvis custom tools.
 
     Returns None if the SDK MCP server API is not available.
@@ -217,34 +217,24 @@ def create_jarvis_mcp_server(workspace_path: Path):
 
         return content
 
-    @sdk_tool(
-        "consult_chief_of_sport",
-        "Send a message to the Chief Of Sport agent and receive a response. "
-        "Use to query sport/fitness/health data, request weekly training status, "
-        "or delegate sport-domain tasks to the Chief Of Sport.",
-        {"message": str, "session_id": str},
-    )
-    async def consult_chief_of_sport(args: dict) -> str:
-        args = _parse_args(args)
-        message = args.get("message", "").strip()
-        if not message:
-            return "No message provided."
-        session_id = args.get("session_id") or "jarvis-to-chief"
-        chief_url = os.environ.get("CHIEF_OF_SPORT_URL", "").rstrip("/")
-        if not chief_url:
-            return "Chief Of Sport URL not configured (CHIEF_OF_SPORT_URL env var missing)."
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(
-                    f"{chief_url}/chat",
-                    json={"message": message, "session_id": session_id},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return data.get("response", "(empty response from Chief Of Sport)")
-        except Exception as exc:
-            logger.error("consult_chief_of_sport: error — %s", exc)
-            return f"Could not reach Chief Of Sport: {exc}"
+    # --- A2A send_message (Redis pub/sub) -----------------------------------
+
+    if redis_a2a is not None:
+        from agent_runner.tools.send_message import create_send_message_tool
+        _send_message_fn = create_send_message_tool("jarvis", redis_a2a)
+
+        @sdk_tool(
+            "send_message",
+            "Send a message to another agent and wait for their response. "
+            "Use 'to' to specify the target agent ID (e.g. 'roger'). "
+            "'message' is the natural language request to send.",
+            {"to": str, "message": str},
+        )
+        async def send_message(args: dict) -> str:
+            args = _parse_args(args)
+            return await _send_message_fn(args)
+    else:
+        send_message = None  # Redis not configured
 
     # --- Cron tools ---------------------------------------------------------
 
@@ -347,9 +337,11 @@ def create_jarvis_mcp_server(workspace_path: Path):
 
     # --- Build server ---------------------------------------------------
     all_tools = [
-        perplexity_search, daily_log, memory_search, memory_get, consult_chief_of_sport,
+        perplexity_search, daily_log, memory_search, memory_get,
         cron_create, cron_list, cron_update, cron_delete,
     ]
+    if send_message is not None:
+        all_tools.append(send_message)
     try:
         server = create_sdk_mcp_server(name="jarvis-tools", tools=all_tools)
         logger.info("mcp_server: in-process MCP server created with %d tools", len(all_tools))

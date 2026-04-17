@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from agent_runner.comms.message import A2AMessage
+from agent_runner.comms.redis_pubsub import RedisA2A
 from agent_runner.config import AgentConfig
 from agent_runner.client import create_agent_client, BaseAgentClient
 from agent_runner.memory.daily_logger import DailyLogger
@@ -47,6 +49,8 @@ def create_app(config: AgentConfig) -> FastAPI:
         "telegram_task": None,
         "scheduler_task": None,
         "pipeline_task": None,
+        "redis_a2a_task": None,
+        "redis_a2a": None,
         "start_time": time.time(),
     }
 
@@ -54,8 +58,21 @@ def create_app(config: AgentConfig) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncGenerator:
         logger.info("%s: starting up…", config.name)
 
+        import os
+
+        # Redis A2A — create first so it can be passed to the MCP factory
+        redis_a2a: RedisA2A | None = None
+        if os.environ.get("REDIS_URL"):
+            try:
+                redis_a2a = RedisA2A(config.id)
+                await redis_a2a.connect()
+                logger.info("%s: Redis A2A connected", config.name)
+            except Exception as exc:
+                logger.warning("%s: Redis A2A init failed — %s", config.name, exc)
+                redis_a2a = None
+
         try:
-            agent = create_agent_client(config)
+            agent = create_agent_client(config, redis_a2a=redis_a2a)
             await agent.connect()
             pipeline_queue = PipelineQueue()
             agent.set_pipeline_queue(pipeline_queue)
@@ -66,8 +83,45 @@ def create_app(config: AgentConfig) -> FastAPI:
         except Exception as exc:
             logger.error("%s: agent init failed — %s", config.name, exc, exc_info=True)
 
+        # Wire up inbound A2A handler and start the listen loop
+        if redis_a2a is not None:
+            try:
+                async def _handle_a2a(msg: A2AMessage) -> None:
+                    """Callback: process inbound A2A request, publish response."""
+                    agent = state["agent"]
+                    if not agent or msg.type != "request":
+                        return
+                    try:
+                        DailyLogger(config.workspace_path).log(
+                            f"[A2A] From {msg.from_agent}: {msg.payload[:100]}"
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        response_text = await agent.query(
+                            f"[Message from {msg.from_agent}]\n\n{msg.payload}",
+                            session_id=f"a2a-{msg.from_agent}",
+                            source="a2a",
+                        )
+                        response = A2AMessage(
+                            from_agent=config.id,
+                            to_agent=msg.from_agent,
+                            type="response",
+                            payload=response_text,
+                            correlation_id=msg.correlation_id,
+                        )
+                        await redis_a2a.publish(response)
+                    except Exception as exc:
+                        logger.warning("%s: a2a handler error — %s", config.name, exc)
+
+                redis_a2a.on_message(_handle_a2a)
+                state["redis_a2a"] = redis_a2a
+                state["redis_a2a_task"] = asyncio.create_task(redis_a2a.listen())
+                logger.info("%s: Redis A2A subscriber started", config.name)
+            except Exception as exc:
+                logger.warning("%s: Redis A2A subscriber failed — %s", config.name, exc)
+
         # Telegram polling
-        import os
         if os.environ.get(config.telegram_token_env):
             try:
                 from agent_runner.interfaces.telegram_bot import start_polling
@@ -92,7 +146,7 @@ def create_app(config: AgentConfig) -> FastAPI:
 
         # Shutdown
         logger.info("%s: shutting down…", config.name)
-        for key in ("telegram_task", "scheduler_task", "pipeline_task"):
+        for key in ("telegram_task", "scheduler_task", "pipeline_task", "redis_a2a_task"):
             task = state.get(key)
             if task and not task.done():
                 task.cancel()

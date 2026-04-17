@@ -1,24 +1,11 @@
 """Tests for BaseAgentClient."""
-import sys
-from unittest.mock import MagicMock
-
-# Mock claude_agent_sdk at module level so client.py can be imported
-_sdk_mock = MagicMock()
-_sdk_mock.ClaudeAgentOptions = MagicMock
-_sdk_mock.ClaudeSDKClient = MagicMock
-_sdk_mock.RateLimitEvent = type("RateLimitEvent", (), {})
-_sdk_mock.ResultMessage = type("ResultMessage", (), {"total_cost_usd": 0.0, "duration_ms": 0, "num_turns": 0})
-_sdk_mock.StreamEvent = type("StreamEvent", (), {"event": {}})
-_sdk_mock.TaskNotificationMessage = type("TaskNotificationMessage", (), {})
-_sdk_mock.TaskProgressMessage = type("TaskProgressMessage", (), {})
-_sdk_mock.TaskStartedMessage = type("TaskStartedMessage", (), {})
-_sdk_mock.ThinkingConfigAdaptive = MagicMock
-sys.modules.setdefault("claude_agent_sdk", _sdk_mock)
+# claude_agent_sdk is mocked by tests/conftest.py before any test module is
+# collected — no duplicate mock block needed here.
 
 import asyncio
 import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from src.agent_runner import AgentConfig
 from src.agent_runner.client import BaseAgentClient
 
