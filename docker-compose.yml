@@ -1,24 +1,38 @@
 # =============================================================================
-# Jarvis — Full Stack (agent + PostgreSQL 16 + Redis 7)
+# JarvisOS Platform — multi-agent container + Redis + Cloudflare Tunnel
+# Deploy on: .139 (Docker-AI)
 # =============================================================================
-# Supersedes docker-compose.infra.yml (infra file kept for reference only)
 
 services:
-  jarvis:
+  jarvios:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: jarvis-agent
+    container_name: jarvios-platform
     restart: unless-stopped
     ports:
-      - "8800:8000"
+      - "8800:8000"   # Jarvis agent (Telegram webhook, direct API)
+      - "8900:8900"   # Platform API (dashboard, management)
     env_file: /home/paluss/docker/.env
+    labels:
+      # Jarvis API — jarvis.prova9x.com
+      - "traefik.enable=true"
+      - "traefik.http.routers.jarvis.rule=Host(`jarvis.prova9x.com`)"
+      - "traefik.http.routers.jarvis.entrypoints=websecure"
+      - "traefik.http.routers.jarvis.middlewares=crowdsec-bouncer@file"
+      - "traefik.http.services.jarvis.loadbalancer.server.port=8000"
+      # Dashboard — jarvis-dashboard.prova9x.com
+      - "traefik.http.routers.jarvis-dashboard.rule=Host(`jarvis-dashboard.prova9x.com`)"
+      - "traefik.http.routers.jarvis-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.jarvis-dashboard.middlewares=crowdsec-bouncer@file"
+      - "traefik.http.services.jarvis-dashboard.loadbalancer.server.port=8900"
     volumes:
-      - /home/paluss/docker/appdata/jarvis-workspace:/app/workspace
-      - /home/paluss/.codex:/root/.codex:ro
+      - /home/paluss/docker/appdata/jarvios-workspaces:/app/workspace
+      - /home/paluss/docker/appdata/jarvios-shared:/app/shared
+      - /home/paluss/docker/appdata/jarvios-dot-claude:/root/.claude
+      - /home/paluss/.claude/.credentials.json:/root/.claude/.credentials.json
+      - /home/paluss/docker/.env:/app/.env:ro
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -26,51 +40,26 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 45s
     networks:
-      - jarvis-net
-    mem_limit: 4g
-    cpus: "4.0"
+      - jarvios-net
+      - agents-net
+      - socket_proxy
+    mem_limit: 6g
+    cpus: "6.0"
     logging:
       driver: json-file
       options:
         max-size: "50m"
         max-file: "5"
 
-  postgres:
-    image: postgres:16-alpine
-    container_name: jarvis-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: jarvis
-      POSTGRES_USER: jarvis
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - /home/paluss/docker/appdata/jarvis-pgdata:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jarvis"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - jarvis-net
-    mem_limit: 512m
-    cpus: "0.50"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   redis:
     image: redis:7-alpine
-    container_name: jarvis-redis
+    container_name: jarvios-redis
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
-      - /home/paluss/docker/appdata/jarvis-redis:/data
+      - /home/paluss/docker/appdata/jarvios-redis:/data
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
@@ -79,7 +68,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - jarvis-net
+      - jarvios-net
     mem_limit: 256m
     cpus: "0.20"
     logging:
@@ -88,6 +77,31 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: jarvios-cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      jarvios:
+        condition: service_healthy
+    networks:
+      - jarvios-net
+    mem_limit: 128m
+    cpus: "0.10"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 networks:
-  jarvis-net:
+  jarvios-net:
     driver: bridge
+  agents-net:
+    name: agents-net
+    external: true
+  socket_proxy:
+    external: true
