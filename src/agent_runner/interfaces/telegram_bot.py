@@ -581,11 +581,17 @@ async def _handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # Message handler
 # ---------------------------------------------------------------------------
 
-async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    config = context.bot_data.get("config")
-    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
-        return
+async def _stream_to_agent(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+) -> None:
+    """Dispatch an arbitrary text string to the agent and stream the response.
 
+    Used by both the regular message handler and sport shortcut commands
+    (/pesi, /addome) that convert a command into a natural-language sentence
+    before forwarding it to the agent.
+    """
     agent = context.bot_data.get("agent")
     session_manager = context.bot_data.get("session_manager")
 
@@ -605,7 +611,7 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
     try:
-        async for chunk in agent.stream(update.message.text, session_id=session_id):
+        async for chunk in agent.stream(text, session_id=session_id):
             state["text"] += chunk
 
         content = state["text"] or "(no response)"
@@ -630,6 +636,287 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     finally:
         state["done"] = True
         status_task.cancel()
+
+
+async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+    await _stream_to_agent(update, context, update.message.text)
+
+
+# ---------------------------------------------------------------------------
+# Roger-specific sport shortcut commands
+# ---------------------------------------------------------------------------
+
+async def _cmd_pesi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Shortcut: /pesi 81.5 — log body weight, forwarded to Roger as structured input."""
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: `/pesi 81.5`", parse_mode=ParseMode.MARKDOWN)
+        return
+    weight = context.args[0]
+    await _stream_to_agent(update, context, f"Ho pesato {weight} kg oggi")
+
+
+async def _cmd_addome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Shortcut: /addome 84 — log waist circumference, forwarded to Roger."""
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: `/addome 84`", parse_mode=ParseMode.MARKDOWN)
+        return
+    cm = context.args[0]
+    await _stream_to_agent(update, context, f"Circonferenza addominale oggi: {cm} cm")
+
+
+async def _cmd_profilo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show or update athlete profile: /profilo | /profilo altezza 178 | /profilo nascita 1990-05-15 | /profilo sesso M"""
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+
+    url = os.environ.get("SPORT_POSTGRES_URL", "")
+    if not url:
+        await update.message.reply_text("DB non configurato (`SPORT_POSTGRES_URL` mancante).", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    args = context.args or []
+    chat_id = update.effective_chat.id
+
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(url)
+        try:
+            # Resolve user_id from telegram_chat_id
+            user_row = await conn.fetchrow(
+                "SELECT id, name FROM users WHERE telegram_chat_id = $1 AND is_active = true", chat_id
+            )
+            if not user_row:
+                await update.message.reply_text("Utente non trovato nel DB. Contatta l'admin.")
+                return
+            user_id = user_row["id"]
+            user_name = user_row["name"]
+
+            # Ensure profile row exists
+            await conn.execute(
+                "INSERT INTO athlete_profile (user_id, name) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING",
+                user_id, user_name,
+            )
+
+            if not args:
+                # Read profile
+                row = await conn.fetchrow("SELECT * FROM athlete_profile WHERE user_id = $1", user_id)
+                dob = row["date_of_birth"]
+                height = row["height_cm"]
+                sex = row["sex"] or "—"
+                age_str = "—"
+                if dob:
+                    today = datetime.date.today()
+                    age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                    age_str = f"{age} anni"
+                lines = [
+                    f"*Profilo atleta — {user_name}*",
+                    f"Altezza: {height} cm" if height else "Altezza: — _(non impostata)_",
+                    f"Data di nascita: {dob} \\({age_str}\\)" if dob else "Data di nascita: — _(non impostata)_",
+                    f"Sesso: {sex}",
+                    "",
+                    "_Modifica: /profilo altezza 178 \\| /profilo nascita 1990\\-05\\-15 \\| /profilo sesso M_",
+                ]
+                await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+                return
+
+            field = args[0].lower()
+            if len(args) < 2:
+                await update.message.reply_text(
+                    "Specifica il valore. Esempi:\n"
+                    "`/profilo altezza 178`\n"
+                    "`/profilo nascita 1990-05-15`\n"
+                    "`/profilo sesso M`",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+
+            value = args[1]
+
+            if field in ("altezza", "height"):
+                try:
+                    h = float(value)
+                except ValueError:
+                    await update.message.reply_text("Altezza non valida. Esempio: `/profilo altezza 178`", parse_mode=ParseMode.MARKDOWN)
+                    return
+                await conn.execute(
+                    "UPDATE athlete_profile SET height_cm = $1, updated_at = now() WHERE user_id = $2", h, user_id
+                )
+                await update.message.reply_text(f"Altezza aggiornata: *{h} cm*", parse_mode=ParseMode.MARKDOWN)
+
+            elif field in ("nascita", "dob", "birthday"):
+                try:
+                    dob = datetime.date.fromisoformat(value)
+                except ValueError:
+                    await update.message.reply_text("Data non valida. Formato: `YYYY-MM-DD`", parse_mode=ParseMode.MARKDOWN)
+                    return
+                await conn.execute(
+                    "UPDATE athlete_profile SET date_of_birth = $1, updated_at = now() WHERE user_id = $2", dob, user_id
+                )
+                today = datetime.date.today()
+                age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                await update.message.reply_text(f"Data di nascita: *{dob}* \\({age} anni\\)", parse_mode=ParseMode.MARKDOWN_V2)
+
+            elif field in ("sesso", "sex"):
+                s = value.upper()
+                if s not in ("M", "F", "OTHER"):
+                    await update.message.reply_text("Sesso non valido. Usa `M`, `F`, o `other`.", parse_mode=ParseMode.MARKDOWN)
+                    return
+                await conn.execute(
+                    "UPDATE athlete_profile SET sex = $1, updated_at = now() WHERE user_id = $2", s, user_id
+                )
+                await update.message.reply_text(f"Sesso aggiornato: *{s}*", parse_mode=ParseMode.MARKDOWN)
+
+            else:
+                await update.message.reply_text(
+                    "Campo non riconosciuto. Usa: `altezza`, `nascita`, `sesso`.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.error("_cmd_profilo: error — %s", exc)
+        await update.message.reply_text(f"Errore DB: {exc}")
+
+
+async def _cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/adduser <telegram_chat_id> <name> — register a new user in sport_metrics."""
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+
+    if len(context.args or []) < 2:
+        chat_id = update.effective_chat.id
+        await update.message.reply_text(
+            "Usage: `/adduser <telegram_chat_id> <nome>`\n"
+            f"Esempio: `/adduser {chat_id} Mario`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    url = os.environ.get("SPORT_POSTGRES_URL", "")
+    if not url:
+        await update.message.reply_text("DB non configurato.")
+        return
+
+    try:
+        new_chat_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("telegram_chat_id deve essere un numero intero.")
+        return
+
+    name = " ".join(context.args[1:])
+
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(url)
+        try:
+            existing = await conn.fetchrow("SELECT id, is_active FROM users WHERE telegram_chat_id = $1", new_chat_id)
+            if existing:
+                if existing["is_active"]:
+                    await update.message.reply_text(f"Utente `{name}` (chat_id {new_chat_id}) già registrato.", parse_mode=ParseMode.MARKDOWN)
+                else:
+                    await conn.execute("UPDATE users SET is_active = true, name = $1 WHERE telegram_chat_id = $2", name, new_chat_id)
+                    await update.message.reply_text(f"Utente `{name}` riattivato.", parse_mode=ParseMode.MARKDOWN)
+                return
+            row = await conn.fetchrow(
+                "INSERT INTO users (telegram_chat_id, name) VALUES ($1, $2) RETURNING id",
+                new_chat_id, name,
+            )
+            user_id = row["id"]
+            await conn.execute(
+                "INSERT INTO athlete_profile (user_id, name) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING",
+                user_id, name,
+            )
+            await update.message.reply_text(
+                f"✅ Utente *{name}* registrato \\(id={user_id}\\)\\. "
+                f"Usa `/start` nel suo chat per iniziare\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.error("_cmd_adduser: error — %s", exc)
+        await update.message.reply_text(f"Errore: {exc}")
+
+
+async def _cmd_listusers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/listusers — show all registered users."""
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+
+    url = os.environ.get("SPORT_POSTGRES_URL", "")
+    if not url:
+        await update.message.reply_text("DB non configurato.")
+        return
+
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(url)
+        try:
+            rows = await conn.fetch("SELECT id, name, telegram_chat_id, is_active, is_admin, created_at FROM users ORDER BY id")
+            if not rows:
+                await update.message.reply_text("Nessun utente registrato.")
+                return
+            lines = ["*Utenti registrati:*\n"]
+            for r in rows:
+                status = "✅" if r["is_active"] else "❌"
+                admin_tag = " 👑" if r["is_admin"] else ""
+                lines.append(f"{status} *{r['name']}*{admin_tag} — chat_id: `{r['telegram_chat_id']}` (id={r['id']})")
+            await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.error("_cmd_listusers: error — %s", exc)
+        await update.message.reply_text(f"Errore: {exc}")
+
+
+async def _cmd_removeuser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/removeuser <nome_o_user_id> — deactivate a user (does not delete data)."""
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/removeuser <nome_o_user_id>`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    url = os.environ.get("SPORT_POSTGRES_URL", "")
+    if not url:
+        await update.message.reply_text("DB non configurato.")
+        return
+
+    target = context.args[0]
+
+    try:
+        import asyncpg
+        conn = await asyncpg.connect(url)
+        try:
+            # Try numeric ID first, then name
+            try:
+                row = await conn.fetchrow("SELECT id, name FROM users WHERE id = $1", int(target))
+            except ValueError:
+                row = await conn.fetchrow("SELECT id, name FROM users WHERE lower(name) = lower($1)", target)
+            if not row:
+                await update.message.reply_text(f"Utente `{target}` non trovato.", parse_mode=ParseMode.MARKDOWN)
+                return
+            await conn.execute("UPDATE users SET is_active = false WHERE id = $1", row["id"])
+            await update.message.reply_text(f"Utente *{row['name']}* disattivato (dati conservati).", parse_mode=ParseMode.MARKDOWN)
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.error("_cmd_removeuser: error — %s", exc)
+        await update.message.reply_text(f"Errore: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +990,15 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
     app.add_handler(CommandHandler("model", _cmd_model))
     app.add_handler(CommandHandler("thinking", _cmd_thinking))
     app.add_handler(CommandHandler("deletesession", _cmd_delete_session))
+
+    if config.name.lower() == "roger":
+        app.add_handler(CommandHandler("pesi",        _cmd_pesi))
+        app.add_handler(CommandHandler("addome",      _cmd_addome))
+        app.add_handler(CommandHandler("profilo",     _cmd_profilo))
+        app.add_handler(CommandHandler("adduser",     _cmd_adduser))
+        app.add_handler(CommandHandler("listusers",   _cmd_listusers))
+        app.add_handler(CommandHandler("removeuser",  _cmd_removeuser))
+
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
     app.add_handler(CallbackQueryHandler(_handle_callback, pattern=r"^perm:"))
@@ -726,6 +1022,16 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
         ("thinking",      "Toggle extended thinking: on|off|auto"),
         ("deletesession", "Delete a session"),
     ]
+
+    if config.name.lower() == "roger":
+        _COMMANDS += [
+            ("pesi",        "Log body weight — /pesi 81.5"),
+            ("addome",      "Log waist circumference — /addome 84"),
+            ("profilo",     "View or update athlete profile (height, DOB, sex)"),
+            ("adduser",     "Admin: register a new user"),
+            ("listusers",   "Admin: list all users"),
+            ("removeuser",  "Admin: deactivate a user"),
+        ]
 
     async with app:
         await app.start()
