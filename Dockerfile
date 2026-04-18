@@ -35,4 +35,6 @@ EXPOSE 8000 8900
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8000/health && curl -f http://localhost:8900/health || exit 1
 
-CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+RUN chmod +x scripts/entrypoint.sh
+
+CMD ["scripts/entrypoint.sh"]
