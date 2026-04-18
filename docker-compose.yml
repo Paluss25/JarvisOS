@@ -34,6 +34,10 @@ services:
       - /home/paluss/docker/appdata/jarvios-dot-claude:/root/.claude
       - /home/paluss/.claude/.credentials.json:/root/.claude/.credentials.json
       - /home/paluss/docker/.env:/app/.env:ro
+      # SSH access for CIO remote host management
+      - /home/paluss/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
+      - /home/paluss/docker/appdata/jarvios-shared/ssh/config:/root/.ssh/config:ro
+      - /home/paluss/docker/appdata/jarvios-shared/ssh/known_hosts:/root/.ssh/known_hosts:ro
     depends_on:
       redis:
         condition: service_healthy

@@ -6,6 +6,7 @@ Tools:
   memory_get         — Read a specific memory file from workspace
   infra_check        — HTTP health check on internal service URLs
   docker_query       — List/inspect Docker containers/networks via socket proxy
+  docker_action      — Perform lifecycle actions on Docker containers (restart/start/stop/kill)
   tcp_check          — TCP port connectivity checks (pure-Python, no dig needed)
   dns_lookup         — DNS resolution for hostnames
   pg_query           — Read-only SELECT queries against any named database
@@ -321,6 +322,51 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text(f"Docker query error: {exc}")
 
     @sdk_tool(
+        "docker_action",
+        "Perform a lifecycle action on a Docker container on the local host. "
+        "Actions: restart | start | stop | kill. "
+        "Run docker_query first to confirm the exact container name. "
+        "name: container name or id. "
+        "timeout: graceful stop timeout in seconds before kill (default 10, only used for 'stop').",
+        {"action": str, "name": str, "timeout": int},
+    )
+    async def docker_action(args: dict) -> dict:
+        args = _parse_args(args)
+        action = (args.get("action") or "").strip().lower()
+        name = (args.get("name") or "").strip()
+        timeout = int(args.get("timeout") or 10)
+
+        if not name:
+            return _text("name is required.")
+        if action not in {"restart", "start", "stop", "kill"}:
+            return _text(f"Invalid action '{action}'. Valid actions: restart, start, stop, kill")
+
+        proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")
+        url = f"{proxy}/containers/{name}/{action}"
+        params = {"t": timeout} if action == "stop" else {}
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, params=params)
+
+            if resp.status_code == 204:
+                return _text(f"OK: container '{name}' {action}ed successfully.")
+            elif resp.status_code == 304:
+                return _text(f"Container '{name}' already in the target state (no-op).")
+            elif resp.status_code == 404:
+                return _text(f"Container '{name}' not found. Use docker_query to list containers.")
+            elif resp.status_code == 409:
+                return _text(f"Conflict: container '{name}' cannot perform '{action}' in its current state.")
+            else:
+                return {"content": [{"type": "text", "text": f"Unexpected response {resp.status_code}: {resp.text[:200]}"}], "is_error": True}
+
+        except httpx.ConnectError:
+            return _text(f"Cannot reach Docker socket proxy at {proxy}. Is the socket_proxy network up?")
+        except Exception as exc:
+            logger.error("docker_action[%s/%s]: error — %s", name, action, exc)
+            return {"content": [{"type": "text", "text": f"Action failed: {exc}"}], "is_error": True}
+
+    @sdk_tool(
         "tcp_check",
         "Check TCP connectivity to one or more host:port targets. "
         "No system tools needed — uses pure-Python asyncio. "
@@ -569,7 +615,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
     all_tools = [
         daily_log, memory_search, memory_get,
         infra_check,
-        docker_query, tcp_check, dns_lookup, pg_query,
+        docker_query, docker_action, tcp_check, dns_lookup, pg_query,
         cron_create, cron_list, cron_update, cron_delete,
     ]
     if send_message is not None:

@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     nodejs \
     npm \
+    openssh-client \
     supervisor \
     && rm -rf /var/lib/apt/lists/*
 
