@@ -30,21 +30,22 @@ async def analyze(task: TaskEnvelope) -> dict:
     high_threshold = float(task.scope.get("high_risk_threshold", _HIGH_RISK))
     medium_threshold = float(task.scope.get("medium_risk_threshold", _MEDIUM_RISK))
 
-    # Fetch open positions
+    # Fetch open positions — JOIN markets for condition_id + title
     rows = await db.fetch(
         """
         SELECT
-            condition_id,
-            question,
-            side,
-            size,
-            avg_entry_price,
-            current_price,
-            unrealized_pnl,
-            market_value
-        FROM positions
-        WHERE status = 'open'
-        ORDER BY market_value DESC NULLS LAST
+            m.condition_id,
+            m.title                          AS question,
+            p.side,
+            p.size,
+            p.avg_entry_price,
+            p.current_price,
+            p.unrealized_pnl,
+            (p.size * p.current_price)       AS market_value
+        FROM positions p
+        JOIN markets m ON p.market_id = m.market_id
+        WHERE p.size > 0
+        ORDER BY (p.size * p.current_price) DESC
         """
     )
 

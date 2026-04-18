@@ -48,27 +48,28 @@ async def analyze(task: TaskEnvelope) -> dict:
     news_days = int(task.scope.get("news_days_back", 3))
 
     # 1. Fetch top signals from DB
+    # signals_log uses market_id (not condition_id); score field is final_score
     rows = await db.fetch(
         """
         SELECT
-            sl.condition_id,
+            m.condition_id,
             sl.signal_type,
-            sl.signal_value,
-            sl.created_at,
-            m.question,
+            sl.final_score                AS signal_value,
+            sl.ts                         AS created_at,
+            m.title                       AS question,
             m.category,
-            m.end_date,
+            m.close_time                  AS end_date,
             m.volume,
-            ph.price AS current_price
+            ph.price_yes                  AS current_price
         FROM signals_log sl
-        LEFT JOIN markets m ON sl.condition_id = m.condition_id
+        LEFT JOIN markets m ON sl.market_id = m.market_id
         LEFT JOIN LATERAL (
-            SELECT price FROM price_history
-            WHERE condition_id = sl.condition_id
-            ORDER BY recorded_at DESC LIMIT 1
+            SELECT price_yes FROM price_history
+            WHERE market_id = sl.market_id
+            ORDER BY ts DESC LIMIT 1
         ) ph ON true
-        WHERE sl.created_at > NOW() - INTERVAL '24 hours'
-        ORDER BY sl.created_at DESC
+        WHERE sl.ts > NOW() - INTERVAL '24 hours'
+        ORDER BY sl.ts DESC
         LIMIT $1
         """,
         db_limit,

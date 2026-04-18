@@ -1,8 +1,14 @@
 """Trade Journal sub-agent — Polymarket historical performance review.
 
-Reads trades, orders, and daily PnL from the polymarket DB.
+Reads filled orders and daily PnL from the polymarket DB.
 Returns performance stats: win rate, total PnL, avg return per trade,
 best/worst trades.
+
+Schema notes:
+  - Filled trades = orders table WHERE status = 'filled', JOINed with markets for title
+  - PnL estimate = (fill_price - price) * fill_size * direction  (approximation;
+    actual realized PnL tracked in positions.realized_pnl)
+  - pnl_daily table columns: date, realized_pnl, unrealized_pnl, fees, num_trades
 
 Tunable defaults (from K3s configmap):
   default_period   = "month"  (day | week | month | year | all)
@@ -43,27 +49,32 @@ async def analyze(task: TaskEnvelope) -> dict:
     limit = int(task.scope.get("history_limit", 50))
     since = _period_start(period)
 
-    # Fetch resolved trades
-    where = "WHERE resolved_at IS NOT NULL"
+    # Filled orders JOINed with markets for title/condition_id
+    # pnl approximation: (fill_price - price) * fill_size for BUY orders
+    where = "WHERE o.status = 'filled'"
     params: list = []
     if since:
         params.append(since)
-        where += f" AND resolved_at >= ${len(params)}"
+        where += f" AND o.updated_at >= ${len(params)}"
 
     trades = await db.fetch(
         f"""
         SELECT
-            condition_id,
-            question,
-            side,
-            size,
-            entry_price,
-            exit_price,
-            realized_pnl,
-            resolved_at
-        FROM trades
+            m.condition_id,
+            m.title                                              AS question,
+            o.side,
+            o.fill_size                                          AS size,
+            o.price                                              AS entry_price,
+            o.fill_price                                         AS exit_price,
+            CASE WHEN o.side = 'BUY'
+                 THEN (o.fill_price - o.price) * o.fill_size - o.fee
+                 ELSE (o.price - o.fill_price) * o.fill_size - o.fee
+            END                                                  AS realized_pnl,
+            o.updated_at                                         AS resolved_at
+        FROM orders o
+        JOIN markets m ON o.market_id = m.market_id
         {where}
-        ORDER BY resolved_at DESC
+        ORDER BY o.updated_at DESC
         LIMIT ${len(params) + 1}
         """,
         *params,
@@ -101,13 +112,17 @@ async def analyze(task: TaskEnvelope) -> dict:
     best = max(trades, key=lambda t: float(t["realized_pnl"] or 0))
     worst = min(trades, key=lambda t: float(t["realized_pnl"] or 0))
 
-    # Daily PnL for the period
+    # Daily PnL — pnl_daily.date (not pnl_date); total = realized + unrealized
     pnl_daily = await db.fetch(
         f"""
-        SELECT pnl_date, realized_pnl, unrealized_pnl, total_pnl
+        SELECT
+            date,
+            realized_pnl,
+            unrealized_pnl,
+            realized_pnl + unrealized_pnl  AS total_pnl
         FROM pnl_daily
-        {"WHERE pnl_date >= $1" if since else ""}
-        ORDER BY pnl_date DESC
+        {"WHERE date >= $1" if since else ""}
+        ORDER BY date DESC
         LIMIT 30
         """,
         *([since] if since else []),
@@ -142,7 +157,7 @@ async def analyze(task: TaskEnvelope) -> dict:
         ],
         "pnl_daily": [
             {
-                "date": str(r["pnl_date"]),
+                "date": str(r["date"]),
                 "realized_pnl": float(r["realized_pnl"] or 0),
                 "total_pnl": float(r["total_pnl"] or 0),
             }
