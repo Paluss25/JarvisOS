@@ -37,3 +37,13 @@ agents:
     capabilities: [infra-monitoring, security-audit, docker-management, log-analysis]
     memory:
       backend: filesystem
+
+  - id: cfo
+    port: 8003
+    workspace: workspace/cfo
+    telegram_token_env: TELEGRAM_CFO_TOKEN
+    telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
+    domains: [finance, crypto, investments, budgets, fiscal]
+    capabilities: [budget-analysis, crypto-portfolio, cost-analysis, trading-analysis, fiscal-compliance]
+    memory:
+      backend: filesystem
