@@ -10,11 +10,15 @@ Tools:
   cron_list         — List scheduled tasks
   cron_update       — Update a scheduled task
   cron_delete       — Delete a scheduled task
+  scaffold_agent    — Scaffold a new agent in the platform repo (SSH to host)
 """
 
+import asyncio
 import json
 import logging
 import os
+import re
+import shlex
 from pathlib import Path
 
 import httpx  # used by perplexity_search
@@ -340,10 +344,109 @@ def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
         except Exception as exc:
             return _text(f"Error: {exc}")
 
+    # --- Platform management --------------------------------------------
+
+    @sdk_tool(
+        "scaffold_agent",
+        "Scaffold a new agent in the JarvisOS platform repo on the Docker host. "
+        "Creates the Python package (src/agents/<id>/), workspace files, and appends the entry to agents.yaml. "
+        "Runs on the host machine via SSH so changes persist in the git repo. "
+        "A docker rebuild + redeploy is required after scaffolding to activate the new agent. "
+        "Use dry_run=true to preview what would be created without writing anything. "
+        "Env overrides: PLATFORM_SSH_HOST (default paluss@10.10.200.139), "
+        "PLATFORM_REPO_PATH (default /home/paluss/docker/compose/jarvisOS/.worktrees/jarvios-platform).",
+        {"id": str, "port": int, "name": str, "env_prefix": str, "dry_run": bool},
+    )
+    async def scaffold_agent(args: dict) -> dict:
+        """SSH to the Docker host and run scripts/new_agent.py in the platform repo."""
+        args = _parse_args(args)
+
+        agent_id = args.get("id", "").strip()
+        port = args.get("port")
+        if not agent_id:
+            return _text("id is required.")
+        if port is None:
+            return _text("port is required.")
+
+        if not re.match(r'^[a-z][a-z0-9_]*$', agent_id):
+            return _text(
+                "id must start with a lowercase letter and contain only "
+                "lowercase letters, digits, and underscores."
+            )
+
+        try:
+            port_int = int(port)
+        except (TypeError, ValueError):
+            return _text("port must be an integer.")
+
+        host_ssh = os.environ.get("PLATFORM_SSH_HOST", "paluss@10.10.200.139")
+        repo_path = os.environ.get(
+            "PLATFORM_REPO_PATH",
+            "/home/paluss/docker/compose/jarvisOS/.worktrees/jarvios-platform",
+        )
+        script = f"{repo_path}/scripts/new_agent.py"
+
+        cmd_parts = ["python3", script, agent_id, str(port_int)]
+
+        name = args.get("name", "").strip()
+        if name:
+            cmd_parts += ["--name", name]
+
+        env_prefix = args.get("env_prefix", "").strip()
+        if env_prefix:
+            cmd_parts += ["--env-prefix", env_prefix]
+
+        if args.get("dry_run"):
+            cmd_parts.append("--dry-run")
+
+        # Build the remote command string, shell-quoting each part so spaces/specials are safe
+        remote_cmd = " ".join(shlex.quote(p) for p in cmd_parts)
+
+        ssh_cmd = [
+            "ssh",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "BatchMode=yes",       # fail immediately if no key auth
+            "-i", "/root/.ssh/id_ed25519",
+            host_ssh,
+            remote_cmd,
+        ]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *ssh_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+
+            stdout_text = stdout.decode("utf-8", errors="replace").strip()
+            stderr_text = stderr.decode("utf-8", errors="replace").strip()
+
+            if proc.returncode != 0:
+                err = stderr_text or stdout_text or "unknown error"
+                logger.error(
+                    "scaffold_agent: SSH command failed (rc=%d) — %s",
+                    proc.returncode, err[:300],
+                )
+                return _text(f"scaffold_agent failed (exit {proc.returncode}):\n{err}")
+
+            if stderr_text:
+                logger.warning("scaffold_agent: stderr — %s", stderr_text[:200])
+
+            logger.info("scaffold_agent: scaffolded '%s' on %s", agent_id, host_ssh)
+            return _text(stdout_text or "Done.")
+
+        except asyncio.TimeoutError:
+            return _text("scaffold_agent timed out after 60 seconds.")
+        except Exception as exc:
+            logger.error("scaffold_agent: unexpected error — %s", exc)
+            return _text(f"scaffold_agent error: {exc}")
+
     # --- Build server ---------------------------------------------------
     all_tools = [
         perplexity_search, daily_log, memory_search, memory_get,
         cron_create, cron_list, cron_update, cron_delete,
+        scaffold_agent,
     ]
     if send_message is not None:
         all_tools.append(send_message)
