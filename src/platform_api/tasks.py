@@ -7,11 +7,11 @@ from uuid import UUID
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from platform.audit import audit, AuditEvent
-from platform.auth import get_current_user
-from platform.db import get_pool
-from platform.models import TaskCreate, TaskPatch, TaskResponse
-from platform.task_router import auto_assign
+from platform_api.audit import audit, AuditEvent
+from platform_api.auth import get_current_user
+from platform_api.db import get_pool
+from platform_api.models import TaskCreate, TaskPatch, TaskResponse
+from platform_api.task_router import auto_assign
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -76,6 +76,9 @@ async def create_task(req: TaskCreate, _user=Depends(get_current_user)):
         assigned_to = result.get("agent_id")
         assignment_mode = "auto" if assigned_to else "pending"
 
+    # Derive actor from validated JWT — never trust req.created_by
+    actor = _user.get("sub") if hasattr(_user, "get") else str(_user)
+
     row = await pool.fetchrow(
         """
         INSERT INTO tasks
@@ -86,7 +89,7 @@ async def create_task(req: TaskCreate, _user=Depends(get_current_user)):
         """,
         req.title,
         req.description,
-        req.created_by,
+        actor,
         assigned_to,
         assignment_mode,
         req.priority,
@@ -218,6 +221,8 @@ async def _check_parent_completion(pool, parent_id: UUID) -> None:
     children = await pool.fetch(
         "SELECT status FROM tasks WHERE parent_id = $1", parent_id
     )
+    if not children:
+        return  # no children — parent not auto-completed
     statuses = {r["status"] for r in children}
 
     if all(s == "done" for s in statuses):

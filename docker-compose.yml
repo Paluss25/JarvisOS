@@ -47,6 +47,7 @@ services:
       - jarvios-net
       - agents-net
       - socket_proxy
+      - db-net
     mem_limit: 6g
     cpus: "6.0"
     logging:
@@ -59,6 +60,7 @@ services:
     image: redis:7-alpine
     container_name: jarvios-redis
     restart: unless-stopped
+    env_file: /home/paluss/docker/.env
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - /home/paluss/docker/appdata/jarvios-redis:/data
@@ -106,4 +108,7 @@ networks:
     name: agents-net
     external: true
   socket_proxy:
+    external: true
+  db-net:
+    name: db-net
     external: true

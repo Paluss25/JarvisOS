@@ -4,8 +4,8 @@ import json
 import logging
 import sys
 
-from platform.audit.models import AuditEvent
-from platform.db import get_pool
+from platform_api.audit.models import AuditEvent
+from platform_api.db import get_pool
 
 logger = logging.getLogger(__name__)
 
@@ -52,5 +52,5 @@ class AuditLogger:
         print(line, file=sys.stdout, flush=True)
 
 
-# Module-level singleton — import and use directly: `from platform.audit import audit`
+# Module-level singleton — import and use directly: `from platform_api.audit import audit`
 audit = AuditLogger()

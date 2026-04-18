@@ -5,7 +5,7 @@ import os
 
 import uvicorn
 
-from platform.app import create_platform_app
+from platform_api.app import create_platform_app
 
 
 def main():

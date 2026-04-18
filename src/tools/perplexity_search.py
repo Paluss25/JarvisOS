@@ -31,8 +31,8 @@ class PerplexitySearchTools(Toolkit):
             A text answer with sources cited inline.
         """
         import httpx
-        from src.config import settings
-        from src.memory.daily_logger import DailyLogger
+        from config import settings
+        from memory.daily_logger import DailyLogger
 
         api_key = settings.PERPLEXITY_API_KEY
         if not api_key:

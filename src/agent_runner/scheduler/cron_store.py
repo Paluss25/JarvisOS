@@ -161,9 +161,14 @@ def is_due(entry: CronEntry, now: datetime) -> bool:
         return False
 
     h = params["hour"]
+    m = params["minute"]
+
+    def _in_window(current_minute: int) -> bool:
+        """True if current_minute is within the fire window [m, m+_WINDOW_MINUTES)."""
+        return m <= current_minute < m + _WINDOW_MINUTES
 
     if kind == "daily":
-        if now.hour != h or now.minute >= _WINDOW_MINUTES:
+        if now.hour != h or not _in_window(now.minute):
             return False
         if entry.last_run:
             lr = datetime.fromisoformat(entry.last_run).astimezone(_TZ)
@@ -174,7 +179,7 @@ def is_due(entry: CronEntry, now: datetime) -> bool:
     if kind == "weekly":
         if (now.weekday() != params["dow"]
                 or now.hour != h
-                or now.minute >= _WINDOW_MINUTES):
+                or not _in_window(now.minute)):
             return False
         if entry.last_run:
             lr = datetime.fromisoformat(entry.last_run).astimezone(_TZ)
@@ -185,7 +190,7 @@ def is_due(entry: CronEntry, now: datetime) -> bool:
     if kind == "once":
         if (now.date() != params["date"]
                 or now.hour != h
-                or now.minute >= _WINDOW_MINUTES):
+                or not _in_window(now.minute)):
             return False
         if entry.last_run:
             return False  # already ran

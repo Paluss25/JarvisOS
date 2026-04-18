@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from src.models.fallback_model import FallbackModel
+from models.fallback_model import FallbackModel
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +18,8 @@ def _build_single_model(provider: str, model_id: str):
     """Instantiate one Agno model from provider name + model ID."""
 
     if provider == "openai-codex":
-        from src.models.codex_model import create_codex_model
-        from src.config import settings
+        from models.codex_model import create_codex_model
+        from config import settings
         return create_codex_model(
             model_id=model_id,
             auth_path=settings.codex_auth_path,
@@ -27,13 +27,13 @@ def _build_single_model(provider: str, model_id: str):
 
     elif provider == "xai":
         from agno.models.xai import xAI
-        from src.config import settings
+        from config import settings
         return xAI(id=model_id, api_key=settings.GROK_API_KEY)
 
     elif provider == "litellm":
         # Use LiteLLM self-hosted gateway via OpenAI-compatible API
         from agno.models.openai import OpenAILike
-        from src.config import settings
+        from config import settings
         return OpenAILike(
             id=model_id,
             name=f"LiteLLM/{model_id}",
@@ -44,17 +44,17 @@ def _build_single_model(provider: str, model_id: str):
 
     elif provider == "groq":
         from agno.models.groq import Groq
-        from src.config import settings
+        from config import settings
         return Groq(id=model_id, api_key=settings.groq_key)
 
     elif provider == "anthropic":
         from agno.models.anthropic import Claude
-        from src.config import settings
+        from config import settings
         return Claude(id=model_id, api_key=settings.ANTHROPIC_API_KEY)
 
     elif provider == "google":
         from agno.models.google import Gemini
-        from src.config import settings
+        from config import settings
         return Gemini(id=model_id, api_key=settings.GOOGLE_API_KEY)
 
     elif provider == "ollama":
@@ -81,7 +81,7 @@ def build_agent_model(agent_name: str) -> FallbackModel:
         ValueError: If agent_name not found in config
         FileNotFoundError: If agent-models.yaml not found
     """
-    from src.config import settings
+    from config import settings
 
     config_path = settings.workspace_path / "config" / "agent-models.yaml"
 
@@ -116,8 +116,8 @@ def build_agent_model(agent_name: str) -> FallbackModel:
     def on_fallback(from_model, to_model, error):
         """Log fallback cascade to daily memory (best-effort)."""
         try:
-            from src.memory.daily_logger import DailyLogger
-            from src.config import settings as s
+            from memory.daily_logger import DailyLogger
+            from config import settings as s
             dl = DailyLogger(workspace_path=str(s.workspace_path))
             dl.log(
                 f"[FALLBACK] {agent_name}: {from_model.id} → {to_model.id} "

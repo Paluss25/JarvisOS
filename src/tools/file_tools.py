@@ -42,8 +42,8 @@ class WorkspaceFileTools(Toolkit):
 
     def _log(self, msg: str) -> None:
         try:
-            from src.config import settings
-            from src.memory.daily_logger import DailyLogger
+            from config import settings
+            from memory.daily_logger import DailyLogger
             DailyLogger(settings.workspace_path).log(msg)
         except Exception:
             pass
@@ -93,7 +93,7 @@ class WorkspaceFileTools(Toolkit):
         Returns:
             Confirmation message or error.
         """
-        from src.tools import permission_gate
+        from tools import permission_gate
 
         resolved = self._resolve(path)
         if resolved is None:

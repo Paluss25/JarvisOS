@@ -8,16 +8,25 @@ import yaml
 from fastapi import APIRouter, HTTPException, Depends
 
 from agent_runner.registry import list_agents, load_registry, _REGISTRY_PATH
-from platform.audit import audit, AuditEvent
-from platform.auth import get_current_user
-from platform.models import AgentCreateRequest, AgentStatus
-from platform.supervisord_rpc import SupervisorClient
+from platform_api.audit import audit, AuditEvent
+from platform_api.auth import get_current_user, require_admin
+from platform_api.models import AgentCreateRequest, AgentStatus
+from platform_api.supervisord_rpc import SupervisorClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 _supervisor = SupervisorClient()
 _AGENTS_YAML = _REGISTRY_PATH
+_WORKSPACE_ROOT = Path("/app/workspace")
+
+
+def _safe_workspace(raw: str) -> Path:
+    """Resolve workspace path and ensure it stays under /app/workspace/."""
+    candidate = (_WORKSPACE_ROOT / raw).resolve()
+    if not str(candidate).startswith(str(_WORKSPACE_ROOT.resolve())):
+        raise ValueError(f"Workspace path escapes sandbox: {raw!r}")
+    return candidate
 
 
 def _write_registry(data: dict) -> None:
@@ -93,7 +102,7 @@ async def get_agent(agent_id: str, _user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 
 @router.post("", status_code=201)
-async def create_agent(req: AgentCreateRequest, _user=Depends(get_current_user)):
+async def create_agent(req: AgentCreateRequest, _user=Depends(require_admin)):
     data = load_registry()
     if any(a["id"] == req.id for a in data.get("agents", [])):
         raise HTTPException(status_code=409, detail=f"Agent '{req.id}' already exists")
@@ -111,8 +120,11 @@ async def create_agent(req: AgentCreateRequest, _user=Depends(get_current_user))
     data.setdefault("agents", []).append(entry)
     _write_registry(data)
 
-    # Create workspace directory
-    ws = Path(f"/app/{req.workspace}")
+    # Create workspace directory (path-traversal safe)
+    try:
+        ws = _safe_workspace(req.workspace)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     ws.mkdir(parents=True, exist_ok=True)
 
     # Regenerate supervisord config and reload
@@ -139,7 +151,7 @@ async def create_agent(req: AgentCreateRequest, _user=Depends(get_current_user))
 # ---------------------------------------------------------------------------
 
 @router.delete("/{agent_id}", status_code=204)
-async def delete_agent(agent_id: str, _user=Depends(get_current_user)):
+async def delete_agent(agent_id: str, _user=Depends(require_admin)):
     data = load_registry()
     agents = data.get("agents", [])
     if not any(a["id"] == agent_id for a in agents):
@@ -167,7 +179,7 @@ async def delete_agent(agent_id: str, _user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 
 @router.post("/{agent_id}/restart")
-async def restart_agent(agent_id: str, _user=Depends(get_current_user)):
+async def restart_agent(agent_id: str, _user=Depends(require_admin)):
     agents = list_agents()
     if not any(a["id"] == agent_id for a in agents):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
@@ -204,6 +216,11 @@ async def chat_proxy(agent_id: str, body: dict, _user=Depends(get_current_user))
                 f"http://localhost:{entry['port']}/chat",
                 json=body,
             )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail=f"Agent error: {resp.text[:200]}")
+            content_type = resp.headers.get("content-type", "")
+            if "application/json" not in content_type:
+                raise HTTPException(status_code=502, detail="Agent returned non-JSON response")
             return resp.json()
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"Agent unreachable: {exc}")

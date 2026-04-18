@@ -26,8 +26,17 @@ class RedisA2A:
         self._callbacks: list = []
 
     async def connect(self) -> None:
-        url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+        url = os.environ.get("REDIS_URL", "")
         password = os.environ.get("REDIS_PASSWORD", "")
+
+        # REDIS_URL must be a valid redis[s]:// URL. If it's missing or looks
+        # like a bare password/hostname, build the URL from REDIS_HOST instead.
+        if not url or not (url.startswith("redis://") or url.startswith("rediss://")):
+            host = os.environ.get("REDIS_HOST", "localhost")
+            port = os.environ.get("REDIS_PORT", "6379")
+            url = f"redis://{host}:{port}"
+            logger.debug("a2a[%s]: built Redis URL from REDIS_HOST=%s", self.agent_id, host)
+
         kwargs = {"decode_responses": True}
         if password:
             kwargs["password"] = password

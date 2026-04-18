@@ -9,19 +9,19 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from platform.db import get_pool, close_pool
+from platform_api.db import get_pool, close_pool
 
 logger = logging.getLogger(__name__)
 
 
 def create_platform_app() -> FastAPI:
-    from platform.agents import router as agents_router
-    from platform.audit_endpoints import router as audit_router
-    from platform.auth import router as auth_router
-    from platform.domains import router as domains_router
-    from platform.events import router as events_router
-    from platform.tasks import router as tasks_router
-    from platform.token_keepalive import TokenKeepalive
+    from platform_api.agents import router as agents_router
+    from platform_api.audit_endpoints import router as audit_router
+    from platform_api.auth import router as auth_router
+    from platform_api.domains import router as domains_router
+    from platform_api.events import router as events_router
+    from platform_api.tasks import router as tasks_router
+    from platform_api.token_keepalive import TokenKeepalive
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator:

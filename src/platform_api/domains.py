@@ -7,13 +7,21 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 
 from agent_runner.registry import load_registry, list_agents, _REGISTRY_PATH
-from platform.auth import get_current_user, require_admin
-from platform.models import DomainCreate, DomainGrant
+from platform_api.auth import get_current_user, require_admin
+from platform_api.models import DomainCreate, DomainGrant
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/domains", tags=["domains"])
 
 _SHARED_ROOT = Path("/app/shared")
+
+
+def _safe_domain_path(name: str) -> Path:
+    """Resolve domain path and ensure it stays under /app/shared/."""
+    candidate = (_SHARED_ROOT / name).resolve()
+    if not str(candidate).startswith(str(_SHARED_ROOT.resolve())):
+        raise ValueError(f"Domain name escapes shared root: {name!r}")
+    return candidate
 
 
 def _write_registry(data: dict) -> None:
@@ -59,7 +67,10 @@ async def list_domains(_user=Depends(get_current_user)):
 
 @router.post("", status_code=201)
 async def create_domain(req: DomainCreate, _user=Depends(require_admin)):
-    domain_path = _SHARED_ROOT / req.name
+    try:
+        domain_path = _safe_domain_path(req.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if domain_path.exists():
         raise HTTPException(status_code=409, detail=f"Domain '{req.name}' already exists")
     domain_path.mkdir(parents=True)
@@ -72,7 +83,10 @@ async def create_domain(req: DomainCreate, _user=Depends(require_admin)):
 
 @router.delete("/{name}", status_code=204)
 async def delete_domain(name: str, _user=Depends(require_admin)):
-    domain_path = _SHARED_ROOT / name
+    try:
+        domain_path = _safe_domain_path(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not domain_path.exists():
         raise HTTPException(status_code=404, detail=f"Domain '{name}' not found")
     import shutil

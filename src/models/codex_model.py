@@ -77,7 +77,7 @@ def create_codex_model(model_id: str = "gpt-5.4", auth_path: Path | None = None)
         )
         # Still return a model so FallbackModel can build the chain;
         # the token failure will surface on invoke() and cascade to Groq.
-        from src.config import settings
+        from config import settings
         api_key = settings.OPENAI_API_KEY or "codex-oauth-unavailable"
         return OpenAIChat(id=model_id, api_key=api_key)
 

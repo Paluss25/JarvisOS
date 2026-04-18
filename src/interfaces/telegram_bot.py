@@ -25,8 +25,8 @@ from telegram.ext import (
     filters,
 )
 
-from src.config import settings
-from src.middleware.auth import is_authorized
+from config import settings
+from middleware.auth import is_authorized
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ async def _handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _, action, request_id = parts
     approved = action == "approve"
 
-    from src.tools import permission_gate
+    from tools import permission_gate
     permission_gate.resolve(request_id, approved)
 
     label = "✅ Approved" if approved else "❌ Denied"
@@ -215,7 +215,7 @@ async def start_polling(agent: Any, session_manager: Any) -> None:
     app.bot_data["session_manager"] = session_manager
 
     # Wire the permission gate so tools can send approval requests
-    from src.tools import permission_gate as _gate
+    from tools import permission_gate as _gate
     _gate.configure(
         bot=app.bot,
         event_loop=asyncio.get_event_loop(),

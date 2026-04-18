@@ -58,9 +58,9 @@ class ShellTools(Toolkit):
         Returns:
             Combined stdout + stderr output (truncated at 10 000 chars).
         """
-        from src.config import settings
-        from src.memory.daily_logger import DailyLogger
-        from src.tools import permission_gate
+        from config import settings
+        from memory.daily_logger import DailyLogger
+        from tools import permission_gate
 
         if not _is_read_only(command):
             approved = permission_gate.request_approval(
@@ -71,9 +71,13 @@ class ShellTools(Toolkit):
                 return f"Command denied by permission gate: {command}"
 
         try:
+            try:
+                cmd_args = shlex.split(command)
+            except ValueError as exc:
+                return f"Invalid command syntax: {exc}"
             result = subprocess.run(
-                command,
-                shell=True,
+                cmd_args,
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=_CMD_TIMEOUT,

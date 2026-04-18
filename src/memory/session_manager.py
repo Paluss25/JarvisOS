@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from src.memory.daily_logger import DailyLogger
+from memory.daily_logger import DailyLogger
 
 logger = logging.getLogger(__name__)
 

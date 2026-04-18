@@ -12,9 +12,9 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from platform.audit import audit, AuditEvent
-from platform.db import get_pool
-from platform.models import LoginRequest, RefreshRequest, TokenResponse, UserProfile
+from platform_api.audit import audit, AuditEvent
+from platform_api.db import get_pool
+from platform_api.models import LoginRequest, RefreshRequest, TokenResponse, UserProfile
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])

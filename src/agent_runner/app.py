@@ -179,7 +179,7 @@ def create_app(config: AgentConfig) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,   # credentials=True + origins=* is invalid per CORS spec
         allow_methods=["*"],
         allow_headers=["*"],
     )

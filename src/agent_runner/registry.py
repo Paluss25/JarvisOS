@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 import yaml
@@ -45,7 +46,7 @@ def list_agents(path: Path = _REGISTRY_PATH) -> list[dict[str, Any]]:
     return data.get("agents", [])
 
 
-async def subscribe_to_config_changes(on_change: callable | None = None) -> None:
+async def subscribe_to_config_changes(on_change: Callable | None = None) -> None:
     """Subscribe to platform:config_changed Redis channel.
 
     Logs whenever agents.yaml is updated. Calls on_change() if provided.

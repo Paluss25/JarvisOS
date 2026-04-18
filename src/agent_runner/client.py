@@ -22,9 +22,9 @@ from claude_agent_sdk import (
     ThinkingConfigAdaptive,
 )
 
-from src.agent_runner.config import AgentConfig
-from src.agent_runner.memory.daily_logger import DailyLogger
-from src.agent_runner.memory.pipeline.queue import PipelineItem, PipelineQueue
+from agent_runner.config import AgentConfig
+from agent_runner.memory.daily_logger import DailyLogger
+from agent_runner.memory.pipeline.queue import PipelineItem, PipelineQueue
 
 logger = logging.getLogger(__name__)
 
@@ -338,7 +338,7 @@ def create_agent_client(config: AgentConfig, redis_a2a=None) -> "BaseAgentClient
         redis_a2a: Optional RedisA2A instance — passed to the MCP server factory
                    so tools like send_message can be wired up at creation time.
     """
-    from src.agent_runner.memory.workspace_loader import load_workspace_context
+    from agent_runner.memory.workspace_loader import load_workspace_context
 
     workspace_path = config.workspace_path
     ctx = load_workspace_context(workspace_path)
@@ -356,8 +356,8 @@ def create_agent_client(config: AgentConfig, redis_a2a=None) -> "BaseAgentClient
     can_use_tool = None
     sdk_hooks: dict = {}
     try:
-        from src.agent_runner.hooks.permission_hook import build_can_use_tool
-        from src.agent_runner.hooks.sdk_hooks import build_all_hooks
+        from agent_runner.hooks.permission_hook import build_can_use_tool
+        from agent_runner.hooks.sdk_hooks import build_all_hooks
 
         can_use_tool = build_can_use_tool()
         sdk_hooks = build_all_hooks(workspace_path)

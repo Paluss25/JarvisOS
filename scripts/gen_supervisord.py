@@ -25,7 +25,7 @@ def main():
         conf = f"""[program:{agent_id}]
 command=python -m agents.{agent_id}.run
 directory=/app
-environment=AGENT_PORT={port}
+environment=AGENT_PORT={port},PYTHONPATH=/app/src
 autorestart=true
 stdout_logfile=/dev/stdout
 stdout_logfile_maxbytes=0

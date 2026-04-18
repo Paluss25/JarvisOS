@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
@@ -28,8 +28,8 @@ class AgentCreateRequest(BaseModel):
     workspace: str
     telegram_token_env: str = ""
     telegram_chat_id_env: str = ""
-    domains: list[str] = []
-    capabilities: list[str] = []
+    domains: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

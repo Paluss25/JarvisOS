@@ -107,7 +107,7 @@ def log_fallback_event(agent: str, from_model: str, to_model: str, error: str) -
     function can be called before the full app is initialized.
     """
     try:
-        from src.config import settings
+        from config import settings
         dl = DailyLogger(workspace_path=settings.workspace_path)
         dl.log_fallback_event(agent, from_model, to_model, error)
     except Exception as exc:

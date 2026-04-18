@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 
-from platform.auth import get_current_user
-from platform.db import get_pool
+from platform_api.auth import get_current_user
+from platform_api.db import get_pool
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/audit", tags=["audit"])

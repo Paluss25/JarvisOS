@@ -20,7 +20,7 @@ AGENT: {response}
 Extract every piece of information worth remembering. For each, return:
 - text: the memory in 1–2 sentences
 - type: one of {types}
-- scope: "agent" (private to this agent) or "domain:{name}" for shared domains
+- scope: "agent" (private to this agent) or "domain:{{name}}" for shared domains
 
 Return JSON array: [{{"text":"...","type":"...","scope":"..."}}]
 If nothing worth remembering, return [].
