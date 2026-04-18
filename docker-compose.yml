@@ -3,6 +3,8 @@
 # Deploy on: .139 (Docker-AI)
 # =============================================================================
 
+name: jarvios-platform
+
 services:
   jarvios:
     build:
