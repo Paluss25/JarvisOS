@@ -35,6 +35,11 @@ def _parse_args(args) -> dict:
     return args if isinstance(args, dict) else {}
 
 
+def _text(s: str) -> dict:
+    """Wrap a plain string as an MCP text content response."""
+    return {"content": [{"type": "text", "text": str(s)}]}
+
+
 try:
     from claude_agent_sdk import create_sdk_mcp_server, tool as sdk_tool
     _SDK_AVAILABLE = True
@@ -296,18 +301,18 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "Append a timestamped entry to today's Chief Of Sport memory log. Use this to record significant events, decisions, or information worth remembering.",
         {"message": str},
     )
-    async def daily_log(args: dict) -> str:
+    async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
         message = args.get("message", "")
         if not message:
-            return "No message provided."
+            return _text("No message provided.")
         try:
             from agent_runner.memory.daily_logger import DailyLogger
             DailyLogger(workspace_path).log(message)
-            return f"Logged: {message[:80]}"
+            return _text(f"Logged: {message[:80]}")
         except Exception as exc:
             logger.error("daily_log: failed — %s", exc)
-            return f"Failed to log: {exc}"
+            return _text(f"Failed to log: {exc}")
 
     @sdk_tool(
         "memory_search",
@@ -316,11 +321,11 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "Results include the matching lines with surrounding context, most recent files first.",
         {"query": str, "top_k": int},
     )
-    async def memory_search(args: dict) -> str:
+    async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
         query = args.get("query", "").strip()
         if not query:
-            return "No query provided."
+            return _text("No query provided.")
 
         top_k = int(args.get("top_k") or 5)
         query_lower = query.lower()
@@ -350,9 +355,9 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
                 break
 
         if not results:
-            return f"No results found for '{query}'."
+            return _text(f"No results found for '{query}'.")
 
-        return "\n\n---\n\n".join(results)
+        return _text("\n\n---\n\n".join(results))
 
     @sdk_tool(
         "memory_get",
@@ -361,23 +366,23 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "Optionally specify start_line and num_lines to read a slice.",
         {"path": str, "start_line": int, "num_lines": int},
     )
-    async def memory_get(args: dict) -> str:
+    async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
         rel_path = args.get("path", "").strip()
         if not rel_path:
-            return "No path provided."
+            return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
         if not str(target).startswith(str(workspace_path.resolve())):
-            return "Access denied: path is outside the workspace directory."
+            return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
-            return f"File not found: {rel_path}"
+            return _text(f"File not found: {rel_path}")
 
         try:
             content = target.read_text(encoding="utf-8")
         except OSError as exc:
-            return f"Error reading {rel_path}: {exc}"
+            return _text(f"Error reading {rel_path}: {exc}")
 
         start_line = args.get("start_line")
         num_lines = args.get("num_lines")
@@ -388,7 +393,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
             n = int(num_lines) if num_lines is not None else len(lines)
             content = "\n".join(lines[s: s + n])
 
-        return content
+        return _text(content)
 
     # --- Sport domain tools -------------------------------------------------
 
@@ -479,9 +484,9 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
             "'message' is the natural language request to send.",
             {"to": str, "message": str},
         )
-        async def send_message(args: dict) -> str:
+        async def send_message(args: dict) -> dict:
             args = _parse_args(args)
-            return await _send_message_fn(args)
+            return _text(await _send_message_fn(args))
     else:
         send_message = None  # Redis not configured
 
@@ -549,13 +554,13 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "telegram_notify: set to true to receive a Telegram message with the result.",
         {"name": str, "schedule": str, "prompt": str, "session_id": str, "telegram_notify": bool},
     )
-    async def cron_create(args: dict) -> str:
+    async def cron_create(args: dict) -> dict:
         args = _parse_args(args)
         name = args.get("name", "").strip()
         schedule = args.get("schedule", "").strip()
         prompt_text = args.get("prompt", "").strip()
         if not name or not schedule or not prompt_text:
-            return "name, schedule, and prompt are required."
+            return _text("name, schedule, and prompt are required.")
         try:
             from agent_runner.scheduler.cron_store import get_store
             store = get_store(workspace_path)
@@ -566,22 +571,22 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
                 session_id=args.get("session_id") or "",
                 telegram_notify=bool(args.get("telegram_notify", False)),
             )
-            return f"Created cron '{entry.name}' (id={entry.id}, schedule={entry.schedule})"
+            return _text(f"Created cron '{entry.name}' (id={entry.id}, schedule={entry.schedule})")
         except Exception as exc:
-            return f"Error: {exc}"
+            return _text(f"Error: {exc}")
 
     @sdk_tool(
         "cron_list",
         "List all scheduled tasks (built-in and user-created) with their current status.",
         {},
     )
-    async def cron_list(args: dict) -> str:
+    async def cron_list(args: dict) -> dict:
         try:
             from agent_runner.scheduler.cron_store import get_store
             store = get_store(workspace_path)
             entries = store.all()
             if not entries:
-                return "No scheduled tasks."
+                return _text("No scheduled tasks.")
             lines = []
             for e in entries:
                 status = e.last_status if e.last_run else "never run"
@@ -592,9 +597,9 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
                     f"  schedule={e.schedule}, {enabled}, last={status}\n"
                     f"  telegram_notify={e.telegram_notify}"
                 )
-            return "\n\n".join(lines)
+            return _text("\n\n".join(lines))
         except Exception as exc:
-            return f"Error: {exc}"
+            return _text(f"Error: {exc}")
 
     @sdk_tool(
         "cron_update",
@@ -603,21 +608,21 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         {"id": str, "name": str, "schedule": str, "prompt": str,
          "session_id": str, "telegram_notify": bool, "enabled": bool},
     )
-    async def cron_update(args: dict) -> str:
+    async def cron_update(args: dict) -> dict:
         args = _parse_args(args)
         cron_id = args.get("id", "").strip()
         if not cron_id:
-            return "id is required."
+            return _text("id is required.")
         updates = {k: v for k, v in args.items() if k != "id" and v is not None}
         if not updates:
-            return "No fields to update."
+            return _text("No fields to update.")
         try:
             from agent_runner.scheduler.cron_store import get_store
             store = get_store(workspace_path)
             entry = store.update(cron_id, **updates)
-            return f"Updated cron '{entry.name}' (id={entry.id})"
+            return _text(f"Updated cron '{entry.name}' (id={entry.id})")
         except Exception as exc:
-            return f"Error: {exc}"
+            return _text(f"Error: {exc}")
 
     @sdk_tool(
         "cron_delete",
@@ -625,18 +630,18 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "Built-in tasks cannot be deleted — use cron_update with enabled=false to disable them.",
         {"id": str},
     )
-    async def cron_delete(args: dict) -> str:
+    async def cron_delete(args: dict) -> dict:
         args = _parse_args(args)
         cron_id = args.get("id", "").strip()
         if not cron_id:
-            return "id is required."
+            return _text("id is required.")
         try:
             from agent_runner.scheduler.cron_store import get_store
             store = get_store(workspace_path)
             store.delete(cron_id)
-            return f"Deleted cron id={cron_id}"
+            return _text(f"Deleted cron id={cron_id}")
         except Exception as exc:
-            return f"Error: {exc}"
+            return _text(f"Error: {exc}")
 
     all_tools = [
         daily_log, memory_search, memory_get,
