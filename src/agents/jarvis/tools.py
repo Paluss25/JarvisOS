@@ -354,7 +354,7 @@ def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
         "A docker rebuild + redeploy is required after scaffolding to activate the new agent. "
         "Use dry_run=true to preview what would be created without writing anything. "
         "Env overrides: PLATFORM_SSH_HOST (default paluss@10.10.200.139), "
-        "PLATFORM_REPO_PATH (default /home/paluss/docker/compose/jarvisOS/.worktrees/jarvios-platform).",
+        "PLATFORM_REPO_PATH (default /home/paluss/docker/compose/jarvisOS).",
         {"id": str, "port": int, "name": str, "env_prefix": str, "dry_run": bool},
     )
     async def scaffold_agent(args: dict) -> dict:
@@ -382,7 +382,7 @@ def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
         host_ssh = os.environ.get("PLATFORM_SSH_HOST", "paluss@10.10.200.139")
         repo_path = os.environ.get(
             "PLATFORM_REPO_PATH",
-            "/home/paluss/docker/compose/jarvisOS/.worktrees/jarvios-platform",
+            "/home/paluss/docker/compose/jarvisOS",
         )
         script = f"{repo_path}/scripts/new_agent.py"
 
