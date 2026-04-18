@@ -35,6 +35,23 @@ stderr_logfile_maxbytes=0
         (OUTPUT_DIR / f"{agent_id}.conf").write_text(conf)
         print(f"Generated config for agent '{agent_id}' on port {port}")
 
+    for worker in data.get("workers", []):
+        worker_id = worker["id"]
+        port = worker["port"]
+        module = worker["module"]
+        conf = f"""[program:worker-{worker_id}]
+command=uvicorn {module}:app --host 0.0.0.0 --port {port} --log-level info
+directory=/app
+environment=PYTHONPATH=/app/src
+autorestart=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+"""
+        (OUTPUT_DIR / f"worker-{worker_id}.conf").write_text(conf)
+        print(f"Generated config for worker '{worker_id}' on port {port}")
+
 
 if __name__ == "__main__":
     main()

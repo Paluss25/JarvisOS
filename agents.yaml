@@ -47,3 +47,19 @@ agents:
     capabilities: [budget-analysis, crypto-portfolio, cost-analysis, trading-analysis, fiscal-compliance]
     memory:
       backend: filesystem
+
+workers:
+  - id: finance
+    port: 8010
+    module: workers.finance.app
+    description: "YNAB, BTC fiscal, transaction categorization, reconciliation"
+
+  - id: cost
+    port: 8011
+    module: workers.cost.app
+    description: "LLM costs, power, YNAB budget control, ROI analysis"
+
+  - id: market
+    port: 8012
+    module: workers.market.app
+    description: "Polymarket positions, strategy, trade journal, Kelly sizing"
