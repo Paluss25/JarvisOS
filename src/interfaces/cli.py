@@ -69,8 +69,8 @@ def _handle_command(cmd: str, agent, session_id: str, start_time: float, console
         )
 
     elif cmd == "/memory":
-        from src.config import settings
-        from src.memory.daily_logger import DailyLogger
+        from config import settings
+        from memory.daily_logger import DailyLogger
         content = DailyLogger(settings.workspace_path).read_today()
         if content:
             console.print(Markdown(f"```\n{content}\n```"))
@@ -94,7 +94,7 @@ def run(session_id: str | None = None) -> None:
     from rich.console import Console
     from rich.markdown import Markdown
 
-    from src.agent import create_jarvis_agent, create_session_manager
+    from agent import create_jarvis_agent, create_session_manager
 
     console = Console()
     console.print(_BANNER)

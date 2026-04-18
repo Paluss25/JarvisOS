@@ -24,8 +24,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from src.config import settings
-from src.memory.daily_logger import DailyLogger
+from config import settings
+from memory.daily_logger import DailyLogger
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     logger.info("JarvisOS: starting up…")
 
     try:
-        from src.agent import create_jarvis_agent, create_session_manager
+        from agent import create_jarvis_agent, create_session_manager
         _agent = create_jarvis_agent()
         _session_manager = create_session_manager()
         logger.info("JarvisOS: agent ready — model chain: %s", _model_chain_str(_agent))
@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Start Telegram polling if token is configured
     if settings.TELEGRAM_JARVIS_TOKEN:
         try:
-            from src.interfaces.telegram_bot import start_polling
+            from interfaces.telegram_bot import start_polling
             _telegram_task = asyncio.create_task(start_polling(_agent, _session_manager))
             logger.info("JarvisOS: Telegram polling started")
         except Exception as exc:
@@ -90,7 +90,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Start heartbeat scheduler if agent is available
     if _agent:
         try:
-            from src.scheduler.heartbeat import HeartbeatScheduler
+            from scheduler.heartbeat import HeartbeatScheduler
             scheduler = HeartbeatScheduler(agent=_agent)
             _scheduler_task = asyncio.create_task(scheduler.start())
             logger.info("JarvisOS: heartbeat scheduler started")

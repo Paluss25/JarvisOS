@@ -17,8 +17,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from src.config import settings
-from src.memory.daily_logger import DailyLogger
+from config import settings
+from memory.daily_logger import DailyLogger
 
 logger = logging.getLogger(__name__)
 
@@ -175,12 +175,11 @@ class HeartbeatScheduler:
     # -----------------------------------------------------------------------
 
     async def _run_agent(self, prompt: str, session_id: str) -> str:
-        """Invoke agent.run() in a thread pool and return the response text."""
-        response = await asyncio.to_thread(
-            self._agent.run,
-            prompt,
-            session_id=session_id,
-        )
+        """Invoke agent.query() and return the response text."""
+        if hasattr(self._agent, "query"):
+            return await self._agent.query(prompt, session_id=session_id)
+        # Legacy agno-style agent fallback
+        response = await asyncio.to_thread(self._agent.run, prompt, session_id=session_id)
         return response.content if hasattr(response, "content") else str(response)
 
 

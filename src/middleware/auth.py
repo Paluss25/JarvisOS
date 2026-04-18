@@ -3,7 +3,7 @@
 If TELEGRAM_ALLOWED_CHAT_ID is empty, all messages are denied (safe default).
 """
 
-from src.config import settings
+from config import settings
 
 
 def is_authorized(chat_id: int) -> bool:

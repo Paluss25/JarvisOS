@@ -25,8 +25,8 @@ class CodeExecutorTools(Toolkit):
 
     def _log(self, msg: str) -> None:
         try:
-            from src.config import settings
-            from src.memory.daily_logger import DailyLogger
+            from config import settings
+            from memory.daily_logger import DailyLogger
             DailyLogger(settings.workspace_path).log(msg)
         except Exception:
             pass
@@ -61,7 +61,7 @@ class CodeExecutorTools(Toolkit):
         Returns:
             Combined stdout + stderr output (truncated at 10 000 chars).
         """
-        from src.tools import permission_gate
+        from tools import permission_gate
 
         preview = code[:400] + ("…" if len(code) > 400 else "")
         approved = permission_gate.request_approval(
@@ -97,7 +97,7 @@ class CodeExecutorTools(Toolkit):
         Returns:
             Combined stdout + stderr output (truncated at 10 000 chars).
         """
-        from src.tools import permission_gate
+        from tools import permission_gate
 
         preview = script[:400] + ("…" if len(script) > 400 else "")
         approved = permission_gate.request_approval(

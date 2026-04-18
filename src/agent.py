@@ -13,12 +13,12 @@ from functools import lru_cache
 from agno.agent import Agent
 from agno.db.postgres import PostgresDb
 
-from src.config import settings
-from src.memory.daily_logger import DailyLogger
-from src.memory.memory_api_client import MemoryAPIClient
-from src.memory.session_manager import SessionManager
-from src.memory.workspace_loader import load_workspace_context
-from src.models.factory import build_agent_model_native
+from config import settings
+from memory.daily_logger import DailyLogger
+from memory.memory_api_client import MemoryAPIClient
+from memory.session_manager import SessionManager
+from memory.workspace_loader import load_workspace_context
+from models.factory import build_agent_model_native
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +81,10 @@ def create_jarvis_agent() -> Agent:
     daily_logger.log("[AGENT INIT] model chain ready")
 
     # --- Tool suite ----------------------------------------------------------
-    from src.tools.code_executor import CodeExecutorTools
-    from src.tools.file_tools import WorkspaceFileTools
-    from src.tools.perplexity_search import PerplexitySearchTools
-    from src.tools.shell_tools import ShellTools
+    from tools.code_executor import CodeExecutorTools
+    from tools.file_tools import WorkspaceFileTools
+    from tools.perplexity_search import PerplexitySearchTools
+    from tools.shell_tools import ShellTools
 
     tools = [
         PerplexitySearchTools(),
