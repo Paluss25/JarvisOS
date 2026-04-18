@@ -5,17 +5,28 @@ Tools:
   memory_search      — Text search across MEMORY.md + memory/*.md
   memory_get         — Read a specific memory file from workspace
   infra_check        — HTTP health check on internal service URLs
+  docker_query       — List/inspect Docker containers/networks via socket proxy
+  tcp_check          — TCP port connectivity checks (pure-Python, no dig needed)
+  dns_lookup         — DNS resolution for hostnames
+  pg_query           — Read-only SELECT queries against any named database
   send_message       — Send a message to another agent via Redis pub/sub
   cron_create/list/update/delete — Scheduled task management
 """
 
+import asyncio
 import json
 import logging
+import os
+import socket as _socket
 from pathlib import Path
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _parse_args(args) -> dict:
@@ -27,6 +38,15 @@ def _parse_args(args) -> dict:
         except (json.JSONDecodeError, ValueError):
             return {}
     return args if isinstance(args, dict) else {}
+
+
+def _text(s: str) -> dict:
+    """Wrap a plain string as an MCP text content response.
+
+    The SDK's call_tool handler calls result.get("is_error") unconditionally,
+    so every tool MUST return a dict — never a bare string.
+    """
+    return {"content": [{"type": "text", "text": str(s)}]}
 
 
 try:
@@ -55,18 +75,18 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Use this to record infrastructure changes, incidents, decisions, findings, and resolved issues.",
         {"message": str},
     )
-    async def daily_log(args: dict) -> str:
+    async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
         message = args.get("message", "")
         if not message:
-            return "No message provided."
+            return _text("No message provided.")
         try:
             from agent_runner.memory.daily_logger import DailyLogger
             DailyLogger(workspace_path).log(message)
-            return f"Logged: {message[:80]}"
+            return _text(f"Logged: {message[:80]}")
         except Exception as exc:
             logger.error("daily_log: failed — %s", exc)
-            return f"Failed to log: {exc}"
+            return _text(f"Failed to log: {exc}")
 
     @sdk_tool(
         "memory_search",
@@ -75,11 +95,11 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Results include the matching lines with surrounding context, most recent files first.",
         {"query": str, "top_k": int},
     )
-    async def memory_search(args: dict) -> str:
+    async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
         query = args.get("query", "").strip()
         if not query:
-            return "No query provided."
+            return _text("No query provided.")
 
         top_k = int(args.get("top_k") or 5)
         query_lower = query.lower()
@@ -109,9 +129,9 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
                 break
 
         if not results:
-            return f"No results found for '{query}'."
+            return _text(f"No results found for '{query}'.")
 
-        return "\n\n---\n\n".join(results)
+        return _text("\n\n---\n\n".join(results))
 
     @sdk_tool(
         "memory_get",
@@ -120,23 +140,23 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Optionally specify start_line and num_lines to read a slice.",
         {"path": str, "start_line": int, "num_lines": int},
     )
-    async def memory_get(args: dict) -> str:
+    async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
         rel_path = args.get("path", "").strip()
         if not rel_path:
-            return "No path provided."
+            return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
         if not str(target).startswith(str(workspace_path.resolve())):
-            return "Access denied: path is outside the workspace directory."
+            return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
-            return f"File not found: {rel_path}"
+            return _text(f"File not found: {rel_path}")
 
         try:
             content = target.read_text(encoding="utf-8")
         except OSError as exc:
-            return f"Error reading {rel_path}: {exc}"
+            return _text(f"Error reading {rel_path}: {exc}")
 
         start_line = args.get("start_line")
         num_lines = args.get("num_lines")
@@ -147,7 +167,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             n = int(num_lines) if num_lines is not None else len(lines)
             content = "\n".join(lines[s: s + n])
 
-        return content
+        return _text(content)
 
     # --- CIO domain tools ---------------------------------------------------
 
@@ -160,11 +180,11 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "timeout: per-request timeout in seconds (default 5).",
         {"urls": str, "timeout": int},
     )
-    async def infra_check(args: dict) -> str:
+    async def infra_check(args: dict) -> dict:
         args = _parse_args(args)
         urls_raw = args.get("urls", "").strip()
         if not urls_raw:
-            return "No URLs provided."
+            return _text("No URLs provided.")
         timeout = max(1, int(args.get("timeout") or 5))
 
         url_list = [u.strip() for u in urls_raw.split(",") if u.strip()]
@@ -183,7 +203,247 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
                 except Exception as exc:
                     results.append(f"{url}: ERROR — {exc}")
 
-        return "\n".join(results)
+        return _text("\n".join(results))
+
+    @sdk_tool(
+        "docker_query",
+        "Query Docker via the socket proxy for infrastructure visibility. "
+        "resource: 'containers' (list all with state/status), "
+        "'networks' (list Docker networks), "
+        "'logs' (tail container logs — requires name), "
+        "'inspect' (full container detail — requires name), "
+        "'version' (Docker engine version). "
+        "name: container name or id (required for logs/inspect). "
+        "lines: number of log lines to tail (default 30, max 200). "
+        "filter: optional substring to filter container names.",
+        {"resource": str, "name": str, "lines": int, "filter": str},
+    )
+    async def docker_query(args: dict) -> dict:
+        args = _parse_args(args)
+        resource = (args.get("resource") or "containers").strip().lower()
+        name = (args.get("name") or "").strip()
+        lines = min(200, max(1, int(args.get("lines") or 30)))
+        name_filter = (args.get("filter") or "").strip().lower()
+
+        proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                if resource == "version":
+                    resp = await client.get(f"{proxy}/version")
+                    data = resp.json()
+                    return _text(
+                        f"Docker {data.get('Version','?')} "
+                        f"(API {data.get('ApiVersion','?')}, "
+                        f"OS {data.get('Os','?')}/{data.get('Arch','?')})"
+                    )
+
+                elif resource == "containers":
+                    resp = await client.get(f"{proxy}/containers/json?all=1")
+                    containers = resp.json()
+                    out = []
+                    for c in containers:
+                        cname = c.get("Names", ["/??"])[0].lstrip("/")
+                        if name_filter and name_filter not in cname.lower():
+                            continue
+                        state = c.get("State", "?")
+                        status = c.get("Status", "?")
+                        image = c.get("Image", "?").split("/")[-1]
+                        out.append(f"{cname:<40} {state:<12} {status:<30} {image}")
+                    if not out:
+                        return _text("No containers found" + (f" matching '{name_filter}'" if name_filter else ""))
+                    header = f"{'NAME':<40} {'STATE':<12} {'STATUS':<30} {'IMAGE'}"
+                    return _text(header + "\n" + "\n".join(out))
+
+                elif resource == "networks":
+                    resp = await client.get(f"{proxy}/networks")
+                    nets = resp.json()
+                    out = []
+                    for n in nets:
+                        nname = n.get("Name", "?")
+                        driver = n.get("Driver", "?")
+                        scope = n.get("Scope", "?")
+                        containers_count = len(n.get("Containers") or {})
+                        out.append(f"{nname:<40} {driver:<12} {scope:<10} {containers_count} containers")
+                    return _text("\n".join(out) if out else "No networks found")
+
+                elif resource == "logs":
+                    if not name:
+                        return _text("name is required for logs (e.g. name='jarvios-redis')")
+                    resp = await client.get(
+                        f"{proxy}/containers/{name}/logs",
+                        params={"stdout": "1", "stderr": "1", "tail": str(lines)},
+                    )
+                    # Docker log stream has 8-byte frame headers — strip them
+                    raw = resp.content
+                    text_lines = []
+                    i = 0
+                    while i < len(raw):
+                        if i + 8 > len(raw):
+                            break
+                        frame_size = int.from_bytes(raw[i + 4:i + 8], "big")
+                        i += 8
+                        if frame_size > 0 and i + frame_size <= len(raw):
+                            text_lines.append(raw[i:i + frame_size].decode("utf-8", errors="replace").rstrip())
+                        i += frame_size
+                    if not text_lines:
+                        # Fallback: treat entire response as plain text
+                        text_lines = resp.text.splitlines()
+                    return _text("\n".join(text_lines[-lines:]) if text_lines else "(no logs)")
+
+                elif resource == "inspect":
+                    if not name:
+                        return _text("name is required for inspect (e.g. name='jarvios-platform')")
+                    resp = await client.get(f"{proxy}/containers/{name}/json")
+                    if resp.status_code == 404:
+                        return _text(f"Container '{name}' not found")
+                    data = resp.json()
+                    # Return key fields only to avoid huge output
+                    summary = {
+                        "Name": data.get("Name", "?").lstrip("/"),
+                        "State": data.get("State", {}),
+                        "NetworkSettings": {
+                            k: v.get("IPAddress")
+                            for k, v in (data.get("NetworkSettings", {}).get("Networks") or {}).items()
+                        },
+                        "RestartCount": data.get("RestartCount", 0),
+                        "Mounts": [m.get("Source") for m in (data.get("Mounts") or [])],
+                    }
+                    return _text(json.dumps(summary, indent=2))
+
+                else:
+                    return _text(f"Unknown resource '{resource}'. Use: containers, networks, logs, inspect, version")
+
+        except httpx.ConnectError:
+            return _text(f"Cannot reach Docker socket proxy at {proxy}. Is the socket_proxy network up?")
+        except Exception as exc:
+            logger.error("docker_query: error — %s", exc)
+            return _text(f"Docker query error: {exc}")
+
+    @sdk_tool(
+        "tcp_check",
+        "Check TCP connectivity to one or more host:port targets. "
+        "No system tools needed — uses pure-Python asyncio. "
+        "targets: comma-separated list of host:port (e.g. 'postgres-shared:5432,10.10.200.50:443'). "
+        "timeout: per-target timeout in seconds (default 3).",
+        {"targets": str, "timeout": int},
+    )
+    async def tcp_check(args: dict) -> dict:
+        args = _parse_args(args)
+        targets_raw = (args.get("targets") or "").strip()
+        if not targets_raw:
+            return _text("No targets provided. Use host:port format (comma-separated).")
+        timeout = max(1, int(args.get("timeout") or 3))
+
+        results = []
+        for target in [t.strip() for t in targets_raw.split(",") if t.strip()]:
+            if ":" not in target:
+                results.append(f"{target}: ERROR — use host:port format")
+                continue
+            host, port_str = target.rsplit(":", 1)
+            try:
+                port = int(port_str)
+            except ValueError:
+                results.append(f"{target}: ERROR — invalid port '{port_str}'")
+                continue
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port), timeout=timeout
+                )
+                writer.close()
+                await writer.wait_closed()
+                results.append(f"{target}: OPEN")
+            except asyncio.TimeoutError:
+                results.append(f"{target}: TIMEOUT (>{timeout}s)")
+            except ConnectionRefusedError:
+                results.append(f"{target}: REFUSED")
+            except OSError as exc:
+                results.append(f"{target}: {exc}")
+
+        return _text("\n".join(results))
+
+    @sdk_tool(
+        "dns_lookup",
+        "Resolve hostnames to IP addresses using the container's DNS resolver. "
+        "No dig/nslookup needed — uses Python socket. "
+        "hosts: comma-separated list of hostnames (e.g. 'postgres-shared,socket-proxy,traefik.prova9x.com').",
+        {"hosts": str},
+    )
+    async def dns_lookup(args: dict) -> dict:
+        args = _parse_args(args)
+        hosts_raw = (args.get("hosts") or "").strip()
+        if not hosts_raw:
+            return _text("No hosts provided.")
+
+        results = []
+        for host in [h.strip() for h in hosts_raw.split(",") if h.strip()]:
+            try:
+                # Run blocking getaddrinfo in thread pool to avoid blocking event loop
+                loop = asyncio.get_event_loop()
+                addrs_raw = await loop.run_in_executor(
+                    None, lambda h=host: _socket.getaddrinfo(h, None, _socket.AF_UNSPEC)
+                )
+                ips = sorted({a[4][0] for a in addrs_raw})
+                results.append(f"{host}: {', '.join(ips)}")
+            except _socket.gaierror as exc:
+                results.append(f"{host}: NXDOMAIN ({exc})")
+            except Exception as exc:
+                results.append(f"{host}: ERROR — {exc}")
+
+        return _text("\n".join(results))
+
+    @sdk_tool(
+        "pg_query",
+        "Run a read-only SELECT query against a named PostgreSQL database. "
+        "db: one of 'sport_metrics', 'gestionale', 'cedolino', 'jarvios'. "
+        "sql: a SELECT statement. "
+        "params: optional list of query parameters (for $1/$2 placeholders). "
+        "Returns rows as JSON. Use this to check DB health, counts, or diagnose data issues.",
+        {"db": str, "sql": str, "params": list},
+    )
+    async def pg_query(args: dict) -> dict:
+        args = _parse_args(args)
+        db = (args.get("db") or "").strip().lower()
+        sql = (args.get("sql") or "").strip()
+        params = args.get("params") or []
+
+        DB_URLS = {
+            "sport_metrics": os.environ.get("SPORT_POSTGRES_URL", ""),
+            "gestionale": os.environ.get("GESTIONALE_POSTGRES_URL", ""),
+            "cedolino": os.environ.get("CEDOLINO_POSTGRES_URL", ""),
+            "jarvios": os.environ.get("JARVIOS_POSTGRES_URL", ""),
+        }
+
+        if not db:
+            configured = [k for k, v in DB_URLS.items() if v]
+            return _text(f"db is required. Available: {', '.join(DB_URLS.keys())} (configured: {', '.join(configured) or 'none'})")
+
+        if db not in DB_URLS:
+            return _text(f"Unknown database '{db}'. Available: {', '.join(DB_URLS.keys())}")
+
+        url = DB_URLS[db]
+        if not url:
+            return _text(f"Database '{db}' URL not configured (env var missing).")
+
+        if not sql:
+            return _text("sql is required.")
+
+        first_word = sql.split()[0].upper() if sql.split() else ""
+        if first_word != "SELECT":
+            return _text("Only SELECT statements are allowed via pg_query.")
+
+        try:
+            import asyncpg
+            conn = await asyncpg.connect(url)
+            try:
+                rows = await conn.fetch(sql, *params)
+                data = [dict(r) for r in rows]
+                return _text(json.dumps(data, default=str, indent=2))
+            finally:
+                await conn.close()
+        except Exception as exc:
+            logger.error("pg_query[%s]: error — %s", db, exc)
+            return _text(f"Query error: {exc}")
 
     # --- A2A send_message (Redis pub/sub) -----------------------------------
 
@@ -199,9 +459,9 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             "Use this for cross-domain escalation, executive decisions, or business context.",
             {"to": str, "message": str},
         )
-        async def send_message(args: dict) -> str:
+        async def send_message(args: dict) -> dict:
             args = _parse_args(args)
-            return await _send_message_fn(args)
+            return _text(await _send_message_fn(args))
     else:
         send_message = None  # Redis not configured
 
@@ -215,13 +475,13 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "telegram_notify: set to true to receive a Telegram message with the result.",
         {"name": str, "schedule": str, "prompt": str, "session_id": str, "telegram_notify": bool},
     )
-    async def cron_create(args: dict) -> str:
+    async def cron_create(args: dict) -> dict:
         args = _parse_args(args)
         name = args.get("name", "").strip()
         schedule = args.get("schedule", "").strip()
         prompt_text = args.get("prompt", "").strip()
         if not name or not schedule or not prompt_text:
-            return "name, schedule, and prompt are required."
+            return _text("name, schedule, and prompt are required.")
         try:
             from agent_runner.scheduler.cron_store import get_store
             store = get_store(workspace_path)
@@ -232,22 +492,22 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
                 session_id=args.get("session_id") or "",
                 telegram_notify=bool(args.get("telegram_notify", False)),
             )
-            return f"Created cron '{entry.name}' (id={entry.id}, schedule={entry.schedule})"
+            return _text(f"Created cron '{entry.name}' (id={entry.id}, schedule={entry.schedule})")
         except Exception as exc:
-            return f"Error: {exc}"
+            return _text(f"Error: {exc}")
 
     @sdk_tool(
         "cron_list",
         "List all scheduled tasks (built-in and user-created) with their current status.",
         {},
     )
-    async def cron_list(args: dict) -> str:
+    async def cron_list(args: dict) -> dict:
         try:
             from agent_runner.scheduler.cron_store import get_store
             store = get_store(workspace_path)
             entries = store.all()
             if not entries:
-                return "No scheduled tasks."
+                return _text("No scheduled tasks.")
             lines = []
             for e in entries:
                 status = e.last_status if e.last_run else "never run"
@@ -258,9 +518,9 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
                     f"  schedule={e.schedule}, {enabled}, last={status}\n"
                     f"  telegram_notify={e.telegram_notify}"
                 )
-            return "\n\n".join(lines)
+            return _text("\n\n".join(lines))
         except Exception as exc:
-            return f"Error: {exc}"
+            return _text(f"Error: {exc}")
 
     @sdk_tool(
         "cron_update",
@@ -269,21 +529,21 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         {"id": str, "name": str, "schedule": str, "prompt": str,
          "session_id": str, "telegram_notify": bool, "enabled": bool},
     )
-    async def cron_update(args: dict) -> str:
+    async def cron_update(args: dict) -> dict:
         args = _parse_args(args)
         cron_id = args.get("id", "").strip()
         if not cron_id:
-            return "id is required."
+            return _text("id is required.")
         updates = {k: v for k, v in args.items() if k != "id" and v is not None}
         if not updates:
-            return "No fields to update."
+            return _text("No fields to update.")
         try:
             from agent_runner.scheduler.cron_store import get_store
             store = get_store(workspace_path)
             entry = store.update(cron_id, **updates)
-            return f"Updated cron '{entry.name}' (id={entry.id})"
+            return _text(f"Updated cron '{entry.name}' (id={entry.id})")
         except Exception as exc:
-            return f"Error: {exc}"
+            return _text(f"Error: {exc}")
 
     @sdk_tool(
         "cron_delete",
@@ -291,24 +551,25 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Built-in tasks cannot be deleted — use cron_update with enabled=false to disable them.",
         {"id": str},
     )
-    async def cron_delete(args: dict) -> str:
+    async def cron_delete(args: dict) -> dict:
         args = _parse_args(args)
         cron_id = args.get("id", "").strip()
         if not cron_id:
-            return "id is required."
+            return _text("id is required.")
         try:
             from agent_runner.scheduler.cron_store import get_store
             store = get_store(workspace_path)
             store.delete(cron_id)
-            return f"Deleted cron id={cron_id}"
+            return _text(f"Deleted cron id={cron_id}")
         except Exception as exc:
-            return f"Error: {exc}"
+            return _text(f"Error: {exc}")
 
     # --- Build server -------------------------------------------------------
 
     all_tools = [
         daily_log, memory_search, memory_get,
         infra_check,
+        docker_query, tcp_check, dns_lookup, pg_query,
         cron_create, cron_list, cron_update, cron_delete,
     ]
     if send_message is not None:
