@@ -159,8 +159,8 @@ def build_can_use_tool():
 
         # container_file_patch: always requires approval (no safe-command list)
         # Bash: auto-allow read-only prefixes
+        command = input_data.get("command", "")
         if tool_name == "Bash":
-            command = input_data.get("command", "")
             if _is_safe(command):
                 return PermissionResultAllow()
 
