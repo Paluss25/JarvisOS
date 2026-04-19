@@ -459,9 +459,6 @@ async def _create_placeholder(message) -> Any:
     return None
 
 
-_STATUS_TASK_MAX_DURATION = 600  # hard cap; prevents zombie tasks if handler stalls
-
-
 async def _typing_keepalive_task(bot, chat_id: int, state: dict) -> None:
     """Keep the Telegram 'typing...' header indicator alive while the agent is processing.
 
@@ -554,22 +551,15 @@ async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     placeholder = await _create_placeholder(update.message)
 
-    state: dict = {"text": "", "done": False, "subagent": None}
+    state: dict = {"text": "", "done": False}
     status_task = (
         asyncio.create_task(_run_status_task(context.bot, chat_id, placeholder, state))
         if placeholder is not None
         else None
     )
 
-    def _on_event(msg):
-        from claude_agent_sdk import TaskStartedMessage, TaskNotificationMessage
-        if isinstance(msg, TaskStartedMessage):
-            state["subagent"] = f"subagent: {msg.description[:50]}…"
-        elif isinstance(msg, TaskNotificationMessage):
-            state["subagent"] = None
-
     try:
-        async for chunk in agent.stream_image(image_bytes, caption, session_id=session_id, on_event=_on_event):
+        async for chunk in agent.stream_image(image_bytes, caption, session_id=session_id):
             state["text"] += chunk
 
         content = state["text"] or "(no response)"
@@ -676,22 +666,15 @@ async def _stream_to_agent(
 
     placeholder = await _create_placeholder(update.message)
 
-    state: dict = {"text": "", "done": False, "subagent": None}
+    state: dict = {"text": "", "done": False}
     status_task = (
         asyncio.create_task(_run_status_task(context.bot, chat_id, placeholder, state))
         if placeholder is not None
         else None
     )
 
-    def _on_event(msg):
-        from claude_agent_sdk import TaskStartedMessage, TaskNotificationMessage
-        if isinstance(msg, TaskStartedMessage):
-            state["subagent"] = f"subagent: {msg.description[:50]}…"
-        elif isinstance(msg, TaskNotificationMessage):
-            state["subagent"] = None
-
     try:
-        async for chunk in agent.stream(text, session_id=session_id, on_event=_on_event):
+        async for chunk in agent.stream(text, session_id=session_id):
             state["text"] += chunk
 
         content = state["text"] or "(no response)"
