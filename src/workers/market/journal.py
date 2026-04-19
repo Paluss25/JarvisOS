@@ -30,16 +30,16 @@ class TaskEnvelope(BaseModel):
     scope: dict = {}
 
 
-def _period_start(period: str) -> str | None:
+def _period_start(period: str) -> date | None:
     today = date.today()
     if period == "day":
-        return (today - timedelta(days=1)).isoformat()
+        return today - timedelta(days=1)
     elif period == "week":
-        return (today - timedelta(weeks=1)).isoformat()
+        return today - timedelta(weeks=1)
     elif period == "month":
-        return today.replace(day=1).isoformat()
+        return today.replace(day=1)
     elif period == "year":
-        return today.replace(month=1, day=1).isoformat()
+        return today.replace(month=1, day=1)
     return None  # "all"
 
 
