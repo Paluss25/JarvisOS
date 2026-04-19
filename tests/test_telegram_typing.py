@@ -7,27 +7,29 @@ import os
 # Add src/ to path so agent_runner module can be imported
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-# Mock claude_agent_sdk before importing anything from agent_runner
-if "claude_agent_sdk" not in sys.modules:
-    _sdk = MagicMock()
-    _sdk.HookMatcher = MagicMock
-    _sdk.PermissionResultAllow = MagicMock
-    _sdk.PermissionResultDeny = MagicMock
-    sys.modules["claude_agent_sdk"] = _sdk
-
 import pytest
-
-# patch permission_hook so _run_status_task can import it
-_ph_mock = MagicMock()
-_ph_mock.get_active_tool = MagicMock(return_value="")
-sys.modules["agent_runner.hooks.permission_hook"] = _ph_mock
-sys.modules["agent_runner.hooks"] = MagicMock(permission_hook=_ph_mock)
 
 from agent_runner.interfaces.telegram_bot import (
     _typing_keepalive_task,
     _run_status_task,
     _TYPING_RENEW_INTERVAL,
 )
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def ph_mock():
+    """Fresh permission_hook mock for each test."""
+    mock = MagicMock()
+    mock.get_active_tool = MagicMock(return_value="")
+    with patch.dict(sys.modules, {
+        "agent_runner.hooks.permission_hook": mock,
+        "agent_runner.hooks": MagicMock(permission_hook=mock),
+    }):
+        yield mock
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +97,7 @@ async def test_keepalive_cancellable():
     task = asyncio.create_task(_typing_keepalive_task(bot, chat_id=123, state=state))
     await asyncio.sleep(0)  # let task start
     task.cancel()
-    await asyncio.gather(task, return_exceptions=True)
+    await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=1.0)
     # No assertion — just verify no hang/error
 
 
@@ -104,7 +106,7 @@ async def test_keepalive_cancellable():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_status_task_edits_placeholder():
+async def test_status_task_edits_placeholder(ph_mock):
     """Status task must call placeholder.edit_text at least once."""
     bot = MagicMock()
     bot.send_chat_action = AsyncMock()
@@ -116,17 +118,16 @@ async def test_status_task_edits_placeholder():
 
     placeholder.edit_text = AsyncMock(side_effect=_stop_after_first_edit)
 
-    with patch.dict(sys.modules, {"agent_runner.hooks.permission_hook": _ph_mock}):
-        await _run_status_task(bot, chat_id=123, placeholder=placeholder, state=state)
+    await _run_status_task(bot, chat_id=123, placeholder=placeholder, state=state)
 
     placeholder.edit_text.assert_awaited_once()
     # Must not contain the cursor when text is empty
     call_args = placeholder.edit_text.call_args[0][0]
-    assert "thinking" in call_args
+    assert " ▌" not in call_args  # cursor must not appear when text is empty
 
 
 @pytest.mark.asyncio
-async def test_status_task_shows_cursor_during_streaming():
+async def test_status_task_shows_cursor_during_streaming(ph_mock):
     """Status task must append ' ▌' to partial text when no active tool."""
     bot = MagicMock()
     placeholder = MagicMock()
@@ -137,32 +138,30 @@ async def test_status_task_shows_cursor_during_streaming():
 
     placeholder.edit_text = AsyncMock(side_effect=_stop_after_first_edit)
 
-    with patch.dict(sys.modules, {"agent_runner.hooks.permission_hook": _ph_mock}):
-        await _run_status_task(bot, chat_id=123, placeholder=placeholder, state=state)
+    await _run_status_task(bot, chat_id=123, placeholder=placeholder, state=state)
 
     call_args = placeholder.edit_text.call_args[0][0]
     assert call_args.endswith(" ▌")
 
 
 @pytest.mark.asyncio
-async def test_status_task_exits_when_done_is_set():
+async def test_status_task_exits_when_done_is_set(ph_mock):
     """Status task must exit immediately when state["done"] is already True."""
     bot = MagicMock()
     placeholder = MagicMock()
     placeholder.edit_text = AsyncMock()
     state = {"text": "", "done": True}
 
-    with patch.dict(sys.modules, {"agent_runner.hooks.permission_hook": _ph_mock}):
-        await asyncio.wait_for(
-            _run_status_task(bot, chat_id=123, placeholder=placeholder, state=state),
-            timeout=1.0,
-        )
+    await asyncio.wait_for(
+        _run_status_task(bot, chat_id=123, placeholder=placeholder, state=state),
+        timeout=1.0,
+    )
 
     placeholder.edit_text.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_status_task_survives_edit_error():
+async def test_status_task_survives_edit_error(ph_mock):
     """Status task must not crash when edit_text raises."""
     bot = MagicMock()
     placeholder = MagicMock()
@@ -178,10 +177,9 @@ async def test_status_task_survives_edit_error():
     placeholder.edit_text = AsyncMock(side_effect=_fail_then_stop)
     state = {"text": "", "done": False}
 
-    with patch.dict(sys.modules, {"agent_runner.hooks.permission_hook": _ph_mock}):
-        await asyncio.wait_for(
-            _run_status_task(bot, chat_id=123, placeholder=placeholder, state=state),
-            timeout=5.0,
-        )
+    await asyncio.wait_for(
+        _run_status_task(bot, chat_id=123, placeholder=placeholder, state=state),
+        timeout=5.0,
+    )
 
     assert call_count == 2
