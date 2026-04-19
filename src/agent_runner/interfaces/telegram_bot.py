@@ -552,11 +552,9 @@ async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     placeholder = await _create_placeholder(update.message)
 
     state: dict = {"text": "", "done": False}
-    status_task = (
-        asyncio.create_task(_run_status_task(context.bot, chat_id, placeholder, state))
-        if placeholder is not None
-        else None
-    )
+    tasks = [asyncio.create_task(_typing_keepalive_task(context.bot, chat_id, state))]
+    if placeholder is not None:
+        tasks.append(asyncio.create_task(_run_status_task(context.bot, chat_id, placeholder, state)))
 
     try:
         async for chunk in agent.stream_image(image_bytes, caption, session_id=session_id):
@@ -564,11 +562,11 @@ async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         content = state["text"] or "(no response)"
 
-        # Stop the animation BEFORE sending the final response.
+        # Stop animations BEFORE sending the final response.
         state["done"] = True
-        if status_task:
-            status_task.cancel()
-        await asyncio.sleep(0)
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
         if placeholder is None:
             await update.message.reply_text(content[:4096])
@@ -594,8 +592,10 @@ async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             pass
     finally:
         state["done"] = True
-        if status_task:
-            status_task.cancel()
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 # ---------------------------------------------------------------------------
