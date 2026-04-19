@@ -29,7 +29,7 @@ from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError, RetryAfter
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -436,29 +436,69 @@ def _reformat_tables(text: str) -> str:
     return "\n".join(result)
 
 
+async def _create_placeholder(message) -> Any:
+    """Send the initial thinking placeholder, retrying once on flood control.
+
+    Returns the Message object on success, or None if both attempts fail.
+    Logs failures instead of swallowing them silently.
+    """
+    for attempt in range(2):
+        try:
+            return await message.reply_text(_THINKING_FRAMES[0] + _THINKING_LABEL)
+        except RetryAfter as exc:
+            wait = min(float(exc.retry_after), 5.0)
+            logger.warning(
+                "telegram: placeholder flood control (attempt %d) — retry in %.1fs",
+                attempt + 1, wait,
+            )
+            if attempt == 0:
+                await asyncio.sleep(wait)
+        except Exception as exc:
+            logger.warning("telegram: placeholder creation failed — %s", exc)
+            break
+    return None
+
+
+_STATUS_TASK_MAX_DURATION = 600  # hard cap; prevents zombie tasks if handler stalls
+
+
+async def _typing_keepalive_task(bot, chat_id: int, state: dict) -> None:
+    """Keep the Telegram 'typing...' header indicator alive while the agent is processing.
+
+    Calls send_chat_action('typing') every _TYPING_RENEW_INTERVAL seconds until
+    state["done"] is True.  Isolated from the animation task — a crash here does
+    not affect the spinner, and vice versa.
+    """
+    try:
+        while not state["done"]:
+            try:
+                await bot.send_chat_action(chat_id=chat_id, action="typing")
+            except Exception:
+                pass
+            if state["done"]:
+                break
+            await asyncio.sleep(_TYPING_RENEW_INTERVAL)
+    except Exception:
+        pass
+
+
 async def _run_status_task(bot, chat_id: int, placeholder, state: dict) -> None:
     """Animate placeholder throughout the entire agent operation.
 
-    Reads permission_hook._active_tool to show what tool the agent is calling.
-    state = {"text": str, "done": bool}
+    Reads permission_hook.get_active_tool() to show what the agent is currently
+    doing.  state = {"text": str, "done": bool}
     """
-    from agent_runner.hooks import permission_hook as _ph
-    frame_idx = 0
-    last_typing = 0.0
     try:
+        from agent_runner.hooks import permission_hook as _ph
+        frame_idx = 0
         while not state["done"]:
-            now = time.monotonic()
-            if now - last_typing >= _TYPING_RENEW_INTERVAL:
-                try:
-                    await bot.send_chat_action(chat_id=chat_id, action="typing")
-                    last_typing = now
-                except Exception:
-                    pass
+            try:
+                active_tool = _ph.get_active_tool()
+            except Exception:
+                active_tool = ""
 
             frame = _THINKING_FRAMES[frame_idx % len(_THINKING_FRAMES)]
             frame_idx += 1
-
-            active_tool = _ph.get_active_tool()
             current_text = state["text"]
 
             if not current_text:
@@ -474,7 +514,7 @@ async def _run_status_task(bot, chat_id: int, placeholder, state: dict) -> None:
                 pass
 
             await asyncio.sleep(1.0)
-    except asyncio.CancelledError:
+    except Exception:
         pass
 
 
@@ -506,26 +546,43 @@ async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await photo_file.download_to_memory(buf)
     image_bytes = buf.getvalue()
 
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-    placeholder = await update.message.reply_text(_THINKING_FRAMES[0] + _THINKING_LABEL)
+    # send_chat_action is just a UX hint — ignore transient network failures
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    except Exception:
+        pass
 
-    state: dict = {"text": "", "done": False}
-    status_task = asyncio.create_task(
-        _run_status_task(context.bot, chat_id, placeholder, state)
+    placeholder = await _create_placeholder(update.message)
+
+    state: dict = {"text": "", "done": False, "subagent": None}
+    status_task = (
+        asyncio.create_task(_run_status_task(context.bot, chat_id, placeholder, state))
+        if placeholder is not None
+        else None
     )
 
+    def _on_event(msg):
+        from claude_agent_sdk import TaskStartedMessage, TaskNotificationMessage
+        if isinstance(msg, TaskStartedMessage):
+            state["subagent"] = f"subagent: {msg.description[:50]}…"
+        elif isinstance(msg, TaskNotificationMessage):
+            state["subagent"] = None
+
     try:
-        async for chunk in agent.stream_image(image_bytes, caption, session_id=session_id):
+        async for chunk in agent.stream_image(image_bytes, caption, session_id=session_id, on_event=_on_event):
             state["text"] += chunk
 
         content = state["text"] or "(no response)"
 
         # Stop the animation BEFORE sending the final response.
         state["done"] = True
-        status_task.cancel()
+        if status_task:
+            status_task.cancel()
         await asyncio.sleep(0)
 
-        if len(content) <= 4096:
+        if placeholder is None:
+            await update.message.reply_text(content[:4096])
+        elif len(content) <= 4096:
             await _send_response(placeholder, content)
         else:
             await placeholder.delete()
@@ -539,12 +596,16 @@ async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as exc:
         logger.error("telegram: error processing photo — %s", exc, exc_info=True)
         try:
-            await placeholder.edit_text("Sorry, something went wrong processing the photo. Check the logs.")
+            if placeholder:
+                await placeholder.edit_text("Sorry, something went wrong processing the photo. Check the logs.")
+            else:
+                await update.message.reply_text("Sorry, something went wrong processing the photo. Check the logs.")
         except Exception:
             pass
     finally:
         state["done"] = True
-        status_task.cancel()
+        if status_task:
+            status_task.cancel()
 
 
 # ---------------------------------------------------------------------------
@@ -607,16 +668,30 @@ async def _stream_to_agent(
     chat_id = update.effective_chat.id
     session_id = _get_or_create_session(chat_id, session_manager)
 
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-    placeholder = await update.message.reply_text(_THINKING_FRAMES[0] + _THINKING_LABEL)
+    # send_chat_action is just a UX hint — ignore transient network failures
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    except Exception:
+        pass
 
-    state: dict = {"text": "", "done": False}
-    status_task = asyncio.create_task(
-        _run_status_task(context.bot, chat_id, placeholder, state)
+    placeholder = await _create_placeholder(update.message)
+
+    state: dict = {"text": "", "done": False, "subagent": None}
+    status_task = (
+        asyncio.create_task(_run_status_task(context.bot, chat_id, placeholder, state))
+        if placeholder is not None
+        else None
     )
 
+    def _on_event(msg):
+        from claude_agent_sdk import TaskStartedMessage, TaskNotificationMessage
+        if isinstance(msg, TaskStartedMessage):
+            state["subagent"] = f"subagent: {msg.description[:50]}…"
+        elif isinstance(msg, TaskNotificationMessage):
+            state["subagent"] = None
+
     try:
-        async for chunk in agent.stream(text, session_id=session_id):
+        async for chunk in agent.stream(text, session_id=session_id, on_event=_on_event):
             state["text"] += chunk
 
         content = state["text"] or "(no response)"
@@ -624,10 +699,13 @@ async def _stream_to_agent(
         # Stop the animation BEFORE sending the final response to prevent
         # the status task from overwriting it with a spinner frame.
         state["done"] = True
-        status_task.cancel()
+        if status_task:
+            status_task.cancel()
         await asyncio.sleep(0)  # yield so the task processes CancelledError first
 
-        if len(content) <= 4096:
+        if placeholder is None:
+            await update.message.reply_text(content[:4096])
+        elif len(content) <= 4096:
             await _send_response(placeholder, content)
         else:
             await placeholder.delete()
@@ -641,12 +719,16 @@ async def _stream_to_agent(
     except Exception as exc:
         logger.error("telegram: error processing message — %s", exc, exc_info=True)
         try:
-            await placeholder.edit_text("Sorry, something went wrong. Check the logs.")
+            if placeholder:
+                await placeholder.edit_text("Sorry, something went wrong. Check the logs.")
+            else:
+                await update.message.reply_text("Sorry, something went wrong. Check the logs.")
         except Exception:
             pass
     finally:
         state["done"] = True
-        status_task.cancel()
+        if status_task:
+            status_task.cancel()
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -955,111 +1037,134 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
 
     allowed_chat_id = int(chat_id_str)
 
-    app = Application.builder().token(token).build()
-
-    # Inject agent, session_manager, and config into bot_data for all handlers
-    app.bot_data["agent"] = agent
-    app.bot_data["session_manager"] = session_manager
-    app.bot_data["config"] = config
-
-    # Wire the async permission hook so tools can send approval requests
     from agent_runner.hooks import permission_hook as _hook
 
-    async def _send_approval(text: str, request_id: str) -> None:
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Approve", callback_data=f"perm:approve:{request_id}"),
-            InlineKeyboardButton("❌ Deny", callback_data=f"perm:deny:{request_id}"),
-        ]])
-        await app.bot.send_message(
-            chat_id=allowed_chat_id,
-            text=text,
-            parse_mode="Markdown",
-            reply_markup=keyboard,
-        )
+    retry_delay = 5
+    max_retries = 6
 
-    async def _send_notification(text: str) -> None:
+    for attempt in range(max_retries):
         try:
-            await app.bot.send_message(
-                chat_id=allowed_chat_id,
-                text=text,
-                parse_mode="Markdown",
+            app = Application.builder().token(token).build()
+
+            # Inject agent, session_manager, and config into bot_data for all handlers
+            app.bot_data["agent"] = agent
+            app.bot_data["session_manager"] = session_manager
+            app.bot_data["config"] = config
+
+            # Wire the async permission hook so tools can send approval requests
+            async def _send_approval(text: str, request_id: str, _app=app) -> None:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Approve", callback_data=f"perm:approve:{request_id}"),
+                    InlineKeyboardButton("❌ Deny", callback_data=f"perm:deny:{request_id}"),
+                ]])
+                await _app.bot.send_message(
+                    chat_id=allowed_chat_id,
+                    text=text,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard,
+                )
+
+            async def _send_notification(text: str, _app=app) -> None:
+                try:
+                    await _app.bot.send_message(
+                        chat_id=allowed_chat_id,
+                        text=text,
+                        parse_mode="Markdown",
+                    )
+                except Exception as exc:
+                    logger.warning("telegram: notification send failed — %s", exc)
+
+            _hook.configure_hook(_send_approval, allowed_chat_id, notify_fn=_send_notification)
+
+            app.add_handler(CommandHandler("start", _cmd_start))
+            app.add_handler(CommandHandler("status", _cmd_status))
+            app.add_handler(CommandHandler("session", _cmd_session))
+            app.add_handler(CommandHandler("sessions", _cmd_sessions))
+            app.add_handler(CommandHandler("rename", _cmd_rename))
+            app.add_handler(CommandHandler("tag", _cmd_tag))
+            app.add_handler(CommandHandler("fork", _cmd_fork))
+            app.add_handler(CommandHandler("interrupt", _cmd_interrupt))
+            app.add_handler(CommandHandler("tools", _cmd_tools))
+            app.add_handler(CommandHandler("model", _cmd_model))
+            app.add_handler(CommandHandler("thinking", _cmd_thinking))
+            app.add_handler(CommandHandler("deletesession", _cmd_delete_session))
+
+            if config.name.lower() == "roger":
+                app.add_handler(CommandHandler("pesi",        _cmd_pesi))
+                app.add_handler(CommandHandler("addome",      _cmd_addome))
+                app.add_handler(CommandHandler("profilo",     _cmd_profilo))
+                app.add_handler(CommandHandler("adduser",     _cmd_adduser))
+                app.add_handler(CommandHandler("listusers",   _cmd_listusers))
+                app.add_handler(CommandHandler("removeuser",  _cmd_removeuser))
+
+            app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
+            app.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
+            app.add_handler(CallbackQueryHandler(_handle_callback, pattern=r"^perm:"))
+
+            logger.info(
+                "telegram: starting polling for %s (allowed_chat_id=%s)",
+                config.name, allowed_chat_id,
             )
-        except Exception as exc:
-            logger.warning("telegram: notification send failed — %s", exc)
 
-    _hook.configure_hook(_send_approval, allowed_chat_id, notify_fn=_send_notification)
+            _COMMANDS = [
+                ("start",         "Welcome message"),
+                ("status",        "Agent status and session info"),
+                ("session",       "Current session details"),
+                ("sessions",      "List last 5 sessions"),
+                ("rename",        "Rename current session"),
+                ("tag",           "Tag current session"),
+                ("fork",          "Fork current session"),
+                ("interrupt",     "Interrupt current agent operation"),
+                ("tools",         "Show MCP server status"),
+                ("model",         "Show context usage or switch model"),
+                ("thinking",      "Toggle extended thinking: on|off|auto"),
+                ("deletesession", "Delete a session"),
+            ]
 
-    app.add_handler(CommandHandler("start", _cmd_start))
-    app.add_handler(CommandHandler("status", _cmd_status))
-    app.add_handler(CommandHandler("session", _cmd_session))
-    app.add_handler(CommandHandler("sessions", _cmd_sessions))
-    app.add_handler(CommandHandler("rename", _cmd_rename))
-    app.add_handler(CommandHandler("tag", _cmd_tag))
-    app.add_handler(CommandHandler("fork", _cmd_fork))
-    app.add_handler(CommandHandler("interrupt", _cmd_interrupt))
-    app.add_handler(CommandHandler("tools", _cmd_tools))
-    app.add_handler(CommandHandler("model", _cmd_model))
-    app.add_handler(CommandHandler("thinking", _cmd_thinking))
-    app.add_handler(CommandHandler("deletesession", _cmd_delete_session))
+            if config.name.lower() == "roger":
+                _COMMANDS += [
+                    ("pesi",        "Log body weight — /pesi 81.5"),
+                    ("addome",      "Log waist circumference — /addome 84"),
+                    ("profilo",     "View or update athlete profile (height, DOB, sex)"),
+                    ("adduser",     "Admin: register a new user"),
+                    ("listusers",   "Admin: list all users"),
+                    ("removeuser",  "Admin: deactivate a user"),
+                ]
 
-    if config.name.lower() == "roger":
-        app.add_handler(CommandHandler("pesi",        _cmd_pesi))
-        app.add_handler(CommandHandler("addome",      _cmd_addome))
-        app.add_handler(CommandHandler("profilo",     _cmd_profilo))
-        app.add_handler(CommandHandler("adduser",     _cmd_adduser))
-        app.add_handler(CommandHandler("listusers",   _cmd_listusers))
-        app.add_handler(CommandHandler("removeuser",  _cmd_removeuser))
+            async with app:
+                await app.start()
+                try:
+                    from telegram import BotCommand
+                    await app.bot.set_my_commands([BotCommand(cmd, desc) for cmd, desc in _COMMANDS])
+                    logger.info("telegram: bot commands registered (%d commands)", len(_COMMANDS))
+                except Exception as exc:
+                    logger.warning("telegram: could not register bot commands — %s", exc)
+                await app.updater.start_polling(drop_pending_updates=False)
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
-    app.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
-    app.add_handler(CallbackQueryHandler(_handle_callback, pattern=r"^perm:"))
+                try:
+                    await asyncio.Event().wait()  # block until Task is cancelled
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    await app.updater.stop()
+                    await app.stop()
 
-    logger.info(
-        "telegram: starting polling for %s (allowed_chat_id=%s)",
-        config.name, allowed_chat_id,
-    )
+            break  # clean exit — no retry needed
 
-    _COMMANDS = [
-        ("start",         "Welcome message"),
-        ("status",        "Agent status and session info"),
-        ("session",       "Current session details"),
-        ("sessions",      "List last 5 sessions"),
-        ("rename",        "Rename current session"),
-        ("tag",           "Tag current session"),
-        ("fork",          "Fork current session"),
-        ("interrupt",     "Interrupt current agent operation"),
-        ("tools",         "Show MCP server status"),
-        ("model",         "Show context usage or switch model"),
-        ("thinking",      "Toggle extended thinking: on|off|auto"),
-        ("deletesession", "Delete a session"),
-    ]
-
-    if config.name.lower() == "roger":
-        _COMMANDS += [
-            ("pesi",        "Log body weight — /pesi 81.5"),
-            ("addome",      "Log waist circumference — /addome 84"),
-            ("profilo",     "View or update athlete profile (height, DOB, sex)"),
-            ("adduser",     "Admin: register a new user"),
-            ("listusers",   "Admin: list all users"),
-            ("removeuser",  "Admin: deactivate a user"),
-        ]
-
-    async with app:
-        await app.start()
-        try:
-            from telegram import BotCommand
-            await app.bot.set_my_commands([BotCommand(cmd, desc) for cmd, desc in _COMMANDS])
-            logger.info("telegram: bot commands registered (%d commands)", len(_COMMANDS))
-        except Exception as exc:
-            logger.warning("telegram: could not register bot commands — %s", exc)
-        await app.updater.start_polling(drop_pending_updates=False)
-
-        try:
-            await asyncio.Event().wait()  # block until Task is cancelled
         except asyncio.CancelledError:
-            pass
-        finally:
-            await app.updater.stop()
-            await app.stop()
+            raise
+        except NetworkError as exc:
+            if attempt == max_retries - 1:
+                logger.error(
+                    "telegram: startup failed after %d attempts — %s",
+                    max_retries, exc,
+                )
+                raise
+            logger.warning(
+                "telegram: startup failed (attempt %d/%d) — %s; retrying in %ds",
+                attempt + 1, max_retries, exc, retry_delay,
+            )
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60)
 
     logger.info("telegram: polling stopped for %s", config.name)
