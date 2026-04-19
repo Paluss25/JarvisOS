@@ -667,11 +667,9 @@ async def _stream_to_agent(
     placeholder = await _create_placeholder(update.message)
 
     state: dict = {"text": "", "done": False}
-    status_task = (
-        asyncio.create_task(_run_status_task(context.bot, chat_id, placeholder, state))
-        if placeholder is not None
-        else None
-    )
+    tasks = [asyncio.create_task(_typing_keepalive_task(context.bot, chat_id, state))]
+    if placeholder is not None:
+        tasks.append(asyncio.create_task(_run_status_task(context.bot, chat_id, placeholder, state)))
 
     try:
         async for chunk in agent.stream(text, session_id=session_id):
@@ -679,12 +677,12 @@ async def _stream_to_agent(
 
         content = state["text"] or "(no response)"
 
-        # Stop the animation BEFORE sending the final response to prevent
+        # Stop animations BEFORE sending the final response to prevent
         # the status task from overwriting it with a spinner frame.
         state["done"] = True
-        if status_task:
-            status_task.cancel()
-        await asyncio.sleep(0)  # yield so the task processes CancelledError first
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
         if placeholder is None:
             await update.message.reply_text(content[:4096])
@@ -710,8 +708,10 @@ async def _stream_to_agent(
             pass
     finally:
         state["done"] = True
-        if status_task:
-            status_task.cancel()
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
