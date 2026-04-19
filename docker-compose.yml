@@ -19,6 +19,12 @@ services:
       - "8803:8003"   # Warren agent (CFO)
       - "8900:8900"   # Platform API (dashboard, management)
     env_file: /home/paluss/docker/.env
+    environment:
+      LOKI_URL: "http://10.10.200.202:3100"
+      RUNBOOKS_PATH: "/app/runbooks"
+      DETECTOR_POLL_INTERVAL: "300"
+      DETECTOR_LOOKBACK_MINUTES: "10"
+      DETECTOR_PORT: "8013"
     labels:
       # Jarvis API — jarvis.prova9x.com
       - "traefik.enable=true"
@@ -37,6 +43,7 @@ services:
       - /home/paluss/docker/appdata/jarvios-dot-claude:/root/.claude
       - /home/paluss/.claude/.credentials.json:/root/.claude/.credentials.json
       - /home/paluss/docker/.env:/app/.env:ro
+      - /home/paluss/Brains/HomeLab/operations/runbooks/jarvios:/app/runbooks:rw
       # SSH identity key for CIO remote host management
       # config + known_hosts come from /app/shared/ssh/ and are copied by entrypoint.sh
       - /home/paluss/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
