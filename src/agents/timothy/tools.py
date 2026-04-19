@@ -882,6 +882,8 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         daily_log, memory_search, memory_get,
         infra_check,
         docker_query, docker_action, tcp_check, dns_lookup, pg_query,
+        loki_query, runbook_list, runbook_read, runbook_write,
+        container_exec, container_file_patch,
         cron_create, cron_list, cron_update, cron_delete,
     ]
     if send_message is not None:
