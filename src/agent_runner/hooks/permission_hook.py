@@ -100,6 +100,13 @@ _SHELL_META = re.compile(r'[;&|`<>]|\$\(')
 # All other container_exec commands require Telegram approval.
 _SAFE_CONTAINER_EXEC = re.compile(r"^supervisorctl\s+restart\s+\w[\w-]*$")
 
+# Auto-allowed tools: genuine read-only observability tools + low-risk writes
+# (runbook_write is intentionally ungated — writing a runbook file is low-risk).
+_UNGATED_TOOLS = frozenset({
+    "loki_query", "runbook_list", "runbook_read", "runbook_write",
+    "docker_query", "infra_check", "tcp_check", "dns_lookup",
+})
+
 
 def _is_safe(command: str) -> bool:
     cmd = command.strip()
@@ -144,10 +151,8 @@ def build_can_use_tool():
     """Return the can_use_tool async callback for ClaudeAgentOptions."""
 
     async def can_use_tool(tool_name: str, input_data: dict, context) -> PermissionResultAllow | PermissionResultDeny:
-        # Read-only tools always auto-allow
-        _UNGATED = {"loki_query", "runbook_list", "runbook_read", "runbook_write",
-                    "docker_query", "infra_check", "tcp_check", "dns_lookup"}
-        if tool_name in _UNGATED:
+        # Auto-allowed tools (read-only + low-risk writes like runbook_write)
+        if tool_name in _UNGATED_TOOLS:
             return PermissionResultAllow()
 
         # container_exec: auto-allow safe supervisorctl restart commands
@@ -177,7 +182,13 @@ def build_can_use_tool():
         event = asyncio.Event()
         _pending[request_id] = event
 
-        snippet = command[:800] + ("…" if len(command) > 800 else "")
+        if tool_name == "container_file_patch":
+            container = input_data.get("container", "?")
+            path = input_data.get("path", "?")
+            content_len = len(input_data.get("content", ""))
+            snippet = f"container: {container}\npath: {path}\ncontent: {content_len} bytes"
+        else:
+            snippet = command[:800] + ("…" if len(command) > 800 else "")
         text = (
             f"*Permission Required*\n\n"
             f"*Tool:* `{tool_name}`\n\n"
