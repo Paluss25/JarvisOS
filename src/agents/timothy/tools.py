@@ -595,6 +595,168 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
 
         return _text(content)
 
+    @sdk_tool(
+        "runbook_write",
+        "Create or overwrite a runbook file in the runbooks directory. "
+        "Use this when you discover a new failure pattern with no existing runbook, "
+        "or when an existing runbook needs correction. "
+        "filename: target filename (e.g. 'runbook-new-issue.md'). "
+        "content: full file content (markdown or yaml).",
+        {"filename": str, "content": str},
+    )
+    async def runbook_write(args: dict) -> dict:
+        args = _parse_args(args)
+        filename = args.get("filename", "").strip()
+        content = args.get("content", "")
+        if not filename:
+            return _text("filename is required.")
+        if not content:
+            return _text("content is required.")
+
+        runbooks_path = Path(os.environ.get("RUNBOOKS_PATH", "/app/runbooks"))
+        target = (runbooks_path / filename).resolve()
+
+        if not str(target).startswith(str(runbooks_path.resolve())):
+            return _text("Access denied: path is outside the runbooks directory.")
+
+        try:
+            runbooks_path.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            return _text(f"Written: {filename} ({len(content)} bytes)")
+        except OSError as exc:
+            return _text(f"Error writing {filename}: {exc}")
+
+    @sdk_tool(
+        "container_exec",
+        "Execute a command inside a named Docker container via the socket proxy. "
+        "Intended for supervisorctl restart commands — other commands require "
+        "Telegram approval via the permission hook. "
+        "container: container name (e.g. 'jarvios-platform'). "
+        "command: shell command to run (e.g. 'supervisorctl restart worker-roger'). "
+        "Returns combined stdout+stderr output.",
+        {"container": str, "command": str},
+    )
+    async def container_exec(args: dict) -> dict:
+        args = _parse_args(args)
+        container = args.get("container", "").strip()
+        command = args.get("command", "").strip()
+        if not container:
+            return _text("container is required.")
+        if not command:
+            return _text("command is required.")
+
+        proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Step 1: Create exec instance
+                exec_resp = await client.post(
+                    f"{proxy}/containers/{container}/exec",
+                    json={
+                        "Cmd": ["sh", "-c", command],
+                        "AttachStdout": True,
+                        "AttachStderr": True,
+                    },
+                )
+                if exec_resp.status_code == 404:
+                    return _text(f"Container '{container}' not found.")
+                exec_resp.raise_for_status()
+                exec_id = exec_resp.json().get("Id", "")
+                if not exec_id:
+                    return _text("Docker exec create returned no Id.")
+
+                # Step 2: Start exec and collect output
+                start_resp = await client.post(
+                    f"{proxy}/exec/{exec_id}/start",
+                    json={"Detach": False, "Tty": False},
+                )
+                start_resp.raise_for_status()
+
+                # Docker multiplexed stream: 8-byte header per frame
+                raw = start_resp.content
+                output_parts: list[str] = []
+                i = 0
+                while i < len(raw):
+                    if i + 8 > len(raw):
+                        break
+                    frame_size = int.from_bytes(raw[i + 4:i + 8], "big")
+                    i += 8
+                    if frame_size > 0 and i + frame_size <= len(raw):
+                        output_parts.append(
+                            raw[i:i + frame_size].decode("utf-8", errors="replace")
+                        )
+                    i += frame_size
+
+                output = "".join(output_parts).strip()
+                return _text(f"Executed: {command}\nOutput: {output or '(no output)'}")
+
+        except httpx.ConnectError:
+            return _text(f"Cannot reach Docker socket proxy at {proxy}.")
+        except Exception as exc:
+            logger.error("container_exec[%s/%s]: error — %s", container, command, exc)
+            return {"content": [{"type": "text", "text": f"Exec error: {exc}"}], "is_error": True}
+
+    @sdk_tool(
+        "container_file_patch",
+        "Write a file into a running Docker container. "
+        "Uses docker cp (PUT /archive) via the socket proxy. "
+        "This tool ALWAYS requires Telegram operator approval (HITL). "
+        "container: container name (e.g. 'jarvios-platform'). "
+        "path: absolute path inside the container (e.g. '/app/src/workers/market/journal.py'). "
+        "content: full file content to write.",
+        {"container": str, "path": str, "content": str},
+    )
+    async def container_file_patch(args: dict) -> dict:
+        args = _parse_args(args)
+        container = args.get("container", "").strip()
+        path = args.get("path", "").strip()
+        content = args.get("content", "")
+        if not container:
+            return _text("container is required.")
+        if not path:
+            return _text("path is required.")
+        if not path.startswith("/"):
+            return _text("path must be absolute (start with '/').")
+
+        proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")
+
+        # Build a tar archive in memory with the single file
+        import os as _os
+        filename = _os.path.basename(path)
+        dir_path = _os.path.dirname(path) or "/"
+
+        tar_buffer = io.BytesIO()
+        content_bytes = content.encode("utf-8")
+        with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
+            info = tarfile.TarInfo(name=filename)
+            info.size = len(content_bytes)
+            tar.addfile(info, io.BytesIO(content_bytes))
+        tar_buffer.seek(0)
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.put(
+                    f"{proxy}/containers/{container}/archive",
+                    params={"path": dir_path},
+                    content=tar_buffer.getvalue(),
+                    headers={"Content-Type": "application/x-tar"},
+                )
+                if resp.status_code == 404:
+                    return _text(f"Container '{container}' not found.")
+                if resp.status_code not in (200, 204):
+                    return _text(
+                        f"Docker archive PUT failed: HTTP {resp.status_code} — {resp.text[:200]}"
+                    )
+                return _text(
+                    f"File patched: {path} in container '{container}' "
+                    f"({len(content_bytes)} bytes written)"
+                )
+        except httpx.ConnectError:
+            return _text(f"Cannot reach Docker socket proxy at {proxy}.")
+        except Exception as exc:
+            logger.error("container_file_patch[%s%s]: error — %s", container, path, exc)
+            return {"content": [{"type": "text", "text": f"Patch error: {exc}"}], "is_error": True}
+
     # --- A2A send_message (Redis pub/sub) -----------------------------------
 
     if redis_a2a is not None:
