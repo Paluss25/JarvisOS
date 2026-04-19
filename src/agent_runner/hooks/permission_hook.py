@@ -96,6 +96,10 @@ _SAFE_PREFIXES = {
 
 _SHELL_META = re.compile(r'[;&|`<>]|\$\(')
 
+# Safe container_exec commands: supervisorctl restart <process> is auto-allowed.
+# All other container_exec commands require Telegram approval.
+_SAFE_CONTAINER_EXEC = re.compile(r"^supervisorctl\s+restart\s+\w[\w-]*$")
+
 
 def _is_safe(command: str) -> bool:
     cmd = command.strip()
@@ -140,12 +144,28 @@ def build_can_use_tool():
     """Return the can_use_tool async callback for ClaudeAgentOptions."""
 
     async def can_use_tool(tool_name: str, input_data: dict, context) -> PermissionResultAllow | PermissionResultDeny:
-        # Only gate the Bash tool; all others auto-allow
-        if tool_name != "Bash":
+        # Read-only tools always auto-allow
+        _UNGATED = {"loki_query", "runbook_list", "runbook_read", "runbook_write",
+                    "docker_query", "infra_check", "tcp_check", "dns_lookup"}
+        if tool_name in _UNGATED:
             return PermissionResultAllow()
 
-        command = input_data.get("command", "")
-        if _is_safe(command):
+        # container_exec: auto-allow safe supervisorctl restart commands
+        if tool_name == "container_exec":
+            cmd = input_data.get("command", "").strip()
+            if _SAFE_CONTAINER_EXEC.match(cmd):
+                return PermissionResultAllow()
+            # Non-safe container_exec falls through to Telegram approval
+
+        # container_file_patch: always requires approval (no safe-command list)
+        # Bash: auto-allow read-only prefixes
+        if tool_name == "Bash":
+            command = input_data.get("command", "")
+            if _is_safe(command):
+                return PermissionResultAllow()
+
+        # Everything else (non-Bash, non-container tools): auto-allow
+        if tool_name not in ("Bash", "container_exec", "container_file_patch"):
             return PermissionResultAllow()
 
         # Destructive command — request Telegram approval
