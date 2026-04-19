@@ -15,10 +15,13 @@ Tools:
 """
 
 import asyncio
+import io
 import json
 import logging
 import os
 import socket as _socket
+import tarfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -490,6 +493,107 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         except Exception as exc:
             logger.error("pg_query[%s]: error — %s", db, exc)
             return _text(f"Query error: {exc}")
+
+    # --- Ops-detector observability tools -----------------------------------
+
+    @sdk_tool(
+        "loki_query",
+        "Query Loki for log lines matching a LogQL expression. "
+        "logql: LogQL stream selector + filter (e.g. '{job=\"jarvios-platform\"} |= \"ERROR\"'). "
+        "start_minutes_ago: how many minutes back to search (default 15, max 1440). "
+        "limit: max log lines to return (default 100, max 500). "
+        "Returns matched lines with ISO timestamps.",
+        {"logql": str, "start_minutes_ago": int, "limit": int},
+    )
+    async def loki_query(args: dict) -> dict:
+        args = _parse_args(args)
+        logql = args.get("logql", "").strip()
+        if not logql:
+            return _text("logql is required.")
+        lookback = max(1, min(1440, int(args.get("start_minutes_ago") or 15)))
+        limit = max(1, min(500, int(args.get("limit") or 100)))
+
+        loki_base = os.environ.get("LOKI_URL", "http://10.10.200.202:3100")
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(minutes=lookback)
+        params = {
+            "query": logql,
+            "start": str(int(start.timestamp() * 1_000_000_000)),
+            "end": str(int(now.timestamp() * 1_000_000_000)),
+            "limit": str(limit),
+            "direction": "backward",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{loki_base}/loki/api/v1/query_range", params=params
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.TimeoutException:
+            return _text("Loki query timed out.")
+        except httpx.HTTPStatusError as exc:
+            return _text(f"Loki HTTP {exc.response.status_code}: {exc.response.text[:200]}")
+        except Exception as exc:
+            return _text(f"Loki error: {exc}")
+
+        lines: list[str] = []
+        for stream in data.get("data", {}).get("result", []):
+            for ts_ns, msg in stream.get("values", []):
+                ts = datetime.fromtimestamp(
+                    int(ts_ns) / 1_000_000_000, tz=timezone.utc
+                ).isoformat()
+                lines.append(f"{ts}  {msg}")
+
+        if not lines:
+            return _text(f"No log lines found for query: {logql}")
+        return _text(f"Found {len(lines)} lines (last {lookback}m):\n\n" + "\n".join(lines))
+
+    @sdk_tool(
+        "runbook_list",
+        "List all runbook .md files available in the runbooks directory. "
+        "Returns filenames only — use runbook_read to read a specific file.",
+        {},
+    )
+    async def runbook_list(args: dict) -> dict:
+        runbooks_path = Path(os.environ.get("RUNBOOKS_PATH", "/app/runbooks"))
+        if not runbooks_path.exists():
+            return _text(f"Runbooks directory not found: {runbooks_path}")
+        files = sorted(p.name for p in runbooks_path.iterdir()
+                       if p.suffix in (".md", ".yaml", ".yml"))
+        if not files:
+            return _text("No runbook files found.")
+        return _text("\n".join(files))
+
+    @sdk_tool(
+        "runbook_read",
+        "Read a runbook file from the runbooks directory. "
+        "filename: the filename (e.g. 'runbook-telegram-crash.md' or 'index.yaml'). "
+        "Returns the full file content.",
+        {"filename": str},
+    )
+    async def runbook_read(args: dict) -> dict:
+        args = _parse_args(args)
+        filename = args.get("filename", "").strip()
+        if not filename:
+            return _text("filename is required.")
+
+        runbooks_path = Path(os.environ.get("RUNBOOKS_PATH", "/app/runbooks"))
+        target = (runbooks_path / filename).resolve()
+
+        # Path traversal guard
+        if not str(target).startswith(str(runbooks_path.resolve())):
+            return _text("Access denied: path is outside the runbooks directory.")
+
+        if not target.exists():
+            return _text(f"Runbook not found: {filename}")
+
+        try:
+            content = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            return _text(f"Error reading {filename}: {exc}")
+
+        return _text(content)
 
     # --- A2A send_message (Redis pub/sub) -----------------------------------
 
