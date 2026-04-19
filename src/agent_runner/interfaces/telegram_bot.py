@@ -24,7 +24,6 @@ import datetime
 import logging
 import os
 import re
-import time
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -475,8 +474,10 @@ async def _typing_keepalive_task(bot, chat_id: int, state: dict) -> None:
             if state["done"]:
                 break
             await asyncio.sleep(_TYPING_RENEW_INTERVAL)
+    except asyncio.CancelledError:
+        pass  # normal task cancellation
     except Exception:
-        pass
+        pass  # suppress unexpected errors — task is best-effort
 
 
 async def _run_status_task(bot, chat_id: int, placeholder, state: dict) -> None:
@@ -511,8 +512,10 @@ async def _run_status_task(bot, chat_id: int, placeholder, state: dict) -> None:
                 pass
 
             await asyncio.sleep(1.0)
+    except asyncio.CancelledError:
+        pass  # normal task cancellation
     except Exception:
-        pass
+        pass  # suppress unexpected errors — task is best-effort
 
 
 # ---------------------------------------------------------------------------
