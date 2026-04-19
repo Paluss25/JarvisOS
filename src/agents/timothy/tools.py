@@ -547,6 +547,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
 
         if not lines:
             return _text(f"No log lines found for query: {logql}")
+        lines.sort()
         return _text(f"Found {len(lines)} lines (last {lookback}m):\n\n" + "\n".join(lines))
 
     @sdk_tool(
@@ -582,7 +583,9 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         target = (runbooks_path / filename).resolve()
 
         # Path traversal guard
-        if not str(target).startswith(str(runbooks_path.resolve())):
+        try:
+            target.relative_to(runbooks_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the runbooks directory.")
 
         if not target.exists():
@@ -610,13 +613,13 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         content = args.get("content", "")
         if not filename:
             return _text("filename is required.")
-        if not content:
-            return _text("content is required.")
 
         runbooks_path = Path(os.environ.get("RUNBOOKS_PATH", "/app/runbooks"))
         target = (runbooks_path / filename).resolve()
 
-        if not str(target).startswith(str(runbooks_path.resolve())):
+        try:
+            target.relative_to(runbooks_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the runbooks directory.")
 
         try:
@@ -681,14 +684,31 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
                         break
                     frame_size = int.from_bytes(raw[i + 4:i + 8], "big")
                     i += 8
-                    if frame_size > 0 and i + frame_size <= len(raw):
-                        output_parts.append(
-                            raw[i:i + frame_size].decode("utf-8", errors="replace")
-                        )
+                    if frame_size > 0:
+                        if i + frame_size <= len(raw):
+                            output_parts.append(
+                                raw[i:i + frame_size].decode("utf-8", errors="replace")
+                            )
+                        else:
+                            logger.warning(
+                                "container_exec: truncated frame (expected %d bytes, got %d)",
+                                frame_size, len(raw) - i,
+                            )
                     i += frame_size
 
                 output = "".join(output_parts).strip()
-                return _text(f"Executed: {command}\nOutput: {output or '(no output)'}")
+
+                # Retrieve exit code via inspect
+                exit_code = None
+                try:
+                    inspect_resp = await client.get(f"{proxy}/exec/{exec_id}/inspect")
+                    if inspect_resp.status_code == 200:
+                        exit_code = inspect_resp.json().get("ExitCode")
+                except Exception:
+                    pass
+
+                exit_info = f" (exit {exit_code})" if exit_code is not None else ""
+                return _text(f"Executed: {command}{exit_info}\nOutput: {output or '(no output)'}")
 
         except httpx.ConnectError:
             return _text(f"Cannot reach Docker socket proxy at {proxy}.")
@@ -721,9 +741,8 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")
 
         # Build a tar archive in memory with the single file
-        import os as _os
-        filename = _os.path.basename(path)
-        dir_path = _os.path.dirname(path) or "/"
+        filename = os.path.basename(path)
+        dir_path = os.path.dirname(path) or "/"
 
         tar_buffer = io.BytesIO()
         content_bytes = content.encode("utf-8")
