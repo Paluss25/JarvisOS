@@ -19,6 +19,7 @@ asyncpg>=0.30.0
 
 # HTTP
 httpx>=0.27.0
+aiohttp>=3.9.0
 
 # YAML
 pyyaml>=6.0

@@ -30,7 +30,7 @@ RUN python scripts/gen_supervisord.py
 # Workspace + shared memory bind-mounted at runtime
 # /app/workspace/jarvis, /app/workspace/roger, /app/shared
 
-EXPOSE 8000 8900
+EXPOSE 8000 8900 8013
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8000/health && curl -f http://localhost:8900/health || exit 1

@@ -18,6 +18,7 @@ services:
       - "8802:8002"   # Timothy agent (CIO)
       - "8803:8003"   # Warren agent (CFO)
       - "8900:8900"   # Platform API (dashboard, management)
+      - "8013:8013"   # worker-ops-detector (Grafana webhook + health)
     env_file: /home/paluss/docker/.env
     environment:
       LOKI_URL: "http://10.10.200.202:3100"
