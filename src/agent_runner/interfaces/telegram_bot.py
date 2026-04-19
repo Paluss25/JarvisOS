@@ -520,6 +520,11 @@ async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         content = state["text"] or "(no response)"
 
+        # Stop the animation BEFORE sending the final response.
+        state["done"] = True
+        status_task.cancel()
+        await asyncio.sleep(0)
+
         if len(content) <= 4096:
             await _send_response(placeholder, content)
         else:
@@ -615,6 +620,12 @@ async def _stream_to_agent(
             state["text"] += chunk
 
         content = state["text"] or "(no response)"
+
+        # Stop the animation BEFORE sending the final response to prevent
+        # the status task from overwriting it with a spinner frame.
+        state["done"] = True
+        status_task.cancel()
+        await asyncio.sleep(0)  # yield so the task processes CancelledError first
 
         if len(content) <= 4096:
             await _send_response(placeholder, content)
@@ -1041,7 +1052,7 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
             logger.info("telegram: bot commands registered (%d commands)", len(_COMMANDS))
         except Exception as exc:
             logger.warning("telegram: could not register bot commands — %s", exc)
-        await app.updater.start_polling(drop_pending_updates=True)
+        await app.updater.start_polling(drop_pending_updates=False)
 
         try:
             await asyncio.Event().wait()  # block until Task is cancelled
