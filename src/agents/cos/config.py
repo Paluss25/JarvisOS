@@ -1,4 +1,4 @@
-"""Mark-specific configuration."""
+"""ChiefOfStaff-specific configuration."""
 
 from pathlib import Path
 
@@ -47,14 +47,14 @@ MARK_BUILTIN_CRONS = [
 ]
 
 
-def build_mark_config(workspace_root: Path = Path("/app/workspace/cos")) -> AgentConfig:
-    from agents.cos.tools import create_mark_mcp_server
+def build_chief_of_staff_config(workspace_root: Path = Path("/app/workspace/chief_of_staff")) -> AgentConfig:
+    from agents.cos.tools import create_chief_of_staff_mcp_server
     return AgentConfig(
-        id="mark",
-        name="Mark",
-        port=8004,
+        id="chief_of_staff",
+        name="ChiefOfStaffAgent",
+        port=8008,
         workspace_path=workspace_root,
-        telegram_token_env="TELEGRAM_MARK_TOKEN",
+        telegram_token_env="TELEGRAM_CHIEF_OF_STAFF_TOKEN",
         telegram_chat_id_env="TELEGRAM_ALLOWED_CHAT_ID",
         domains=['chief-of-staff', 'email', 'communications', 'routing', 'coordination', 'triage', 'prioritization'],
         capabilities=['chief-of-staff', 'agent-coordination', 'email-triage', 'routing-decisions', 'escalation-management', 'priority-assessment', 'cross-domain-coordination'],
@@ -65,9 +65,9 @@ def build_mark_config(workspace_root: Path = Path("/app/workspace/cos")) -> Agen
         thinking_env="CLAUDE_THINKING",
         context_1m_env="CLAUDE_CONTEXT_1M",
         log_level_env="LOG_LEVEL",
-        env_prefix="MARK_",
+        env_prefix="CHIEF_OF_STAFF_",
         memory_backend="filesystem",
-        mcp_server_factory=create_mark_mcp_server,
+        mcp_server_factory=create_chief_of_staff_mcp_server,
         extra_mcp_servers={
             "protonmail-email": {"type": "sse", "url": "http://protonmail-mcp:3000/sse"},
             "gmx-email": {"type": "sse", "url": "http://gmx-mcp:3001/sse"},

@@ -1,4 +1,4 @@
-"""Mark agent entry point — invoked by supervisord."""
+"""ChiefOfStaff agent entry point — invoked by supervisord."""
 
 import logging
 import os
@@ -6,13 +6,13 @@ from pathlib import Path
 
 import uvicorn
 
-from agents.cos.config import build_mark_config
+from agents.cos.config import build_chief_of_staff_config
 from agent_runner.app import create_app
 
 
 def main():
-    workspace = os.environ.get("COS_WORKSPACE", "/app/workspace/cos")
-    config = build_mark_config(workspace_root=Path(workspace))
+    workspace = os.environ.get("CHIEF_OF_STAFF_WORKSPACE", "/app/workspace/chief_of_staff")
+    config = build_chief_of_staff_config(workspace_root=Path(workspace))
 
     logging.basicConfig(
         level=getattr(logging, config.log_level.upper(), logging.INFO),

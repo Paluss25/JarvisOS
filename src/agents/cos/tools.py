@@ -1,4 +1,4 @@
-"""In-process MCP server exposing Mark (ChiefOfStaffAgent) custom tools to the claude-agent-sdk.
+"""In-process MCP server exposing ChiefOfStaffAgent custom tools to the claude-agent-sdk.
 
 Core tools (platform-standard — do not remove):
   daily_log      — Append to today's memory log
@@ -65,8 +65,8 @@ except ImportError:
 # MCP server factory
 # ---------------------------------------------------------------------------
 
-def create_mark_mcp_server(workspace_path: Path, redis_a2a=None):
-    """Build and return the in-process MCP server with Mark custom tools.
+def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
+    """Build and return the in-process MCP server with ChiefOfStaff custom tools.
 
     Returns None if the SDK MCP server API is not available.
     """
