@@ -179,12 +179,12 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
 
     if redis_a2a is not None:
         from agent_runner.tools.send_message import create_send_message_tool
-        _send_message_fn = create_send_message_tool("mark", redis_a2a)
+        _send_message_fn = create_send_message_tool("cos", redis_a2a)
 
         @sdk_tool(
             "send_message",
             "Send a message to another agent and wait for their response. "
-            "Use 'to' to specify the target agent ID (e.g. 'jarvis'). "
+            "Use 'to' to specify the target agent ID (e.g. 'ceo', 'cio'). "
             "'message' is the natural language request to send.",
             {"to": str, "message": str},
         )
@@ -337,7 +337,7 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
             writer.write(writer.make_event(
                 event_id=str(uuid.uuid4()),
                 event_type="routing",
-                agent_id="mark",
+                agent_id="cos",
                 action="route_email_payload",
                 outcome=routing_decision.get("decision_type", "unknown"),
                 email_id=payload_dict.get("email_id"),
@@ -459,7 +459,7 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
         all_tools.append(send_message)
 
     try:
-        server = create_sdk_mcp_server(name="mark-tools", tools=all_tools)
+        server = create_sdk_mcp_server(name="cos-tools", tools=all_tools)
         logger.info("mcp_server: in-process MCP server created with %d tools", len(all_tools))
         return server
     except Exception as exc:

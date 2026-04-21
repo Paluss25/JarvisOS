@@ -111,7 +111,7 @@ def _run_security_pipeline(
 
     # Layer 6: PermissionLayer
     permission = PermissionLayer(cfg["permissions"]).check(
-        agent_id="email_intelligence",
+        agent_id="email_intelligence_agent",
         requested_tools=["process_email"],
     )
 
@@ -134,14 +134,47 @@ def _run_security_pipeline(
             },
         },
         request=AgentRequest(
-            agent_id="email_intelligence",
+            agent_id="email_intelligence_agent",
             requested_action="route_and_review",
         ),
     )
 
+    # Enforcement gate — halt processing if policy denies or escalates
+    if not policy_decision.allow and policy_decision.decision in {"deny", "escalate"}:
+        audit_path = Path("var/audit/audit.jsonl")
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        _gate_writer = AuditWriter(str(audit_path))
+        _gate_writer.write(_gate_writer.make_event(
+            event_id=str(uuid.uuid4()),
+            event_type="pipeline_blocked",
+            agent_id="email_intelligence_agent",
+            action="route_and_review",
+            outcome=policy_decision.decision,
+            email_id=email_id,
+            details={
+                "account": account,
+                "primary_domain": classification.primary_domain,
+                "sensitivity": classification.sensitivity,
+                "policy_decision": policy_decision.decision,
+                "reasons": policy_decision.reasons,
+                "constraints": policy_decision.constraints,
+            },
+        ))
+        return {
+            "email_id": email_id,
+            "account": account,
+            "blocked": True,
+            "policy": {
+                "decision": policy_decision.decision,
+                "allow": False,
+                "reasons": policy_decision.reasons,
+                "constraints": policy_decision.constraints,
+            },
+        }
+
     # Layer 8: MemoryGuard
     memory_decision = MemoryGuard(cfg["memory_policy"]).check_write(
-        agent_id="email_intelligence",
+        agent_id="email_intelligence_agent",
         target_store="structured_store",
         content_type="email_summary",
         sensitivity=classification.sensitivity,
@@ -155,7 +188,7 @@ def _run_security_pipeline(
     writer.write(writer.make_event(
         event_id=str(uuid.uuid4()),
         event_type="pipeline_run",
-        agent_id="email_intelligence",
+        agent_id="email_intelligence_agent",
         action="route_and_review",
         outcome=policy_decision.decision,
         email_id=email_id,
@@ -328,12 +361,12 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
 
     if redis_a2a is not None:
         from agent_runner.tools.send_message import create_send_message_tool
-        _send_message_fn = create_send_message_tool("email_intelligence", redis_a2a)
+        _send_message_fn = create_send_message_tool("email_intelligence_agent", redis_a2a)
 
         @sdk_tool(
             "send_message",
             "Send a message to another agent and wait for their response. "
-            "Use 'to' to specify the target agent ID (e.g. 'jarvis'). "
+            "Use 'to' to specify the target agent ID (e.g. 'cos'). "
             "'message' is the natural language request to send.",
             {"to": str, "message": str},
         )
@@ -446,10 +479,13 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "process_email",
-        "Fetch email via MCP and run it through the 9-layer security pipeline. "
-        "Returns a full EmailIntelligencePayload with classification, security signals, "
-        "routing decision, policy decision, and redaction metadata.",
-        {"email_id": str, "account": str},
+        "Run an email through the 9-layer security pipeline. "
+        "Fetch subject and body from the protonmail-email or gmx-email MCP tool first, "
+        "then pass them here. Returns a full EmailIntelligencePayload with classification, "
+        "security signals, routing decision, policy decision, and redaction metadata. "
+        "'account' must be 'protonmail' or 'gmx'. "
+        "'attachments_json' is an optional JSON array of {filename, mime_type, size_bytes} objects.",
+        {"email_id": str, "account": str, "subject": str, "body": str, "attachments_json": str},
     )
     async def process_email(args: dict) -> dict:
         args = _parse_args(args)
@@ -457,14 +493,27 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
         account = args.get("account", "").strip()
         if not email_id or not account:
             return _text("email_id and account are required.")
+
+        subject = args.get("subject", "").strip() or ""
+        body = args.get("body", "").strip() or ""
+
+        attachments: list = []
+        attachments_raw = (args.get("attachments_json") or "").strip()
+        if attachments_raw:
+            try:
+                parsed = json.loads(attachments_raw)
+                if isinstance(parsed, list):
+                    attachments = parsed
+            except (json.JSONDecodeError, ValueError):
+                pass  # ignore malformed — pipeline handles empty list fine
+
         try:
-            # In production: fetch subject/body/attachments via MCP tool call to
-            # protonmail-email or gmx-email server using ctx.call_tool()
             payload = _run_security_pipeline(
                 email_id=email_id,
                 account=account,
-                subject="[fetched via MCP]",
-                body="[fetched via MCP]",
+                subject=subject or "(no subject)",
+                body=body or "(empty body)",
+                attachments=attachments,
             )
             return _text(json.dumps(payload))
         except Exception as exc:
@@ -473,22 +522,54 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "process_unread",
-        "Process unread emails from the specified account through the 9-layer security pipeline. "
-        "'account' can be 'protonmail', 'gmx', or 'all'. "
-        "'max_emails' limits how many unread emails to process (default 20).",
-        {"account": str, "max_emails": int},
+        "Process a batch of emails through the 9-layer security pipeline. "
+        "First use the protonmail-email or gmx-email MCP tools to fetch unread email list and content, "
+        "then pass the result as a JSON array via 'emails_json'. Each item must have: "
+        "email_id (str), account ('protonmail'|'gmx'), subject (str), body (str). "
+        "'max_emails' caps how many are processed (default 20). "
+        "Returns a summary list of {email_id, decision_type, route_to, blocked, status}.",
+        {"emails_json": str, "max_emails": int},
     )
     async def process_unread(args: dict) -> dict:
         args = _parse_args(args)
-        account = args.get("account", "all").strip() or "all"
         max_emails = int(args.get("max_emails") or 20)
-        # In production: calls list_emails MCP tool then process_email for each result
-        return _text(json.dumps({
-            "account": account,
-            "max_emails": max_emails,
-            "processed": 0,
-            "note": "In production: calls list_emails MCP tool then process_email for each result",
-        }))
+
+        emails_raw = (args.get("emails_json") or "[]").strip()
+        try:
+            emails = json.loads(emails_raw)
+            if not isinstance(emails, list):
+                return _text("emails_json must be a JSON array of {email_id, account, subject, body}.")
+        except (json.JSONDecodeError, ValueError) as exc:
+            return _text(f"Invalid emails_json: {exc}")
+
+        emails = emails[:max_emails]
+        results = []
+        for item in emails:
+            email_id = str(item.get("email_id", "")).strip()
+            account = str(item.get("account", "")).strip()
+            subject = str(item.get("subject", "")).strip() or "(no subject)"
+            body = str(item.get("body", "")).strip() or "(empty body)"
+            if not email_id or not account:
+                continue
+            try:
+                payload = _run_security_pipeline(
+                    email_id=email_id,
+                    account=account,
+                    subject=subject,
+                    body=body,
+                )
+                results.append({
+                    "email_id": email_id,
+                    "decision_type": payload.get("policy", {}).get("decision"),
+                    "route_to": payload.get("routing", {}).get("route_to"),
+                    "blocked": payload.get("blocked", False),
+                    "status": "processed",
+                })
+            except Exception as exc:
+                logger.error("process_unread: email %s failed — %s", email_id, exc)
+                results.append({"email_id": email_id, "status": "error", "error": str(exc)})
+
+        return _text(json.dumps(results))
 
     @sdk_tool(
         "get_audit_log",
@@ -530,7 +611,7 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
             writer.write(writer.make_event(
                 event_id=str(uuid.uuid4()),
                 event_type="quarantine",
-                agent_id="email_intelligence",
+                agent_id="email_intelligence_agent",
                 action="quarantine",
                 outcome="quarantined",
                 email_id=email_id,

@@ -17,7 +17,7 @@ shared_constraints:
     - change_security_policy_directly
 
 agents:
-  EmailIntelligenceAgent:
+  email_intelligence_agent:
     description: "Reads emails and attachments, extracts structured intelligence"
     permissions:
       read:
@@ -45,7 +45,7 @@ agents:
         - cloud_model_invoke
         - external_disclosure
 
-  ChiefOfStaffAgent:
+  cos:
     description: "Routes, coordinates, archives, and escalates"
     permissions:
       read:
