@@ -20,6 +20,9 @@ build/
 /pgdata/
 /redis/
 
+# Audit log (runtime-generated, not tracked in git)
+var/audit/audit.jsonl
+
 # Workspace runtime memory (auto-generated, too noisy for git)
 workspace/memory/
 workspace/knowledge/uploads/
