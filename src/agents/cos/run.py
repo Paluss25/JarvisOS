@@ -11,7 +11,7 @@ from agent_runner.app import create_app
 
 
 def main():
-    workspace = os.environ.get("CHIEF_OF_STAFF_WORKSPACE", "/app/workspace/chief_of_staff")
+    workspace = os.environ.get("CHIEF_OF_STAFF_WORKSPACE", "/app/workspace/cos")
     config = build_chief_of_staff_config(workspace_root=Path(workspace))
 
     logging.basicConfig(

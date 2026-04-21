@@ -21,9 +21,13 @@ def main():
 
     for agent in data.get("agents", []):
         agent_id = agent["id"]
+        # Use 'module' field as the Python module path if provided, else fall back to id.
+        # This handles agents where directory name differs from the agent id
+        # (e.g., id=chief_of_staff module=cos, id=nutrition-director module=don).
+        agent_module = agent.get("module", agent_id)
         port = agent["port"]
         conf = f"""[program:{agent_id}]
-command=python -m agents.{agent_id}.run
+command=python -m agents.{agent_module}.run
 directory=/app
 environment=AGENT_PORT={port},PYTHONPATH=/app/src
 autorestart=true
@@ -33,7 +37,7 @@ stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 """
         (OUTPUT_DIR / f"{agent_id}.conf").write_text(conf)
-        print(f"Generated config for agent '{agent_id}' on port {port}")
+        print(f"Generated config for agent '{agent_id}' (module: {agent_module}) on port {port}")
 
     for worker in data.get("workers", []):
         worker_id = worker["id"]

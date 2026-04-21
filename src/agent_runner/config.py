@@ -29,6 +29,7 @@ class AgentConfig:
     env_prefix: str = ""                     # "CHIEF_" for Roger
     memory_backend: str = "filesystem"       # "filesystem" or "agentic"
     mcp_server_factory: Callable[..., Any] | None = None
+    extra_mcp_servers: dict[str, dict] = field(default_factory=dict)
     builtin_crons: list[dict] = field(default_factory=list)
     default_image_caption: str = "Analyze this image."
     allowed_tools: list[str] = field(default_factory=lambda: [

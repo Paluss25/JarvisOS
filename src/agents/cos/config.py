@@ -47,7 +47,7 @@ MARK_BUILTIN_CRONS = [
 ]
 
 
-def build_chief_of_staff_config(workspace_root: Path = Path("/app/workspace/chief_of_staff")) -> AgentConfig:
+def build_chief_of_staff_config(workspace_root: Path = Path("/app/workspace/cos")) -> AgentConfig:
     from agents.cos.tools import create_chief_of_staff_mcp_server
     return AgentConfig(
         id="chief_of_staff",
