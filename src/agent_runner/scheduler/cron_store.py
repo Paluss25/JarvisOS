@@ -101,9 +101,10 @@ def parse_schedule(schedule: str) -> tuple[str, dict]:
     """Parse a schedule string. Returns (kind, params) or raises ValueError.
 
     kinds and params:
-        "daily"  → {"hour": int, "minute": int}
-        "weekly" → {"dow": int, "hour": int, "minute": int}
-        "once"   → {"date": datetime.date, "hour": int, "minute": int}
+        "daily"    → {"hour": int, "minute": int}
+        "weekly"   → {"dow": int, "hour": int, "minute": int}
+        "once"     → {"date": datetime.date, "hour": int, "minute": int}
+        "interval" → {"minutes": int}   e.g. interval@15m fires every 15 minutes (allowed: 5, 15, 30, 60)
     """
     parts = schedule.strip().split("@")
     kind = parts[0].lower()
@@ -130,9 +131,25 @@ def parse_schedule(schedule: str) -> tuple[str, dict]:
         h, m = _parse_hhmm(parts[2])
         return "once", {"date": target_date, "hour": h, "minute": m}
 
+    if kind == "interval" and len(parts) == 2:
+        try:
+            raw = parts[1].lower()
+            if not raw.endswith("m"):
+                raise ValueError()
+            minutes = int(raw[:-1])
+            _ALLOWED_INTERVAL_MINUTES = {5, 15, 30, 60}
+            if minutes not in _ALLOWED_INTERVAL_MINUTES:
+                raise ValueError()
+        except (ValueError, AttributeError):
+            raise ValueError(
+                f"Invalid interval schedule '{schedule}'. "
+                "Use interval@Nm where N is one of: 5, 15, 30, 60."
+            )
+        return "interval", {"minutes": minutes}
+
     raise ValueError(
         f"Invalid schedule '{schedule}'. "
-        "Valid: daily@HH:MM | weekly@DOW@HH:MM | once@YYYY-MM-DD@HH:MM"
+        "Valid: daily@HH:MM | weekly@DOW@HH:MM | once@YYYY-MM-DD@HH:MM | interval@Nm"
     )
 
 
@@ -159,6 +176,14 @@ def is_due(entry: CronEntry, now: datetime) -> bool:
         kind, params = parse_schedule(entry.schedule)
     except ValueError:
         return False
+
+    if kind == "interval":
+        interval_minutes = params["minutes"]
+        if entry.last_run is None:
+            return True
+        lr = datetime.fromisoformat(entry.last_run).astimezone(_TZ)
+        elapsed = (now - lr).total_seconds() / 60
+        return elapsed >= interval_minutes
 
     h = params["hour"]
     m = params["minute"]
@@ -210,6 +235,9 @@ def was_missed(entry: CronEntry, now: datetime) -> bool:
     try:
         kind, params = parse_schedule(entry.schedule)
     except ValueError:
+        return False
+
+    if kind == "interval":
         return False
 
     h, m_target = params["hour"], params["minute"]
