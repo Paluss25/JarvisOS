@@ -1,4 +1,4 @@
-"""Email Intelligence Agent agent entry point — invoked by supervisord."""
+"""EmailIntelligenceAgent entry point — invoked by supervisord."""
 
 import logging
 import os
@@ -6,13 +6,15 @@ from pathlib import Path
 
 import uvicorn
 
-from agents.emailintel.config import build_emailintel_config
+from agents.email_intelligence.config import build_email_intelligence_config
 from agent_runner.app import create_app
 
 
 def main():
-    workspace = os.environ.get("EMAILINTEL_WORKSPACE", "/app/workspace/emailintel")
-    config = build_emailintel_config(workspace_root=Path(workspace))
+    workspace = os.environ.get(
+        "EMAIL_INTELLIGENCE_WORKSPACE", "/app/workspace/email_intelligence"
+    )
+    config = build_email_intelligence_config(workspace_root=Path(workspace))
 
     logging.basicConfig(
         level=getattr(logging, config.log_level.upper(), logging.INFO),
