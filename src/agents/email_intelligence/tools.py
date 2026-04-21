@@ -62,7 +62,7 @@ except ImportError:
 # MCP server factory
 # ---------------------------------------------------------------------------
 
-def create_emailintel_mcp_server(workspace_path: Path, redis_a2a=None):
+def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
     """Build and return the in-process MCP server with Email Intelligence Agent custom tools.
 
     Returns None if the SDK MCP server API is not available.
@@ -176,7 +176,7 @@ def create_emailintel_mcp_server(workspace_path: Path, redis_a2a=None):
 
     if redis_a2a is not None:
         from agent_runner.tools.send_message import create_send_message_tool
-        _send_message_fn = create_send_message_tool("emailintel", redis_a2a)
+        _send_message_fn = create_send_message_tool("email_intelligence", redis_a2a)
 
         @sdk_tool(
             "send_message",
@@ -312,7 +312,7 @@ def create_emailintel_mcp_server(workspace_path: Path, redis_a2a=None):
     # TODO: append domain-specific tools to all_tools here
 
     try:
-        server = create_sdk_mcp_server(name="emailintel-tools", tools=all_tools)
+        server = create_sdk_mcp_server(name="email_intelligence-tools", tools=all_tools)
         logger.info("mcp_server: in-process MCP server created with %d tools", len(all_tools))
         return server
     except Exception as exc:
