@@ -10,6 +10,7 @@ def test_script_tags_stripped():
     assert "<script>" not in result.sanitized_body
     assert "alert" not in result.sanitized_body
     assert "Hello" in result.sanitized_body
+    assert result.safe == False
 
 
 def test_punycode_link_flagged():

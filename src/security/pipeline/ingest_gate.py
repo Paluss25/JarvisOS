@@ -124,6 +124,9 @@ class IngestGate:
         # --- 2. HTML sanitization of body ------------------------------------
         sanitized_body = self._BLOCK_TAG_RE.sub("", body)
         sanitized_body = self._EVENT_ATTR_RE.sub("", sanitized_body)
+        html_stripped = sanitized_body != body
+        if html_stripped:
+            reasons.append("ACTIVE_HTML_STRIPPED")
 
         # --- 3. Subject sanitization -----------------------------------------
         sanitized_subject = self._ALL_TAGS_RE.sub("", subject)
@@ -148,7 +151,7 @@ class IngestGate:
                     attachment_risk = "high"
 
         # --- 5. Safe flag ----------------------------------------------------
-        safe = len(blocked_attachments) == 0 and len(suspicious_links) == 0
+        safe = len(blocked_attachments) == 0 and len(suspicious_links) == 0 and not html_stripped
 
         return IngestResult(
             safe=safe,
