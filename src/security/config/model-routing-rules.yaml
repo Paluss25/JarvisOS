@@ -1,0 +1,44 @@
+version: "1.0"
+name: "model-routing-rules"
+
+defaults:
+  local_first: true
+  cloud_default_disabled: true
+  deny_if_route_uncertain: true
+
+model_classes:
+  parsing:
+    default: local_small_or_rules
+    fallback: local_7b
+
+  reasoning:
+    default: local_14b
+    fallback: local_7b
+
+routing_rules:
+  - id: local_only_for_sensitive
+    if:
+      sensitivity_in:
+        - sensitive
+        - critical
+    then:
+      route: local_only
+
+  - id: local_only_for_sensitive_domains
+    if:
+      business_domain_in:
+        - finance
+        - legal
+        - security
+    then:
+      route: local_only
+
+  - id: cloud_allowed_for_redacted_internal
+    if:
+      sensitivity_equals: internal
+      redaction_applied: true
+      external_processing_approved: true
+      provider_approved: true
+      no_irreversible_action_follows: true
+    then:
+      route: cloud_allowed

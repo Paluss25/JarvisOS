@@ -1,0 +1,44 @@
+version: "1.0"
+name: "approval-policy"
+
+default_policy:
+  deny_execution_without_policy_check: true
+  deny_execution_without_required_token: true
+  tokens_must_be_action_bound: true
+  tokens_must_be_target_bound: true
+  tokens_must_expire: true
+
+approval_classes:
+  auto_allowed:
+    description: "Safe internal actions"
+    actions:
+      - classify_email
+      - summarize_email
+      - extract_entities
+      - create_structured_payload
+      - store_structured_metadata
+      - create_routing_decision
+      - mark_for_review
+      - request_domain_analysis
+      - request_human_review
+      - create_internal_execution_plan
+
+  human_approval_required:
+    description: "Sensitive but single-approval actions"
+    actions:
+      - send_external_email
+      - delete_email
+      - archive_permanently
+      - disclose_data_to_cloud
+      - release_from_quarantine
+      - forward_sensitive_attachment
+
+  two_step_approval_required:
+    description: "High-risk or irreversible actions"
+    actions:
+      - payment_execution
+      - vendor_bank_change_acceptance
+      - legal_commitment_response
+      - security_containment_with_operational_impact
+      - high_value_financial_approval
+      - destructive_security_action

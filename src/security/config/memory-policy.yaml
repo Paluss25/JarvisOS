@@ -1,0 +1,71 @@
+version: "1.0"
+name: "memory-policy"
+
+defaults:
+  encryption_at_rest: true
+  encryption_in_transit: true
+  deny_if_store_unknown: true
+  deny_if_content_scope_unknown: true
+
+stores:
+  raw_email_store:
+    description: "Original emails and attachment binaries/text"
+    allowed_content:
+      - raw_email_headers
+      - raw_email_body
+      - attachment_binary
+      - attachment_extracted_text
+    forbidden_content:
+      - embeddings
+    access_roles:
+      - EmailIntelligenceAgent
+      - ChiefOfStaffAgent
+    retention_days: 90
+    vectorization_allowed: false
+
+  structured_store:
+    description: "Extracted metadata, entities, classification, summaries, decisions"
+    allowed_content:
+      - email_metadata
+      - entities
+      - classification
+      - redacted_summary
+      - routing_decision
+      - domain_assessment
+      - approval_state
+    forbidden_content:
+      - raw_attachment_binary
+    access_roles:
+      - EmailIntelligenceAgent
+      - ChiefOfStaffAgent
+      - CFOAgent
+      - CISOAgent
+      - CIOAgent
+      - CLOAgent
+      - COOAgent
+      - CEOAgent
+    retention_days: 180
+    pii_minimized: true
+
+  vector_store:
+    description: "Semantic retrieval memory"
+    allowed_content:
+      - redacted_summary
+      - minimized_context_bundle
+      - redacted_domain_note
+    forbidden_content:
+      - raw_email_body
+      - raw_attachment_text
+      - direct_pii_payload
+      - credentials
+      - raw_financial_identifiers
+    access_roles:
+      - ChiefOfStaffAgent
+      - CFOAgent
+      - CISOAgent
+      - CIOAgent
+      - CLOAgent
+    retention_days: 60
+    namespace_per_domain: true
+    vectorization_allowed: true
+    redaction_required: true

@@ -1,0 +1,72 @@
+version: "1.0"
+name: "agent-permissions"
+
+default_policy:
+  deny_if_not_explicitly_allowed: true
+  require_agent_identity: true
+  require_resource_scope: true
+  require_audit_on_denial: true
+
+shared_constraints:
+  no_agent_may:
+    - execute_irreversible_action_without_approval
+    - bypass_policy_engine
+    - read_unscoped_raw_memory
+    - embed_raw_email_content
+    - disclose_sensitive_data_to_cloud_without_policy_approval
+    - change_security_policy_directly
+
+agents:
+  EmailIntelligenceAgent:
+    description: "Reads emails and attachments, extracts structured intelligence"
+    permissions:
+      read:
+        - inbound_email_headers
+        - inbound_email_body
+        - inbound_email_attachments
+        - sender_metadata
+      write:
+        - raw_email_store
+        - structured_store
+        - vector_store_redacted_only
+      execute:
+        - parse_email
+        - parse_attachment
+        - classify_domain
+        - classify_sensitivity
+        - extract_entities
+        - create_structured_payload
+      denied:
+        - send_email
+        - delete_email
+        - archive_permanently
+        - payment_execution
+        - policy_change
+        - cloud_model_invoke
+        - external_disclosure
+
+  ChiefOfStaffAgent:
+    description: "Routes, coordinates, archives, and escalates"
+    permissions:
+      read:
+        - structured_store
+        - routing_history
+        - escalation_history
+        - redacted_vector_memory
+      write:
+        - decision_store
+        - structured_store
+      execute:
+        - route_case
+        - request_domain_analysis
+        - escalate_case
+        - hold_case
+        - mark_case_for_review
+      denied:
+        - send_email
+        - delete_email
+        - payment_execution
+        - infrastructure_change
+        - legal_commitment
+        - cloud_model_invoke
+        - direct_external_disclosure
