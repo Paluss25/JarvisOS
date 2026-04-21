@@ -104,7 +104,7 @@ agents:
   memory:
     backend: filesystem
 - id: chief_of_staff
-  port: 8006
+  port: 8008
   workspace: workspace/chief_of_staff
   telegram_token_env: TELEGRAM_CHIEF_OF_STAFF_TOKEN
   telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
@@ -143,6 +143,7 @@ agents:
   memory:
     backend: filesystem
 - id: nutrition-director
+  module: nutrition
   port: 8007
   workspace: workspace/nutrition-director
   reports_to: drhouse
