@@ -17,6 +17,11 @@ services:
       - "8801:8001"   # Roger agent (Chief of Sport)
       - "8802:8002"   # Timothy agent (CIO)
       - "8803:8003"   # Warren agent (CFO)
+      - "8804:8004"   # Mark agent (legacy Chief of Staff)
+      - "8805:8005"   # EmailIntelligence agent
+      - "8806:8006"   # DrHouse agent (Chief of Health)
+      - "8807:8007"   # NutritionDirector agent
+      - "8808:8008"   # ChiefOfStaff agent (COS)
       - "8900:8900"   # Platform API (dashboard, management)
       - "8013:8013"   # worker-ops-detector (Grafana webhook + health)
     env_file: /home/paluss/docker/.env
@@ -26,6 +31,8 @@ services:
       DETECTOR_POLL_INTERVAL: "300"
       DETECTOR_LOOKBACK_MINUTES: "10"
       DETECTOR_PORT: "8013"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://10.10.200.139:4317"
+      OTEL_SERVICE_NAME: "jarvios-platform"
     labels:
       # Jarvis API — jarvis.prova9x.com
       - "traefik.enable=true"
@@ -45,6 +52,7 @@ services:
       - /home/paluss/.claude/.credentials.json:/root/.claude/.credentials.json
       - /home/paluss/docker/.env:/app/.env:ro
       - /home/paluss/Brains/HomeLab/operations/runbooks/jarvios:/app/runbooks:rw
+      - /home/paluss/docker/compose/jarvisOS/var/audit:/app/var/audit:rw
       # SSH identity key for CIO remote host management
       # config + known_hosts come from /app/shared/ssh/ and are copied by entrypoint.sh
       - /home/paluss/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
