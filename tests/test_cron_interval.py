@@ -54,6 +54,17 @@ def test_is_due_interval_not_elapsed():
     assert is_due(entry, now) is False
 
 
+def test_is_due_interval_exactly_elapsed():
+    entry = CronEntry({
+        "id": "eee", "name": "poll", "schedule": "interval@15m",
+        "prompt": "check",
+        "last_run": datetime(2026, 4, 21, 9, 45, 0, tzinfo=_TZ).isoformat(),
+        "enabled": True, "builtin": True,
+    })
+    now = datetime(2026, 4, 21, 10, 0, 0, tzinfo=_TZ)  # exactly 15 min later
+    assert is_due(entry, now) is True
+
+
 def test_was_missed_interval_always_false():
     entry = CronEntry({
         "id": "ddd", "name": "poll", "schedule": "interval@15m",

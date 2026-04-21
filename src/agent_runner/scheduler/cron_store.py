@@ -50,6 +50,8 @@ _DOW_MAP: dict[str, int] = {
 _WINDOW_MINUTES = 4        # minutes after target time still considered "due"
 _MISSED_WINDOW_HOURS = 23  # max age of a missed task before we stop trying
 
+_ALLOWED_INTERVAL_MINUTES: frozenset[int] = frozenset({5, 15, 30, 60})
+
 
 # ---------------------------------------------------------------------------
 # CronEntry
@@ -137,7 +139,6 @@ def parse_schedule(schedule: str) -> tuple[str, dict]:
             if not raw.endswith("m"):
                 raise ValueError()
             minutes = int(raw[:-1])
-            _ALLOWED_INTERVAL_MINUTES = {5, 15, 30, 60}
             if minutes not in _ALLOWED_INTERVAL_MINUTES:
                 raise ValueError()
         except (ValueError, AttributeError):
@@ -181,7 +182,10 @@ def is_due(entry: CronEntry, now: datetime) -> bool:
         interval_minutes = params["minutes"]
         if entry.last_run is None:
             return True
-        lr = datetime.fromisoformat(entry.last_run).astimezone(_TZ)
+        dt = datetime.fromisoformat(entry.last_run)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_TZ)
+        lr = dt.astimezone(_TZ)
         elapsed = (now - lr).total_seconds() / 60
         return elapsed >= interval_minutes
 
