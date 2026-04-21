@@ -1,65 +1,173 @@
-# agents.yaml — JarvisOS agent registry
-# Read by supervisord config generator + Platform API
-
 platform:
   pipeline_model: gemini-2.5-flash
   pipeline_fallback: haiku
   postgresql_url_env: JARVIOS_POSTGRES_URL
   redis_url_env: REDIS_URL
-
 agents:
-  - id: jarvis
-    port: 8000
-    workspace: workspace/jarvis
-    telegram_token_env: TELEGRAM_JARVIS_TOKEN
-    telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
-    domains: ["*"]
-    capabilities: [delegation, planning, coordination, general-knowledge]
-    memory:
-      backend: filesystem
-
-  - id: roger
-    port: 8001
-    workspace: workspace/roger
-    telegram_token_env: TELEGRAM_CHIEF_TOKEN
-    telegram_chat_id_env: TELEGRAM_SPORT_CHAT_ID
-    domains: [sport, health]
-    capabilities: [sport-analysis, training-plans, nutrition, race-strategy]
-    memory:
-      backend: filesystem
-
-  - id: timothy
-    port: 8002
-    workspace: workspace/timothy
-    telegram_token_env: TELEGRAM_TIMOTHY_TOKEN
-    telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
-    domains: [infrastructure, security, devops, it-operations]
-    capabilities: [infra-monitoring, security-audit, docker-management, log-analysis]
-    memory:
-      backend: filesystem
-
-  - id: cfo
-    port: 8003
-    workspace: workspace/cfo
-    telegram_token_env: TELEGRAM_CFO_TOKEN
-    telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
-    domains: [finance, crypto, investments, budgets, fiscal]
-    capabilities: [budget-analysis, crypto-portfolio, cost-analysis, trading-analysis, fiscal-compliance]
-    memory:
-      backend: filesystem
-
+- id: jarvis
+  port: 8000
+  workspace: workspace/jarvis
+  telegram_token_env: TELEGRAM_JARVIS_TOKEN
+  telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
+  domains:
+  - '*'
+  capabilities:
+  - delegation
+  - planning
+  - coordination
+  - general-knowledge
+  memory:
+    backend: filesystem
+- id: roger
+  port: 8001
+  workspace: workspace/roger
+  reports_to: drhouse
+  domains:
+  - sport
+  - fitness
+  capabilities:
+  - sport-analysis
+  - training-plans
+  - race-strategy
+  - performance-tracking
+  memory:
+    backend: filesystem
+- id: timothy
+  port: 8002
+  workspace: workspace/timothy
+  telegram_token_env: TELEGRAM_TIMOTHY_TOKEN
+  telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
+  domains:
+  - infrastructure
+  - security
+  - devops
+  - it-operations
+  capabilities:
+  - infra-monitoring
+  - security-audit
+  - docker-management
+  - log-analysis
+  memory:
+    backend: filesystem
+- id: cfo
+  port: 8003
+  workspace: workspace/cfo
+  telegram_token_env: TELEGRAM_CFO_TOKEN
+  telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
+  domains:
+  - finance
+  - crypto
+  - investments
+  - budgets
+  - fiscal
+  capabilities:
+  - budget-analysis
+  - crypto-portfolio
+  - cost-analysis
+  - trading-analysis
+  - fiscal-compliance
+  memory:
+    backend: filesystem
+- id: mark
+  port: 8004
+  workspace: workspace/mark
+  telegram_token_env: TELEGRAM_MARK_TOKEN
+  telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
+  domains:
+  - email
+  - communications
+  - routing
+  - coordination
+  - triage
+  capabilities:
+  - email-triage
+  - routing-decisions
+  - escalation-management
+  - priority-assessment
+  - cross-domain-coordination
+  memory:
+    backend: filesystem
+- id: email_intelligence
+  port: 8005
+  workspace: workspace/email_intelligence
+  domains:
+  - email
+  - intelligence
+  - extraction
+  - analysis
+  capabilities:
+  - fact-extraction
+  - entity-identification
+  - domain-classification
+  - sensitivity-assessment
+  - security-pipeline
+  memory:
+    backend: filesystem
+- id: chief_of_staff
+  port: 8006
+  workspace: workspace/chief_of_staff
+  telegram_token_env: TELEGRAM_CHIEF_OF_STAFF_TOKEN
+  telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
+  domains:
+  - email
+  - communications
+  - routing
+  - coordination
+  - triage
+  capabilities:
+  - email-routing
+  - escalation-management
+  - priority-assessment
+  - cross-domain-coordination
+  memory:
+    backend: filesystem
+- id: drhouse
+  port: 8006
+  workspace: workspace/drhouse
+  telegram_token_env: TELEGRAM_DRHOUSE_TOKEN
+  telegram_chat_id_env: TELEGRAM_HEALTH_CHAT_ID
+  reports_to: jarvis
+  domains:
+  - health
+  - sport
+  - nutrition
+  - medical
+  capabilities:
+  - health-orchestration
+  - conflict-resolution
+  - medical-screening
+  - cross-domain-analysis
+  directors:
+  - roger
+  - nutrition-director
+  memory:
+    backend: filesystem
+- id: nutrition-director
+  port: 8007
+  workspace: workspace/nutrition-director
+  reports_to: drhouse
+  domains:
+  - nutrition
+  - meals
+  - diet
+  capabilities:
+  - meal-recognition
+  - nutrition-resolution
+  - barcode-lookup
+  - meal-logging
+  - food-coaching
+  memory:
+    backend: filesystem
 workers:
-  - id: finance
-    port: 8010
-    module: workers.finance.app
-    description: "YNAB, BTC fiscal, transaction categorization, reconciliation"
-
-  - id: cost
-    port: 8011
-    module: workers.cost.app
-    description: "LLM costs, power, YNAB budget control, ROI analysis"
-
-  - id: market
-    port: 8012
-    module: workers.market.app
-    description: "Polymarket positions, strategy, trade journal, Kelly sizing"
+- id: finance
+  port: 8010
+  module: workers.finance.app
+  description: YNAB, BTC fiscal, transaction categorization, reconciliation
+- id: cost
+  port: 8011
+  module: workers.cost.app
+  description: LLM costs, power, YNAB budget control, ROI analysis
+- id: market
+  port: 8012
+  module: workers.market.app
+  description: Polymarket positions, strategy, trade journal, Kelly sizing
