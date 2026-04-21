@@ -14,10 +14,11 @@ ROGER_BUILTIN_CRONS = [
             "1. Any new activities logged yesterday (use sport_query)\n"
             "2. Today's planned training session (check training_plan table)\n"
             "3. Any pending body measurements (last measurement date)\n"
-            "Direct, no fluff."
+            "Direct, no fluff. "
+            "Send the result to DrHouse via send_message(to='drhouse', message=<your briefing>)."
         ),
         "session_id": "heartbeat-morning",
-        "telegram_notify": True,
+        "telegram_notify": False,
         "builtin": True,
     },
     {
@@ -26,7 +27,8 @@ ROGER_BUILTIN_CRONS = [
         "prompt": (
             "End of sport day. Summarise today in 2-3 bullet points: "
             "training completed/skipped, meals logged, any measurements. "
-            "If any data was logged, confirm it's saved to the database."
+            "If any data was logged, confirm it's saved to the database. "
+            "Send the summary to DrHouse via send_message(to='drhouse', message=<your summary>)."
         ),
         "session_id": "heartbeat-eod",
         "telegram_notify": False,
@@ -39,10 +41,12 @@ ROGER_BUILTIN_CRONS = [
             "Weekly sport report. Run the rules engine (run_rules_engine with "
             "check_type='weekly') and summarize the week: training adherence, "
             "nutrition adherence, body composition trend, flags and recommendations. "
-            "Be data-driven and direct."
+            "Be data-driven and direct. "
+            "Send the sport report to DrHouse via send_message(to='drhouse', message=<report>). "
+            "DrHouse will include it in the integrated weekly health report to Jarvis."
         ),
         "session_id": "heartbeat-weekly-report",
-        "telegram_notify": True,
+        "telegram_notify": False,
         "builtin": True,
     },
     {
@@ -55,7 +59,7 @@ ROGER_BUILTIN_CRONS = [
             "Remove stale entries. Return ONLY the raw markdown — no commentary."
         ),
         "session_id": "heartbeat-weekly-memory",
-        "telegram_notify": True,
+        "telegram_notify": False,
         "builtin": True,
     },
 ]
@@ -68,9 +72,9 @@ def build_roger_config(workspace_root: Path = Path("/app/workspace/roger")) -> A
         name="Roger",
         port=8001,
         workspace_path=workspace_root,
-        telegram_token_env="TELEGRAM_CHIEF_TOKEN",
-        telegram_chat_id_env="TELEGRAM_SPORT_CHAT_ID",
-        domains=["sport", "fitness", "health", "nutrition"],
+        telegram_token_env="",
+        telegram_chat_id_env="",
+        domains=["sport", "fitness"],
         capabilities=["sport-analysis", "training-planning", "body-composition", "strava-integration"],
         model_env="CLAUDE_MODEL",
         fallback_model_env="CLAUDE_FALLBACK_MODEL",

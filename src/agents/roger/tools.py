@@ -6,6 +6,10 @@ Tools:
   memory_get         — Read a specific memory file from workspace
   sport_query        — SELECT queries against sport_metrics PostgreSQL DB
   sport_execute      — INSERT/UPDATE/DELETE operations on sport_metrics
+  sport_ddl          — CREATE/ALTER schema changes on sport_metrics
+  nutrition_query    — SELECT queries against nutrition_data PostgreSQL DB
+  nutrition_execute  — INSERT/UPDATE/DELETE operations on nutrition_data
+  nutrition_ddl      — CREATE/ALTER schema changes on nutrition_data
   run_rules_engine   — Deterministic rules evaluation (load, adherence, plateau)
   send_message       — Send a message to another agent via Redis pub/sub
   strava_list_recent — List recent Strava activities
@@ -101,6 +105,36 @@ async def _pg_run(sql: str, params: list | None = None) -> str:
     url = os.environ.get("SPORT_POSTGRES_URL", "")
     if not url:
         raise RuntimeError("SPORT_POSTGRES_URL not configured")
+
+    conn = await asyncpg.connect(url)
+    try:
+        result = await conn.execute(sql, *(_coerce_params(params) or []))
+        return str(result)
+    finally:
+        await conn.close()
+
+
+async def _nutrition_execute(sql: str, params: list | None = None) -> list[dict]:
+    """Run a query against nutrition_data and return rows as list of dicts."""
+    import asyncpg
+    url = os.environ.get("NUTRITION_POSTGRES_URL", "")
+    if not url:
+        raise RuntimeError("NUTRITION_POSTGRES_URL not configured")
+
+    conn = await asyncpg.connect(url)
+    try:
+        rows = await conn.fetch(sql, *(_coerce_params(params) or []))
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def _nutrition_run(sql: str, params: list | None = None) -> str:
+    """Run a DML/DDL statement against nutrition_data and return a status string."""
+    import asyncpg
+    url = os.environ.get("NUTRITION_POSTGRES_URL", "")
+    if not url:
+        raise RuntimeError("NUTRITION_POSTGRES_URL not configured")
 
     conn = await asyncpg.connect(url)
     try:
@@ -400,14 +434,21 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "sport_query",
         "Execute a SELECT query against the sport_metrics PostgreSQL database. "
-        "Tables: activities, body_measurements, waist_measurements, meals, "
-        "training_plan, weekly_summaries. Returns rows as JSON.",
-        {"sql": str, "params": list},
+        "Tables: activities, body_measurements, waist_measurements, training_plan, "
+        "weekly_summaries, athlete_profile, goals, strength_sets. Returns rows as JSON. "
+        "For meal and nutrition data use nutrition_query instead.",
+        {"sql": str, "params": {"type": "array", "items": {}, "default": []}},
     )
     async def sport_query(args: dict) -> dict:
         args = _parse_args(args)
         sql = (args.get("sql") or "").strip()
-        params = args.get("params") or []
+        raw_params = args.get("params") or []
+        if isinstance(raw_params, str):
+            try:
+                raw_params = json.loads(raw_params)
+            except Exception:
+                raw_params = []
+        params = raw_params if isinstance(raw_params, list) else []
         if not sql:
             return {"content": [{"type": "text", "text": "No SQL provided."}]}
         if not sql.upper().startswith("SELECT"):
@@ -423,12 +464,18 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "sport_execute",
         "Execute an INSERT, UPDATE, or DELETE on the sport_metrics database. "
         "Use for logging activities, meals, measurements. Returns affected row count.",
-        {"sql": str, "params": list},
+        {"sql": str, "params": {"type": "array", "items": {}, "default": []}},
     )
     async def sport_execute(args: dict) -> dict:
         args = _parse_args(args)
         sql = (args.get("sql") or "").strip()
-        params = args.get("params") or []
+        raw_params = args.get("params") or []
+        if isinstance(raw_params, str):
+            try:
+                raw_params = json.loads(raw_params)
+            except Exception:
+                raw_params = []
+        params = raw_params if isinstance(raw_params, list) else []
         if not sql:
             return {"content": [{"type": "text", "text": "No SQL provided."}]}
         if sql.upper().startswith("SELECT"):
@@ -450,6 +497,151 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         except Exception as exc:
             logger.error("sport_execute: error — %s", exc)
             return {"content": [{"type": "text", "text": f"Execute error: {exc}"}], "is_error": True}
+
+    @sdk_tool(
+        "sport_ddl",
+        "Execute a DDL statement on the sport_metrics database: CREATE TABLE, "
+        "CREATE INDEX, ALTER TABLE (ADD/ALTER/RENAME COLUMN). "
+        "DROP, TRUNCATE, GRANT, and REVOKE are blocked. "
+        "Use this to extend the schema with new tracking tables or columns.",
+        {"sql": str},
+    )
+    async def sport_ddl(args: dict) -> dict:
+        args = _parse_args(args)
+        sql = (args.get("sql") or "").strip()
+        if not sql:
+            return _text("No SQL provided.")
+        first_word = sql.split()[0].upper() if sql.split() else ""
+        _ALLOWED = {"CREATE", "ALTER"}
+        _BLOCKED = {"DROP", "TRUNCATE", "GRANT", "REVOKE"}
+        if first_word in _BLOCKED:
+            return {
+                "content": [{"type": "text", "text": (
+                    f"DDL blocked: {first_word} is not allowed via sport_ddl. "
+                    "Only CREATE and ALTER statements are permitted."
+                )}],
+                "is_error": True,
+            }
+        if first_word not in _ALLOWED:
+            return {
+                "content": [{"type": "text", "text": (
+                    f"Unexpected DDL verb '{first_word}'. "
+                    "sport_ddl only accepts CREATE or ALTER statements."
+                )}],
+                "is_error": True,
+            }
+        try:
+            result = await _pg_run(sql)
+            return _text(f"OK: {result}")
+        except Exception as exc:
+            logger.error("sport_ddl: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"DDL error: {exc}"}], "is_error": True}
+
+    @sdk_tool(
+        "nutrition_query",
+        "Execute a SELECT query against the nutrition_data PostgreSQL database. "
+        "Primary table: meals (id, date, meal_type, description, calories_est, protein_g, carbs_g, fat_g, "
+        "confidence_score, image_ref, notes, created_at, user_id). "
+        "Returns rows as JSON.",
+        {"sql": str, "params": {"type": "array", "items": {}, "default": []}},
+    )
+    async def nutrition_query(args: dict) -> dict:
+        args = _parse_args(args)
+        sql = (args.get("sql") or "").strip()
+        raw_params = args.get("params") or []
+        if isinstance(raw_params, str):
+            try:
+                raw_params = json.loads(raw_params)
+            except Exception:
+                raw_params = []
+        params = raw_params if isinstance(raw_params, list) else []
+        if not sql:
+            return _text("No SQL provided.")
+        if not sql.upper().startswith("SELECT"):
+            return _text("nutrition_query only accepts SELECT statements. Use nutrition_execute for writes.")
+        try:
+            rows = await _nutrition_execute(sql, params or None)
+            return {"content": [{"type": "text", "text": json.dumps(rows, default=str, indent=2)}]}
+        except Exception as exc:
+            logger.error("nutrition_query: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"Query error: {exc}"}], "is_error": True}
+
+    @sdk_tool(
+        "nutrition_execute",
+        "Execute an INSERT, UPDATE, or DELETE on the nutrition_data database. "
+        "Use for logging meals and any custom nutrition tables. Returns affected row count.",
+        {"sql": str, "params": {"type": "array", "items": {}, "default": []}},
+    )
+    async def nutrition_execute(args: dict) -> dict:
+        args = _parse_args(args)
+        sql = (args.get("sql") or "").strip()
+        raw_params = args.get("params") or []
+        if isinstance(raw_params, str):
+            try:
+                raw_params = json.loads(raw_params)
+            except Exception:
+                raw_params = []
+        params = raw_params if isinstance(raw_params, list) else []
+        if not sql:
+            return _text("No SQL provided.")
+        if sql.upper().startswith("SELECT"):
+            return _text("nutrition_execute is for writes. Use nutrition_query for SELECT statements.")
+        _DDL_KEYWORDS = {"ALTER", "CREATE", "DROP", "TRUNCATE", "GRANT", "REVOKE"}
+        first_word = sql.split()[0].upper() if sql.split() else ""
+        if first_word in _DDL_KEYWORDS:
+            return {
+                "content": [{"type": "text", "text": (
+                    f"DDL not allowed via nutrition_execute (blocked: {first_word}). "
+                    "Only INSERT, UPDATE, and DELETE are permitted. "
+                    "Use nutrition_ddl for schema changes."
+                )}],
+                "is_error": True,
+            }
+        try:
+            result = await _nutrition_run(sql, params or None)
+            return _text(f"OK: {result}")
+        except Exception as exc:
+            logger.error("nutrition_execute: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"Execute error: {exc}"}], "is_error": True}
+
+    @sdk_tool(
+        "nutrition_ddl",
+        "Execute a DDL statement on the nutrition_data database: CREATE TABLE, "
+        "CREATE INDEX, ALTER TABLE (ADD/ALTER/RENAME COLUMN). "
+        "DROP, TRUNCATE, GRANT, and REVOKE are blocked. "
+        "Use this to create new nutrition tracking tables or extend existing ones.",
+        {"sql": str},
+    )
+    async def nutrition_ddl(args: dict) -> dict:
+        args = _parse_args(args)
+        sql = (args.get("sql") or "").strip()
+        if not sql:
+            return _text("No SQL provided.")
+        first_word = sql.split()[0].upper() if sql.split() else ""
+        _ALLOWED = {"CREATE", "ALTER"}
+        _BLOCKED = {"DROP", "TRUNCATE", "GRANT", "REVOKE"}
+        if first_word in _BLOCKED:
+            return {
+                "content": [{"type": "text", "text": (
+                    f"DDL blocked: {first_word} is not allowed via nutrition_ddl. "
+                    "Only CREATE and ALTER statements are permitted."
+                )}],
+                "is_error": True,
+            }
+        if first_word not in _ALLOWED:
+            return {
+                "content": [{"type": "text", "text": (
+                    f"Unexpected DDL verb '{first_word}'. "
+                    "nutrition_ddl only accepts CREATE or ALTER statements."
+                )}],
+                "is_error": True,
+            }
+        try:
+            result = await _nutrition_run(sql)
+            return _text(f"OK: {result}")
+        except Exception as exc:
+            logger.error("nutrition_ddl: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"DDL error: {exc}"}], "is_error": True}
 
     @sdk_tool(
         "run_rules_engine",
@@ -645,7 +837,9 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
 
     all_tools = [
         daily_log, memory_search, memory_get,
-        sport_query, sport_execute, run_rules_engine,
+        sport_query, sport_execute, sport_ddl,
+        nutrition_query, nutrition_execute, nutrition_ddl,
+        run_rules_engine,
         strava_list_recent, strava_download,
         cron_create, cron_list, cron_update, cron_delete,
     ]

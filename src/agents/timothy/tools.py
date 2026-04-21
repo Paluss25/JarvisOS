@@ -444,20 +444,27 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "pg_query",
         "Run a read-only SELECT query against a named PostgreSQL database. "
-        "db: one of 'sport_metrics', 'gestionale', 'cedolino', 'jarvios'. "
+        "db: one of 'sport_metrics', 'nutrition_data', 'gestionale', 'cedolino', 'jarvios'. "
         "sql: a SELECT statement. "
         "params: optional list of query parameters (for $1/$2 placeholders). "
         "Returns rows as JSON. Use this to check DB health, counts, or diagnose data issues.",
-        {"db": str, "sql": str, "params": list},
+        {"db": str, "sql": str, "params": {"type": "array", "items": {}, "default": []}},
     )
     async def pg_query(args: dict) -> dict:
         args = _parse_args(args)
         db = (args.get("db") or "").strip().lower()
         sql = (args.get("sql") or "").strip()
-        params = args.get("params") or []
+        raw_params = args.get("params") or []
+        if isinstance(raw_params, str):
+            try:
+                raw_params = json.loads(raw_params)
+            except Exception:
+                raw_params = []
+        params = raw_params if isinstance(raw_params, list) else []
 
         DB_URLS = {
             "sport_metrics": os.environ.get("SPORT_POSTGRES_URL", ""),
+            "nutrition_data": os.environ.get("NUTRITION_POSTGRES_URL", ""),
             "gestionale": os.environ.get("GESTIONALE_POSTGRES_URL", ""),
             "cedolino": os.environ.get("CEDOLINO_POSTGRES_URL", ""),
             "jarvios": os.environ.get("JARVIOS_POSTGRES_URL", ""),
