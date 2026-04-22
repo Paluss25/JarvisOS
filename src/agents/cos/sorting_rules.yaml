@@ -1,0 +1,53 @@
+# sorting_rules.yaml
+# COS Email Auto-Sorter — user-defined rules
+#
+# Rule format:
+#   name:       Human-readable label (for logs)
+#   match:      "all" (AND) | "any" (OR)
+#   conditions: one or more of:
+#     sender:           glob pattern (e.g. "*@amazon.it")
+#     subject_contains: substring or list of substrings
+#     body_contains:    substring or list of substrings
+#     primary_domain:   classifier output (finance, health, work, personal…)
+#     priority:         high | normal | low
+#     sensitivity:      public | internal | confidential
+#   folder:     target IMAP folder (created automatically if missing)
+#
+# Rules are evaluated in order — the first match wins.
+
+version: 1
+defaults:
+  create_folder_if_missing: true
+  on_no_match: keep
+
+rules: []
+# Example rules (uncomment and edit as needed):
+#
+#   - name: "Amazon ordini"
+#     match: all
+#     conditions:
+#       sender: "*@amazon.it"
+#       subject_contains: "ordine"
+#     folder: "Acquisti"
+#
+#   - name: "Fatture"
+#     match: any
+#     conditions:
+#       subject_contains: "fattura"
+#       body_contains: "importo dovuto"
+#     folder: "Fatture"
+#
+#   - name: "Finance urgenti"
+#     match: all
+#     conditions:
+#       primary_domain: "finance"
+#       priority: "high"
+#     folder: "Urgenti"
+#
+#   - name: "Newsletter"
+#     match: any
+#     conditions:
+#       body_contains:
+#         - "unsubscribe"
+#         - "cancella iscrizione"
+#     folder: "Newsletter"
