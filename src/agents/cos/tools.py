@@ -21,6 +21,8 @@ import logging
 import uuid
 from pathlib import Path
 
+from agents.cos.email_sorter import sort_email_after_routing
+
 logger = logging.getLogger(__name__)
 
 
@@ -349,6 +351,14 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
                     "priority": routing_decision.get("priority"),
                 },
             ))
+
+            # Sort email into IMAP folder after routing (deterministic, non-blocking)
+            _uid = payload_dict.get("email_id", "")
+            if _uid:
+                try:
+                    sort_email_after_routing(_uid, payload_dict)
+                except Exception as _sort_exc:
+                    logger.warning("route_email_payload: sort step failed — %s", _sort_exc)
 
             return _text(json.dumps(routing_decision, ensure_ascii=False))
         except Exception as exc:
