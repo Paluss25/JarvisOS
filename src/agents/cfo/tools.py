@@ -353,7 +353,7 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
         @sdk_tool(
             "send_message",
             "Send a message to another agent and wait for their response. "
-            "Use 'to' to specify the target agent ID (e.g. 'jarvis' for the CEO). "
+            "Use 'to' to specify the target agent ID (e.g. 'ceo' for the CEO). "
             "'message' is the natural language request to send. "
             "Use for executive briefings, HITL approvals for financial actions, "
             "or cross-domain escalation.",
@@ -465,11 +465,16 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text(f"Error: {exc}")
 
     # --- Build server -------------------------------------------------------
+    from agent_runner.tools.report_issue import create_report_issue_tool, REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA
+
+    @sdk_tool("report_issue", REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA)
+    async def report_issue(args: dict) -> dict:
+        return await create_report_issue_tool("cfo")(args)
 
     all_tools = [
         daily_log, memory_search, memory_get,
         dispatch_worker, memory_lookup, rag_search,
-        cron_create, cron_list, cron_update, cron_delete,
+        cron_create, cron_list, cron_update, cron_delete, report_issue,
     ]
     if send_message is not None:
         all_tools.append(send_message)

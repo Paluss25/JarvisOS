@@ -459,11 +459,16 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
         return _text(result)
 
     # --- Assemble server ----------------------------------------------------
+    from agent_runner.tools.report_issue import create_report_issue_tool, REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA
+
+    @sdk_tool("report_issue", REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA)
+    async def report_issue(args: dict) -> dict:
+        return await create_report_issue_tool("cos")(args)
 
     all_tools = [
         daily_log, memory_search, memory_get,
         cron_create, cron_list, cron_update, cron_delete,
-        route_email_payload, get_routing_history, route_case,
+        route_email_payload, get_routing_history, route_case, report_issue,
     ]
     if send_message is not None:
         all_tools.append(send_message)
