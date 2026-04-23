@@ -7,9 +7,7 @@ name: jarvios-platform
 
 services:
   jarvios:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: 10.10.200.61:5000/jarvios-platform:latest
     container_name: jarvios-platform
     restart: unless-stopped
     ports:
@@ -39,22 +37,23 @@ services:
       - "traefik.http.routers.jarvis.rule=Host(`jarvis.prova9x.com`)"
       - "traefik.http.routers.jarvis.entrypoints=websecure"
       - "traefik.http.routers.jarvis.middlewares=crowdsec-bouncer@file"
+      - "traefik.http.routers.jarvis.service=jarvis"
       - "traefik.http.services.jarvis.loadbalancer.server.port=8000"
       # Dashboard — jarvis-dashboard.prova9x.com
       - "traefik.http.routers.jarvis-dashboard.rule=Host(`jarvis-dashboard.prova9x.com`)"
       - "traefik.http.routers.jarvis-dashboard.entrypoints=websecure"
       - "traefik.http.routers.jarvis-dashboard.middlewares=crowdsec-bouncer@file"
+      - "traefik.http.routers.jarvis-dashboard.service=jarvis-dashboard"
       - "traefik.http.services.jarvis-dashboard.loadbalancer.server.port=8900"
     volumes:
       - /home/paluss/docker/appdata/jarvios-workspaces:/app/workspace
+      - /home/paluss/docker/appdata/jarvios-shared-issues:/app/workspace/shared/issues
       - /home/paluss/docker/appdata/jarvios-shared:/app/shared
       - /home/paluss/docker/appdata/jarvios-dot-claude:/root/.claude
       - /home/paluss/.claude/.credentials.json:/root/.claude/.credentials.json
       - /home/paluss/docker/.env:/app/.env:ro
       - /home/paluss/Brains/HomeLab/operations/runbooks/jarvios:/app/runbooks:rw
       - /home/paluss/docker/compose/jarvisOS/var/audit:/app/var/audit:rw
-      # SSH identity key for CIO remote host management
-      # config + known_hosts come from /app/shared/ssh/ and are copied by entrypoint.sh
       - /home/paluss/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
     depends_on:
       redis:
