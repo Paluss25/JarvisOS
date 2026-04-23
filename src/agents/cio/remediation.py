@@ -108,13 +108,17 @@ class RemediationEngine:
                 raise RuntimeError(f"exec create failed: HTTP {r.status_code}")
             exec_id = r.json().get("Id", "")
 
-            # Start exec
-            r2 = await client.post(f"{_PROXY_URL}/exec/{exec_id}/start", json={"Detach": False})
+            # Start exec (detached — avoids multiplexed-stream binary output)
+            r2 = await client.post(f"{_PROXY_URL}/exec/{exec_id}/start", json={"Detach": True})
             if r2.status_code not in (200, 204):
                 raise RuntimeError(f"exec start failed: HTTP {r2.status_code}")
 
-            output = r2.text.strip()[:200] if r2.text else "(no output)"
-            return f"supervisorctl {sub_action} {process} → {output}"
+            # Inspect exit code
+            inspect_r = await client.get(f"{_PROXY_URL}/exec/{exec_id}/json")
+            exit_code = inspect_r.json().get("ExitCode", -1) if inspect_r.status_code == 200 else -1
+            if exit_code != 0:
+                raise RuntimeError(f"supervisorctl {sub_action} {process} → exit {exit_code}")
+            return f"supervisorctl {sub_action} {process} → OK (exit 0)"
 
     # ------------------------------------------------------------------
     # HTTP health check
@@ -157,7 +161,6 @@ class RemediationEngine:
     # ------------------------------------------------------------------
 
     async def _tcp_check(self, host: str, port: int) -> str:
-        loop = asyncio.get_event_loop()
         try:
             _, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port),
