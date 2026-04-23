@@ -14,7 +14,14 @@ MARK_BUILTIN_CRONS = [
             "cases routed, any pending escalations, items awaiting human approval, "
             "routing anomalies or security flags detected. Be direct. "
             "After producing the briefing, forward a copy to Timothy (CIO) via: "
-            "send_message(to='timothy', message=<your briefing>)."
+            "send_message(to='cio', message=<your briefing>). "
+            "After producing and sending this briefing, you MUST call report_issue. "
+            "Extract all technical issues detected during this session: failed connections, "
+            "unreachable databases, MCP servers not responding, unexpected restarts, "
+            "elevated error rates, authentication failures. "
+            "Call report_issue(issues=[...]) with all issues found. "
+            "If no technical issues were detected: call report_issue(issues=[]). "
+            "Never skip this call."
         ),
         "session_id": "heartbeat-morning",
         "telegram_notify": True,
@@ -50,7 +57,7 @@ MARK_BUILTIN_CRONS = [
 def build_chief_of_staff_config(workspace_root: Path = Path("/app/workspace/cos")) -> AgentConfig:
     from agents.cos.tools import create_chief_of_staff_mcp_server
     return AgentConfig(
-        id="chief_of_staff",
+        id="cos",
         name="ChiefOfStaffAgent",
         port=8008,
         workspace_path=workspace_root,
