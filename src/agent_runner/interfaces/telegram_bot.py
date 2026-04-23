@@ -637,6 +637,45 @@ async def _handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 # ---------------------------------------------------------------------------
+# HITL issue gate callback handler (CIO)
+# ---------------------------------------------------------------------------
+
+async def _handle_issue_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Accetta / Rifiuta responses from CIO's HITL issue inline keyboard."""
+    config = context.bot_data.get("config")
+    query = update.callback_query
+    if not is_authorized(query.message.chat.id, config.telegram_chat_id_env if config else None):
+        await query.answer("Not authorised.")
+        return
+
+    await query.answer()
+
+    parts = (query.data or "").split(":")
+    if len(parts) != 3 or parts[0] != "issue":
+        return
+
+    _, action, task_id = parts
+    approved = action == "approve"
+
+    try:
+        from agent_runner.issues import hitl_gate
+        hitl_gate.resolve(task_id, approved)
+    except ImportError:
+        logger.warning("telegram: hitl_gate not available")
+        return
+
+    label = "✅ Accettato" if approved else "❌ Rifiutato"
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.edit_message_text(
+            query.message.text + f"\n\n*{label}*",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Message handler
 # ---------------------------------------------------------------------------
 
@@ -1062,6 +1101,33 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
 
             _hook.configure_hook(_send_approval, allowed_chat_id, notify_fn=_send_notification)
 
+            # Configure HITL gate (CIO only — no-op for other agents)
+            try:
+                from agent_runner.issues import hitl_gate as _hg
+
+                async def _send_task_with_keyboard(text: str, task_id: str, _app=app) -> None:
+                    keyboard = InlineKeyboardMarkup([[
+                        InlineKeyboardButton("✅ Accetta", callback_data=f"issue:approve:{task_id}"),
+                        InlineKeyboardButton("❌ Rifiuta", callback_data=f"issue:reject:{task_id}"),
+                    ]])
+                    await _app.bot.send_message(
+                        chat_id=allowed_chat_id,
+                        text=text,
+                        reply_markup=keyboard,
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+
+                async def _send_plain_notification(text: str, _app=app) -> None:
+                    await _app.bot.send_message(
+                        chat_id=allowed_chat_id,
+                        text=text,
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+
+                _hg.configure(_send_task_with_keyboard, _send_plain_notification)
+            except ImportError:
+                pass
+
             app.add_handler(CommandHandler("start", _cmd_start))
             app.add_handler(CommandHandler("status", _cmd_status))
             app.add_handler(CommandHandler("session", _cmd_session))
@@ -1086,6 +1152,7 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
             app.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
             app.add_handler(CallbackQueryHandler(_handle_callback, pattern=r"^perm:"))
+            app.add_handler(CallbackQueryHandler(_handle_issue_callback, pattern=r"^issue:(approve|reject):\w+"))
 
             logger.info(
                 "telegram: starting polling for %s (allowed_chat_id=%s)",
