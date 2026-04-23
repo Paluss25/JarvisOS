@@ -93,14 +93,13 @@ class RemediationEngine:
     # ------------------------------------------------------------------
 
     async def _supervisorctl(self, sub_action: str, process: str) -> str:
-        """Execute supervisorctl {sub_action} {process} in the jarvios-platform container."""
-        command = f"supervisorctl {sub_action} {process}"
+        """Execute supervisorctl command in the jarvios-platform container."""
         # Create exec instance
         exec_create_url = f"{_PROXY_URL}/containers/jarvios-platform/exec"
         exec_body = {
             "AttachStdout": True,
             "AttachStderr": True,
-            "Cmd": ["sh", "-c", command],
+            "Cmd": ["supervisorctl", sub_action, process],
         }
         async with httpx.AsyncClient(timeout=_EXEC_TIMEOUT) as client:
             r = await client.post(exec_create_url, json=exec_body)
@@ -113,9 +112,18 @@ class RemediationEngine:
             if r2.status_code not in (200, 204):
                 raise RuntimeError(f"exec start failed: HTTP {r2.status_code}")
 
-            # Inspect exit code
-            inspect_r = await client.get(f"{_PROXY_URL}/exec/{exec_id}/json")
-            exit_code = inspect_r.json().get("ExitCode", -1) if inspect_r.status_code == 200 else -1
+            # Poll inspect until the process exits (ExitCode != -1 means done)
+            deadline = asyncio.get_event_loop().time() + _EXEC_TIMEOUT
+            while True:
+                inspect_r = await client.get(f"{_PROXY_URL}/exec/{exec_id}/json")
+                data = inspect_r.json() if inspect_r.status_code == 200 else {}
+                if not data.get("Running", True):
+                    exit_code = data.get("ExitCode", -1)
+                    break
+                if asyncio.get_event_loop().time() >= deadline:
+                    raise RuntimeError(f"supervisorctl {sub_action} {process} → timed out waiting for exit")
+                await asyncio.sleep(0.5)
+
             if exit_code != 0:
                 raise RuntimeError(f"supervisorctl {sub_action} {process} → exit {exit_code}")
             return f"supervisorctl {sub_action} {process} → OK (exit 0)"
@@ -144,6 +152,7 @@ class RemediationEngine:
             "nutrition": "DRHOUSE_POSTGRES_URL",
             "sport": "DRHOUSE_SPORT_POSTGRES_URL",
             "jarvis": "JARVIS_DB_URL",
+            "ceo": "JARVIS_DB_URL",
         }
         url_env = env_map.get(db_name, f"{db_name.upper()}_DB_URL")
         url = os.environ.get(url_env, "")

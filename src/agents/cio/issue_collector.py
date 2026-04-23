@@ -19,7 +19,7 @@ from agent_runner.issues.schema import IssueReport, IssueSeverity, IssueType, se
 logger = logging.getLogger(__name__)
 
 EXPECTED_REPORTERS = [
-    "ceo", "cos", "email_intelligence_agent", "cfo", "coh", "don", "dos",
+    "ceo", "cos", "email_intelligence_agent", "cfo", "coh", "dos",
 ]
 
 
@@ -153,7 +153,7 @@ class IssueCollector:
                     return f"docker_action:restart:{container_name}"
 
         # Agent processes in supervisord (agent-<id>)
-        if c.endswith("-agent") or issue_type == "connection_error" and "agent" in c:
+        if c.endswith("-agent") or (issue_type == "connection_error" and "agent" in c):
             process = c.replace("-agent", "")
             return f"supervisorctl:restart:{process}"
 
@@ -163,7 +163,7 @@ class IssueCollector:
                 return "pg_check:nutrition"
             if "sport" in c:
                 return "pg_check:sport"
-            return "pg_check:jarvis"
+            return "pg_check:ceo"
 
         # Default: manual intervention
         return f"manual:investigate {component} ({issue_type})"
