@@ -14,7 +14,14 @@ CFO_BUILTIN_CRONS = [
             "1. Check for any budget deviations flagged in yesterday's log\n"
             "2. If CFO_COST_WORKERS_URL is configured, dispatch cost/ai-cost for yesterday's LLM spend\n"
             "3. Note any anomalies or pending fiscal deadlines\n"
-            "Keep it under 150 words. Flag any HIGH severity items immediately to Jarvis via send_message."
+            "Keep it under 150 words. Flag any HIGH severity items immediately to Jarvis via send_message. "
+            "After producing and sending this briefing, you MUST call report_issue. "
+            "Extract all technical issues detected during this session: failed connections, "
+            "unreachable databases, MCP servers not responding, unexpected restarts, "
+            "elevated error rates, authentication failures. "
+            "Call report_issue(issues=[...]) with all issues found. "
+            "If no technical issues were detected: call report_issue(issues=[]). "
+            "Never skip this call."
         ),
         "session_id": "heartbeat-morning",
         "telegram_notify": True,
