@@ -641,10 +641,10 @@ async def _handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # ---------------------------------------------------------------------------
 
 async def _handle_issue_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle Accetta / Rifiuta responses from CIO's HITL issue inline keyboard."""
+    """Handle Approve / Reject responses from CIO's HITL issue inline keyboard."""
     config = context.bot_data.get("config")
     query = update.callback_query
-    if not is_authorized(query.message.chat.id, config.telegram_chat_id_env if config else None):
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env if config else None):
         await query.answer("Not authorised.")
         return
 
@@ -663,6 +663,9 @@ async def _handle_issue_callback(update: Update, context: ContextTypes.DEFAULT_T
     except ImportError:
         logger.warning("telegram: hitl_gate not available")
         return
+    except Exception as exc:
+        logger.error("telegram: hitl_gate.resolve failed task_id=%s — %s", task_id, exc)
+        # fall through to UI cleanup so the keyboard is removed
 
     label = "✅ Accettato" if approved else "❌ Rifiutato"
     try:
@@ -1118,11 +1121,14 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
                     )
 
                 async def _send_plain_notification(text: str, _app=app) -> None:
-                    await _app.bot.send_message(
-                        chat_id=allowed_chat_id,
-                        text=text,
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
+                    try:
+                        await _app.bot.send_message(
+                            chat_id=allowed_chat_id,
+                            text=text,
+                            parse_mode=ParseMode.MARKDOWN,
+                        )
+                    except Exception as exc:
+                        logger.warning("telegram: hitl plain notification failed — %s", exc)
 
                 _hg.configure(_send_task_with_keyboard, _send_plain_notification)
             except ImportError:
