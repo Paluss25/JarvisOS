@@ -46,10 +46,16 @@ async def run_issue_collection(workspace_path: Path) -> str:
         if state.status == "idle":
             # Fresh run: collect issues and build queue
             logger.info("run_issue_collection: collecting issues for %s", today)
-            hitl_issues, medium_descriptions = collector.collect(today)
+            hitl_issues, medium_descriptions = await collector.collect(today)
 
             if hitl_issues:
                 state = hitl_q.build_from_issues(hitl_issues, medium_descriptions, today)
+                # Emit one [INCIDENT] entry per critical/high issue for Loki filtering
+                for issue in hitl_issues:
+                    daily_log.log(
+                        f"[INCIDENT] {issue.severity.upper()} — {issue.component}: "
+                        f"{issue.description[:120]}"
+                    )
                 daily_log.log(
                     f"[ISSUE_COLLECTOR] {today}: {len(hitl_issues)} HITL tasks, "
                     f"{len(medium_descriptions)} medium (log-only)"

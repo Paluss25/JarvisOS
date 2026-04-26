@@ -28,6 +28,9 @@ from agent_runner.memory.pipeline.queue import PipelineItem, PipelineQueue
 
 logger = logging.getLogger(__name__)
 
+_STREAM_TIMEOUT = 480   # seconds — raised from 300; fast-path meal logging ~10s, full pipeline safety margin
+_IMAGE_TIMEOUT = 120    # seconds — generous for large vision requests
+
 
 class BaseAgentClient:
     """Persistent Claude SDK subprocess connection.
@@ -53,6 +56,11 @@ class BaseAgentClient:
     def set_pipeline_queue(self, queue: PipelineQueue) -> None:
         """Attach the memory pipeline queue. Called by the lifespan before serving."""
         self._pipeline_queue = queue
+
+    @property
+    def is_busy(self) -> bool:
+        """True while a query() or stream() call holds the dispatch lock."""
+        return self._lock.locked()
 
     # -- Lifecycle ----------------------------------------------------------
 
@@ -256,9 +264,18 @@ class BaseAgentClient:
                     logger.error("agent[%s]: query failed after reconnect — %s", self.config.id, retry_exc)
                     raise
             text_parts: list[str] = []
-            async for msg in self._sdk.receive_response():
-                if self._process_message(msg, text_parts):
-                    break
+            try:
+                async with asyncio.timeout(_STREAM_TIMEOUT):
+                    async for msg in self._sdk.receive_response():
+                        if self._process_message(msg, text_parts):
+                            break
+            except TimeoutError:
+                logger.error(
+                    "agent[%s]: query timed out after %ss — reconnecting",
+                    self.config.id, _STREAM_TIMEOUT,
+                )
+                await self._reconnect()
+                raise
         response_text = "".join(text_parts)
         if self._pipeline_queue:
             priority = 0 if source == "a2a" else 1
@@ -287,8 +304,14 @@ class BaseAgentClient:
                     raise RuntimeError(f"{self.name} reconnect failed")
                 await self._sdk.query(message, session_id=session_id or "default")
         # Iterate outside the lock — safe because only one caller can dispatch at a time.
-        async for chunk in self._iter_stream_response():
-            yield chunk
+        try:
+            async with asyncio.timeout(_STREAM_TIMEOUT):
+                async for chunk in self._iter_stream_response():
+                    yield chunk
+        except TimeoutError:
+            logger.error("agent[%s]: stream timed out after %ss — reconnecting", self.config.id, _STREAM_TIMEOUT)
+            await self._reconnect()
+            raise
 
     async def stream_image(
         self,
@@ -351,6 +374,8 @@ def create_agent_client(config: AgentConfig, redis_a2a=None) -> "BaseAgentClient
             mcp_servers = {f"{config.id}-tools": config.mcp_server_factory(workspace_path, redis_a2a=redis_a2a)}
         except Exception as exc:
             logger.warning("agent[%s]: mcp_server_factory failed — %s", config.id, exc)
+    if config.extra_mcp_servers:
+        mcp_servers.update(config.extra_mcp_servers)
 
     # Permission hook + SDK hooks
     can_use_tool = None
