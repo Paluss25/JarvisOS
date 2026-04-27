@@ -70,3 +70,19 @@ if "telegram" not in sys.modules:
     sys.modules["telegram.constants"] = _tg_constants
     sys.modules["telegram.error"] = _tg_error
     sys.modules["telegram.ext"] = _tg_ext
+
+# ---------------------------------------------------------------------------
+# caldav.error compatibility shim
+# caldav >= 2.x moved errors to caldav.lib.error; re-export at caldav.error
+# so that test imports (import caldav.error) work regardless of version.
+# ---------------------------------------------------------------------------
+if "caldav.error" not in sys.modules:
+    try:
+        import types as _types
+        import caldav.lib.error as _caldav_lib_error
+        _caldav_error_mod = _types.ModuleType("caldav.error")
+        for _attr in dir(_caldav_lib_error):
+            setattr(_caldav_error_mod, _attr, getattr(_caldav_lib_error, _attr))
+        sys.modules["caldav.error"] = _caldav_error_mod
+    except ImportError:
+        pass
