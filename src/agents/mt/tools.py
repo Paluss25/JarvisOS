@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 from agents.mt.calendar_client import CalendarClient
+from agents.mt.contacts_client import ContactsClient
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,17 @@ def _get_calendar_client(calendar_name: str = "") -> "CalendarClient | None":
     password = os.environ.get("RADICALE_PASSWORD", "").strip()
     name = calendar_name.strip() or os.environ.get("RADICALE_CALENDAR", "").strip()
     return CalendarClient(url=url, user=user, password=password, calendar_name=name)
+
+
+def _get_contacts_client(addressbook_name: str = "") -> "ContactsClient | None":
+    """Build ContactsClient from env vars; return None if RADICALE_URL not set."""
+    url = os.environ.get("RADICALE_URL", "").strip()
+    if not url:
+        return None
+    user = os.environ.get("RADICALE_USER", "").strip()
+    password = os.environ.get("RADICALE_PASSWORD", "").strip()
+    name = addressbook_name.strip() or os.environ.get("RADICALE_CONTACTS", "").strip()
+    return ContactsClient(url=url, user=user, password=password, addressbook_name=name)
 
 
 def _task_create(workspace: Path, title: str, notes: str = "", due_date: str = "") -> dict:
@@ -609,6 +621,143 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         except Exception as exc:
             return _text(f"Calendar delete failed: {exc}")
 
+    @sdk_tool(
+        "contacts_list",
+        "List all contacts in Radicale. addressbook: optional address book name, defaults to RADICALE_CONTACTS.",
+        {"addressbook": {"type": "string", "default": ""}},
+    )
+    async def contacts_list(args: dict) -> dict:
+        args = _parse_args(args)
+        client = _get_contacts_client(args.get("addressbook", ""))
+        if client is None:
+            return _text("Calendar not configured (RADICALE_URL not set).")
+        try:
+            result = await asyncio.to_thread(client.list_contacts)
+            if not result:
+                return _text("No contacts found.")
+            return _text(json.dumps(result, ensure_ascii=False, indent=2))
+        except Exception as exc:
+            return _text(f"Contacts unavailable: {exc}")
+
+    @sdk_tool(
+        "contacts_search",
+        "Search contacts by name or email. addressbook: optional address book name.",
+        {"query": str, "addressbook": {"type": "string", "default": ""}},
+    )
+    async def contacts_search(args: dict) -> dict:
+        args = _parse_args(args)
+        client = _get_contacts_client(args.get("addressbook", ""))
+        if client is None:
+            return _text("Calendar not configured (RADICALE_URL not set).")
+        query = args.get("query", "").strip()
+        if not query:
+            return _text("query is required.")
+        try:
+            result = await asyncio.to_thread(client.search_contacts, query)
+            if not result:
+                return _text(f"No contacts found matching '{query}'.")
+            return _text(json.dumps(result, ensure_ascii=False, indent=2))
+        except Exception as exc:
+            return _text(f"Contacts search failed: {exc}")
+
+    @sdk_tool(
+        "contacts_get",
+        "Get a specific contact by UID. addressbook: optional address book name.",
+        {"uid": str, "addressbook": {"type": "string", "default": ""}},
+    )
+    async def contacts_get(args: dict) -> dict:
+        args = _parse_args(args)
+        client = _get_contacts_client(args.get("addressbook", ""))
+        if client is None:
+            return _text("Calendar not configured (RADICALE_URL not set).")
+        uid = args.get("uid", "").strip()
+        if not uid:
+            return _text("uid is required.")
+        try:
+            result = await asyncio.to_thread(client.get_contact, uid)
+            return _text(json.dumps(result, ensure_ascii=False, indent=2))
+        except ValueError as exc:
+            return _text(str(exc))
+        except Exception as exc:
+            return _text(f"Contact fetch failed: {exc}")
+
+    @sdk_tool(
+        "contacts_update",
+        (
+            "Update a contact by UID. addressbook: optional. "
+            "Call with confirmed=False to preview; confirmed=True to write."
+        ),
+        {
+            "uid": str,
+            "fn": str,
+            "email": {"type": "string", "default": ""},
+            "tel": {"type": "string", "default": ""},
+            "note": {"type": "string", "default": ""},
+            "addressbook": {"type": "string", "default": ""},
+            "confirmed": {"type": "boolean", "default": False},
+        },
+    )
+    async def contacts_update(args: dict) -> dict:
+        args = _parse_args(args)
+        client = _get_contacts_client(args.get("addressbook", ""))
+        if client is None:
+            return _text("Calendar not configured (RADICALE_URL not set).")
+        uid = args.get("uid", "").strip()
+        fn = args.get("fn", "").strip()
+        if not uid or not fn:
+            return _text("uid and fn are required.")
+        confirmed = bool(args.get("confirmed", False))
+        if not confirmed:
+            return _text(
+                f"Ready to update contact uid={uid} → fn='{fn}'. "
+                "Call again with confirmed=True to write."
+            )
+        try:
+            await asyncio.to_thread(
+                client.update_contact,
+                uid,
+                fn,
+                args.get("email", ""),
+                args.get("tel", ""),
+                args.get("note", ""),
+            )
+            return _text(f"Contact updated: uid={uid} → fn='{fn}'")
+        except ValueError as exc:
+            return _text(str(exc))
+        except Exception as exc:
+            return _text(f"Contact update failed: {exc}")
+
+    @sdk_tool(
+        "contacts_delete",
+        "Delete a contact by UID. addressbook: optional. confirmed=False to preview; confirmed=True to delete.",
+        {
+            "uid": str,
+            "addressbook": {"type": "string", "default": ""},
+            "confirmed": {"type": "boolean", "default": False},
+        },
+    )
+    async def contacts_delete(args: dict) -> dict:
+        args = _parse_args(args)
+        client = _get_contacts_client(args.get("addressbook", ""))
+        if client is None:
+            return _text("Calendar not configured (RADICALE_URL not set).")
+        uid = args.get("uid", "").strip()
+        if not uid:
+            return _text("uid is required.")
+        confirmed = bool(args.get("confirmed", False))
+        if not confirmed:
+            return _text(
+                f"Ready to delete contact uid={uid}. "
+                "Call again with confirmed=True to delete permanently."
+            )
+        try:
+            await asyncio.to_thread(client.delete_contact, uid)
+            return _text(f"Contact deleted: uid={uid}")
+        except ValueError as exc:
+            return _text(str(exc))
+        except Exception as exc:
+            return _text(f"Contact delete failed: {exc}")
+
     @sdk_tool("forward_to_cos", "Forward a payload to ChiefOfStaff (COS) via A2A.", {"payload_json": str, "reason": str})
     async def forward_to_cos(args: dict) -> dict:
         args = _parse_args(args)
@@ -651,6 +800,11 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         calendar_create_event,
         calendar_update_event,
         calendar_delete_event,
+        contacts_list,
+        contacts_search,
+        contacts_get,
+        contacts_update,
+        contacts_delete,
         forward_to_cos,
         report_issue,
     ]
