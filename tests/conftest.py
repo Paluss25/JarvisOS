@@ -23,6 +23,35 @@ if "claude_agent_sdk" not in sys.modules:
     _sdk_mock.TaskProgressMessage = type("TaskProgressMessage", (), {})
     _sdk_mock.TaskStartedMessage = type("TaskStartedMessage", (), {})
     _sdk_mock.ThinkingConfigAdaptive = MagicMock
+
+    # Make `tool` (sdk_tool) a faithful decorator factory so that tests can
+    # call the registered tool functions via server._tools.
+    class _ToolEntry:
+        """Minimal stand-in for a registered SDK tool."""
+        __slots__ = ("name", "fn")
+
+        def __init__(self, name: str, fn):
+            self.name = name
+            self.fn = fn
+
+    def _sdk_tool_factory(name, description="", schema=None):
+        """Return a decorator that wraps fn in a _ToolEntry."""
+        def decorator(fn):
+            return _ToolEntry(name=name, fn=fn)
+        return decorator
+
+    class _FakeServer:
+        """Minimal stand-in for the SDK MCP server returned by create_sdk_mcp_server."""
+        def __init__(self, name: str, tools: list):
+            self._name = name
+            self._tools = list(tools)
+
+    def _create_sdk_mcp_server(name, tools):
+        return _FakeServer(name=name, tools=tools)
+
+    _sdk_mock.tool = _sdk_tool_factory
+    _sdk_mock.create_sdk_mcp_server = _create_sdk_mcp_server
+
     sys.modules["claude_agent_sdk"] = _sdk_mock
 
 # ---------------------------------------------------------------------------
