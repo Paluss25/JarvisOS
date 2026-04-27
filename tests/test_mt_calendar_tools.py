@@ -222,3 +222,79 @@ def test_calendar_delete_event_deletes_when_confirmed(tmp_path, monkeypatch):
 
     _run(fn({"uid": "uid-to-delete", "confirmed": True}))
     mock_client.delete_event.assert_called_once_with("uid-to-delete")
+
+
+# ---------------------------------------------------------------------------
+# calendar_update_event — confirmation gate + conflict self-exclusion
+# ---------------------------------------------------------------------------
+
+def test_calendar_update_event_does_not_write_when_unconfirmed(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADICALE_URL", "https://cal.prova9x.com")
+    monkeypatch.setenv("RADICALE_USER", "paluss")
+    monkeypatch.setenv("RADICALE_PASSWORD", "secret")
+
+    mock_client = MagicMock()
+    mock_client.check_conflicts.return_value = []
+    server, _ = _build_server(tmp_path, monkeypatch, mock_client)
+    fn = _find_tool(server, "calendar_update_event")
+
+    result = _run(fn({
+        "uid": "uid-to-update",
+        "title": "New Title",
+        "start_datetime": "2026-04-29T10:00:00Z",
+        "end_datetime": "2026-04-29T11:00:00Z",
+        "description": "",
+        "confirmed": False,
+    }))
+    mock_client.update_event.assert_not_called()
+    assert "ready to update" in result["content"][0]["text"].lower() or \
+           "confirm" in result["content"][0]["text"].lower()
+
+
+def test_calendar_update_event_writes_when_confirmed_no_conflicts(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADICALE_URL", "https://cal.prova9x.com")
+    monkeypatch.setenv("RADICALE_USER", "paluss")
+    monkeypatch.setenv("RADICALE_PASSWORD", "secret")
+
+    mock_client = MagicMock()
+    mock_client.check_conflicts.return_value = []
+    server, _ = _build_server(tmp_path, monkeypatch, mock_client)
+    fn = _find_tool(server, "calendar_update_event")
+
+    result = _run(fn({
+        "uid": "uid-to-update",
+        "title": "New Title",
+        "start_datetime": "2026-04-29T10:00:00Z",
+        "end_datetime": "2026-04-29T11:00:00Z",
+        "description": "",
+        "confirmed": True,
+    }))
+    mock_client.update_event.assert_called_once()
+    assert "updated" in result["content"][0]["text"].lower()
+
+
+def test_calendar_update_event_excludes_self_from_conflict_check(tmp_path, monkeypatch):
+    """The event being updated must not count as a conflict with itself."""
+    monkeypatch.setenv("RADICALE_URL", "https://cal.prova9x.com")
+    monkeypatch.setenv("RADICALE_USER", "paluss")
+    monkeypatch.setenv("RADICALE_PASSWORD", "secret")
+
+    mock_client = MagicMock()
+    # check_conflicts returns the event itself — this must be filtered out
+    mock_client.check_conflicts.return_value = [
+        {"uid": "uid-to-update", "summary": "Self", "start": "2026-04-29T10:00:00Z", "end": "2026-04-29T11:00:00Z"}
+    ]
+    server, _ = _build_server(tmp_path, monkeypatch, mock_client)
+    fn = _find_tool(server, "calendar_update_event")
+
+    result = _run(fn({
+        "uid": "uid-to-update",
+        "title": "New Title",
+        "start_datetime": "2026-04-29T10:00:00Z",
+        "end_datetime": "2026-04-29T11:00:00Z",
+        "description": "",
+        "confirmed": True,
+    }))
+    # The self-event should be excluded → no conflict → write should proceed
+    mock_client.update_event.assert_called_once()
+    assert "conflict" not in result["content"][0]["text"].lower()
