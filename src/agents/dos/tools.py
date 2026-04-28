@@ -336,8 +336,8 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "daily_log",
-        "Append a timestamped entry to today's Chief Of Sport memory log. Use this to record significant events, decisions, or information worth remembering.",
-        {"message": str},
+        "Append a timestamped entry to today's Chief Of Sport memory log. Use this to record significant events, decisions, or information worth remembering. message is required.",
+        {"message": {"type": "string", "default": ""}},
     )
     async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
@@ -357,7 +357,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "Search across long-term memory (MEMORY.md) and all daily logs (memory/*.md) using text matching. "
         "Use this to recall past events, decisions, preferences, or facts. "
         "Results include the matching lines with surrounding context, most recent files first.",
-        {"query": str, "top_k": int},
+        {"query": str, "top_k": {"type": "integer", "default": 5}},
     )
     async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
@@ -402,7 +402,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a specific memory file from the workspace. "
         "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
         "Optionally specify start_line and num_lines to read a slice.",
-        {"path": str, "start_line": int, "num_lines": int},
+        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
     )
     async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
@@ -411,7 +411,9 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
-        if not str(target).startswith(str(workspace_path.resolve())):
+        try:
+            target.relative_to(workspace_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
@@ -488,16 +490,21 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         params = raw_params if isinstance(raw_params, list) else []
         if not sql:
             return {"content": [{"type": "text", "text": "No SQL provided."}]}
-        if sql.upper().startswith("SELECT"):
-            return {"content": [{"type": "text", "text": "sport_execute is for writes. Use sport_query for SELECT statements."}]}
-        _DDL_KEYWORDS = {"ALTER", "CREATE", "DROP", "TRUNCATE", "GRANT", "REVOKE"}
         first_word = sql.split()[0].upper() if sql.split() else ""
-        if first_word in _DDL_KEYWORDS:
+        _ALLOWED_VERBS = {"INSERT", "UPDATE", "DELETE"}
+        if first_word not in _ALLOWED_VERBS:
             return {
                 "content": [{"type": "text", "text": (
-                    f"DDL not allowed via sport_execute (blocked: {first_word}). "
-                    "Only INSERT, UPDATE, and DELETE are permitted. "
-                    "Schema changes must be performed by an administrator."
+                    f"sport_execute rejects leading verb '{first_word}'. "
+                    f"Only {sorted(_ALLOWED_VERBS)} are accepted. "
+                    "CTEs (WITH ...), SELECT, and DDL are all blocked."
+                )}],
+                "is_error": True,
+            }
+        if ";" in sql.rstrip().rstrip(";"):
+            return {
+                "content": [{"type": "text", "text": (
+                    "sport_execute rejects multi-statement SQL. Submit one statement at a time."
                 )}],
                 "is_error": True,
             }
@@ -510,42 +517,15 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "sport_ddl",
-        "Execute a DDL statement on the sport_metrics database: CREATE TABLE, "
-        "CREATE INDEX, ALTER TABLE (ADD/ALTER/RENAME COLUMN). "
-        "DROP, TRUNCATE, GRANT, and REVOKE are blocked. "
-        "Use this to extend the schema with new tracking tables or columns.",
+        "DISABLED — schema changes must go through reviewed migrations, not the "
+        "agent runtime. Calling this tool returns a rejection.",
         {"sql": str},
     )
     async def sport_ddl(args: dict) -> dict:
-        args = _parse_args(args)
-        sql = (args.get("sql") or "").strip()
-        if not sql:
-            return _text("No SQL provided.")
-        first_word = sql.split()[0].upper() if sql.split() else ""
-        _ALLOWED = {"CREATE", "ALTER"}
-        _BLOCKED = {"DROP", "TRUNCATE", "GRANT", "REVOKE"}
-        if first_word in _BLOCKED:
-            return {
-                "content": [{"type": "text", "text": (
-                    f"DDL blocked: {first_word} is not allowed via sport_ddl. "
-                    "Only CREATE and ALTER statements are permitted."
-                )}],
-                "is_error": True,
-            }
-        if first_word not in _ALLOWED:
-            return {
-                "content": [{"type": "text", "text": (
-                    f"Unexpected DDL verb '{first_word}'. "
-                    "sport_ddl only accepts CREATE or ALTER statements."
-                )}],
-                "is_error": True,
-            }
-        try:
-            result = await _pg_run(sql)
-            return _text(f"OK: {result}")
-        except Exception as exc:
-            logger.error("sport_ddl: error — %s", exc)
-            return {"content": [{"type": "text", "text": f"DDL error: {exc}"}], "is_error": True}
+        return _text(
+            "sport_ddl is disabled. Schema changes require a database migration "
+            "reviewed by the operator."
+        )
 
     @sdk_tool(
         "nutrition_query",
@@ -597,16 +577,21 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         params = raw_params if isinstance(raw_params, list) else []
         if not sql:
             return _text("No SQL provided.")
-        if sql.upper().startswith("SELECT"):
-            return _text("nutrition_execute is for writes. Use nutrition_query for SELECT statements.")
-        _DDL_KEYWORDS = {"ALTER", "CREATE", "DROP", "TRUNCATE", "GRANT", "REVOKE"}
         first_word = sql.split()[0].upper() if sql.split() else ""
-        if first_word in _DDL_KEYWORDS:
+        _ALLOWED_VERBS = {"INSERT", "UPDATE", "DELETE"}
+        if first_word not in _ALLOWED_VERBS:
             return {
                 "content": [{"type": "text", "text": (
-                    f"DDL not allowed via nutrition_execute (blocked: {first_word}). "
-                    "Only INSERT, UPDATE, and DELETE are permitted. "
-                    "Use nutrition_ddl for schema changes."
+                    f"nutrition_execute rejects leading verb '{first_word}'. "
+                    f"Only {sorted(_ALLOWED_VERBS)} are accepted. "
+                    "CTEs (WITH ...), SELECT, and DDL are all blocked."
+                )}],
+                "is_error": True,
+            }
+        if ";" in sql.rstrip().rstrip(";"):
+            return {
+                "content": [{"type": "text", "text": (
+                    "nutrition_execute rejects multi-statement SQL. Submit one statement at a time."
                 )}],
                 "is_error": True,
             }
@@ -619,42 +604,15 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "nutrition_ddl",
-        "Execute a DDL statement on the nutrition_data database: CREATE TABLE, "
-        "CREATE INDEX, ALTER TABLE (ADD/ALTER/RENAME COLUMN). "
-        "DROP, TRUNCATE, GRANT, and REVOKE are blocked. "
-        "Use this to create new nutrition tracking tables or extend existing ones.",
+        "DISABLED — schema changes must go through reviewed migrations, not the "
+        "agent runtime. Calling this tool returns a rejection.",
         {"sql": str},
     )
     async def nutrition_ddl(args: dict) -> dict:
-        args = _parse_args(args)
-        sql = (args.get("sql") or "").strip()
-        if not sql:
-            return _text("No SQL provided.")
-        first_word = sql.split()[0].upper() if sql.split() else ""
-        _ALLOWED = {"CREATE", "ALTER"}
-        _BLOCKED = {"DROP", "TRUNCATE", "GRANT", "REVOKE"}
-        if first_word in _BLOCKED:
-            return {
-                "content": [{"type": "text", "text": (
-                    f"DDL blocked: {first_word} is not allowed via nutrition_ddl. "
-                    "Only CREATE and ALTER statements are permitted."
-                )}],
-                "is_error": True,
-            }
-        if first_word not in _ALLOWED:
-            return {
-                "content": [{"type": "text", "text": (
-                    f"Unexpected DDL verb '{first_word}'. "
-                    "nutrition_ddl only accepts CREATE or ALTER statements."
-                )}],
-                "is_error": True,
-            }
-        try:
-            result = await _nutrition_run(sql)
-            return _text(f"OK: {result}")
-        except Exception as exc:
-            logger.error("nutrition_ddl: error — %s", exc)
-            return {"content": [{"type": "text", "text": f"DDL error: {exc}"}], "is_error": True}
+        return _text(
+            "nutrition_ddl is disabled. Schema changes require a database "
+            "migration reviewed by the operator."
+        )
 
     # --- Typed convenience read tools ---------------------------------------
 
@@ -786,8 +744,27 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
             return _text(await _send_message_fn(args))
+
+        @sdk_tool(
+            "push_training_to_calendar",
+            "Push the training plan for a given ISO week to the TrainingPlan calendar via MT. "
+            "Call this after writing or updating training_plan rows for a week. "
+            "week_number is the ISO week number (1-53).",
+            {"week_number": int},
+        )
+        async def push_training_to_calendar(args: dict) -> dict:
+            args = _parse_args(args)
+            week_number = int(args.get("week_number", 0))
+            if not week_number:
+                return _text("week_number is required.")
+            year = date.today().isocalendar()[0]
+            message = f"sync training week {week_number} year {year}"
+            result = await _send_message_fn({"to": "mt", "message": message})
+            return _text(f"Training plan week {week_number} pushed to calendar. MT response: {result}")
+
     else:
         send_message = None  # Redis not configured
+        push_training_to_calendar = None
 
     @sdk_tool(
         "strava_list_recent",
@@ -942,11 +919,17 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         except Exception as exc:
             return _text(f"Error: {exc}")
 
-    from agent_runner.tools.report_issue import create_report_issue_tool, REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA
+    from agent_runner.tools.report_issue import (
+        create_report_issue_tool,
+        REPORT_ISSUE_DESCRIPTION,
+        REPORT_ISSUE_SCHEMA,
+    )
+
+    _report_issue_fn = create_report_issue_tool("dos")
 
     @sdk_tool("report_issue", REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA)
     async def report_issue(args: dict) -> dict:
-        return await create_report_issue_tool("dos")(args)
+        return await _report_issue_fn(args)
 
     all_tools = [
         daily_log, memory_search, memory_get,
@@ -959,6 +942,8 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
     ]
     if send_message is not None:
         all_tools.append(send_message)
+    if push_training_to_calendar is not None:
+        all_tools.append(push_training_to_calendar)
     try:
         server = create_sdk_mcp_server(name="chief-tools", tools=all_tools)
         logger.info(
