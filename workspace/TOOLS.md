@@ -16,3 +16,18 @@
 
 ## MCP Servers
 - Registry: config/mcp-servers.json. Hot-reload on edit.
+
+## daily_log Tag Conventions
+
+Use these tags consistently when calling `daily_log` so logs are machine-filterable in Loki/Grafana.
+
+| Tag | When to use |
+|-----|-------------|
+| `[INCIDENT]` | Unrecoverable error, service down, anomaly requiring attention |
+| `[INFRA EVENT]` | Infrastructure change or alert (restart, deploy, config change) |
+| `[STRATEGIC DECISION]` | High-impact decision made on behalf of the user |
+| `[ROUTING EVENT]` | Email or task routed to another agent |
+| `[FINANCIAL EVENT]` | Financial operation recorded or anomaly detected |
+| `[SPORT EVENT]` | Sport/fitness activity logged |
+| `[MEDICAL GATE]` | Health check gate evaluated |
+| `[EMAIL EXTRACTION]` | Email classified and extracted |
