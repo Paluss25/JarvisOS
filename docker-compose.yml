@@ -20,11 +20,12 @@ services:
       - "8806:8006"   # DrHouse agent (Chief of Health)
       - "8807:8007"   # NutritionDirector agent
       - "8808:8008"   # ChiefOfStaff agent (COS)
+      - "8809:8009"   # MT agent (Executive Assistant)
       - "8900:8900"   # Platform API (dashboard, management)
       - "8013:8013"   # worker-ops-detector (Grafana webhook + health)
     env_file: /home/paluss/docker/.env
     environment:
-      LOKI_URL: "http://10.10.200.202:3100"
+      LOKI_URL: "http://10.10.200.71:3100"
       RUNBOOKS_PATH: "/app/runbooks"
       DETECTOR_POLL_INTERVAL: "300"
       DETECTOR_LOOKBACK_MINUTES: "10"
@@ -50,11 +51,12 @@ services:
       - /home/paluss/docker/appdata/jarvios-shared-issues:/app/workspace/shared/issues
       - /home/paluss/docker/appdata/jarvios-shared:/app/shared
       - /home/paluss/docker/appdata/jarvios-dot-claude:/root/.claude
-      - /home/paluss/.claude/.credentials.json:/root/.claude/.credentials.json
       - /home/paluss/docker/.env:/app/.env:ro
       - /home/paluss/Brains/HomeLab/operations/runbooks/jarvios:/app/runbooks:rw
       - /home/paluss/docker/compose/jarvisOS/var/audit:/app/var/audit:rw
+      - /home/paluss/docker/compose/jarvisOS/memory/schemas:/app/memory/schemas:ro
       - /home/paluss/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
+      - /home/paluss/nas/hr-docs:/app/hr-docs:rw
     depends_on:
       redis:
         condition: service_healthy

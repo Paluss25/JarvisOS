@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Payroll Output",
+  "type": "object",
+  "required": ["extracted_fields", "anomalies", "comparisons", "confidence", "open_questions", "plain_language_summary"],
+  "properties": {
+    "extracted_fields": {"type": "object"},
+    "anomalies": {"type": "array", "items": {"type": "string"}},
+    "comparisons": {"type": "array", "items": {"type": "string"}},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "open_questions": {"type": "array", "items": {"type": "string"}},
+    "plain_language_summary": {"type": "string"}
+  }
+}

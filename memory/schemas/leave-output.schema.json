@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Leave Time Travel Output",
+  "type": "object",
+  "required": ["rule_source", "extracted_records", "computed_balances", "anomalies", "confidence", "next_steps", "plain_language_summary"],
+  "properties": {
+    "rule_source": {"type": "string"},
+    "extracted_records": {"type": "object"},
+    "computed_balances": {"type": "object"},
+    "anomalies": {"type": "array", "items": {"type": "string"}},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "next_steps": {"type": "array", "items": {"type": "string"}},
+    "plain_language_summary": {"type": "string"}
+  }
+}

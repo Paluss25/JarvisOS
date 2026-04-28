@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pension Benefits Output",
+  "type": "object",
+  "required": ["jurisdiction", "contribution_timeline", "projected_scenarios", "benefits_findings", "risks_and_uncertainties", "confidence", "plain_language_summary"],
+  "properties": {
+    "jurisdiction": {"type": "string"},
+    "contribution_timeline": {"type": "array", "items": {"type": "string"}},
+    "projected_scenarios": {"type": "array", "items": {"type": "string"}},
+    "benefits_findings": {"type": "array", "items": {"type": "string"}},
+    "risks_and_uncertainties": {"type": "array", "items": {"type": "string"}},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "plain_language_summary": {"type": "string"}
+  }
+}

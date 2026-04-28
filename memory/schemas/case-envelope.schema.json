@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HR Case Envelope",
+  "type": "object",
+  "required": ["case_id", "domain", "intent", "risk", "data_sensitivity", "jurisdiction", "actionability", "input_text"],
+  "properties": {
+    "case_id": {"type": "string"},
+    "domain": {"type": "string", "enum": ["payroll", "leave_time_travel", "pension_benefits", "multi_domain", "policy", "analytics"]},
+    "intent": {"type": "string"},
+    "risk": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+    "data_sensitivity": {"type": "string", "enum": ["internal", "confidential_hr", "highly_sensitive"]},
+    "jurisdiction": {"type": "string"},
+    "actionability": {"type": "string", "enum": ["advisory_only", "draft_only", "human_approval_required"]},
+    "input_text": {"type": "string"},
+    "attachments": {"type": "array", "items": {"type": "string"}}
+  }
+}
