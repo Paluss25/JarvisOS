@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from datetime import date, datetime
 from pathlib import Path
 
@@ -86,6 +87,45 @@ async def _pg_query(sql: str, params: list | None = None) -> list[dict]:
         return [dict(r) for r in rows]
     finally:
         await conn.close()
+
+
+def extract_text_from_bytes(content: bytes, filename: str) -> str:
+    """Extract text from PDF bytes using pdfplumber, fallback to pytesseract for scanned PDFs."""
+    import pdfplumber
+    import io
+
+    ext = Path(filename).suffix.lower()
+
+    if ext in (".jpg", ".jpeg", ".png"):
+        import pytesseract
+        from PIL import Image
+        img = Image.open(io.BytesIO(content))
+        return pytesseract.image_to_string(img, lang="ita") or ""
+
+    # PDF path
+    try:
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            text = "\n".join(
+                page.extract_text() or "" for page in pdf.pages
+            ).strip()
+        if len(text) > 5:
+            return text
+    except Exception:
+        pass
+
+    # Fallback: OCR the PDF pages as images
+    try:
+        import pytesseract
+        from PIL import Image
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            lines = []
+            for page in pdf.pages:
+                img = page.to_image(resolution=200).original
+                lines.append(pytesseract.image_to_string(img, lang="ita") or "")
+        return "\n".join(lines).strip()
+    except Exception as exc:
+        logger.warning("extract_text_from_bytes: OCR fallback failed — %s", exc)
+        return ""
 
 
 def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
@@ -221,6 +261,53 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             content = "\n".join(lines[s: s + n])
         return _text(content)
 
+    # ---- Document pipeline tools --------------------------------------------
+
+    @sdk_tool(
+        "receive_document",
+        "Save an uploaded HR document (PDF, JPG, PNG) to the NAS inbox. "
+        "Pass the raw file bytes as a base64-encoded string or a file path already on disk. "
+        "Returns the saved path on the NAS.",
+        {"filename": str, "content_b64": str},
+    )
+    async def receive_document(args: dict) -> dict:
+        args = _parse_args(args)
+        filename = (args.get("filename") or "").strip()
+        content_b64 = (args.get("content_b64") or "").strip()
+        if not filename or not content_b64:
+            return _text("filename and content_b64 are required.")
+        import base64
+        try:
+            content = base64.b64decode(content_b64)
+        except Exception as exc:
+            return _text(f"Invalid base64 content: {exc}")
+        inbox = Path("/app/hr-docs/inbox")
+        inbox.mkdir(parents=True, exist_ok=True)
+        dest = inbox / Path(filename).name  # basename only — prevents path traversal
+        dest.write_bytes(content)
+        return _text(f"Saved to {dest}")
+
+    @sdk_tool(
+        "extract_text",
+        "Extract text from a document file on the NAS. "
+        "Pass the full path (e.g. /app/hr-docs/inbox/cedolino-2026-03.pdf). "
+        "Returns the extracted text. For scanned PDFs, OCR is used automatically.",
+        {"path": str},
+    )
+    async def extract_text(args: dict) -> dict:
+        args = _parse_args(args)
+        path_str = (args.get("path") or "").strip()
+        if not path_str:
+            return _text("path is required.")
+        p = Path(path_str)
+        if not p.exists():
+            return _text(f"File not found: {path_str}")
+        content = p.read_bytes()
+        text = extract_text_from_bytes(content, p.name)
+        if not text:
+            return _text("Could not extract text — document may be empty or unsupported format.")
+        return _text(sanitize_pii(text))
+
     # ---- A2A send_message ---------------------------------------------------
 
     if redis_a2a is not None:
@@ -240,7 +327,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
     else:
         send_message = None
 
-    all_tools = [daily_log, memory_search, memory_get, query_db]
+    all_tools = [daily_log, memory_search, memory_get, query_db, receive_document, extract_text]
     if send_message is not None:
         all_tools.append(send_message)
 
