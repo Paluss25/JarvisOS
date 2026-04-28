@@ -448,6 +448,8 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "  weekly_summaries: id, week_start (DATE), week_end (DATE), total_sessions, completed_sessions, adherence_pct, avg_weight_kg, avg_body_fat_pct, waist_cm, total_calories_consumed, avg_protein_g. "
         "  goals: id, goal_type, metric, current_value, target_value, unit, status, target_date. "
         "  athlete_profile: id, name, date_of_birth, height_cm, sex. "
+        "  activity_fit_files, activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT import tables linked by activity_id. "
+        "  activity_metrics_enriched: read view with Strava values, FIT values, and canonical_* metrics. "
         "Returns rows as JSON. For meal and nutrition data use nutrition_query instead.",
         {"sql": str, "params": {"type": "array", "items": {}, "default": []}},
     )
@@ -820,6 +822,60 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
             logger.error("strava_download: error — %s", exc)
             return {"content": [{"type": "text", "text": f"Download error: {exc}"}], "is_error": True}
 
+    @sdk_tool(
+        "garmin_fit_import",
+        "Import a Garmin FIT file and link it to an existing sport_metrics activity. "
+        "Provide file_path plus either activity_id or strava_activity_id. "
+        "Stores FIT sessions, laps, records, and generic fields in dedicated tables. "
+        "Duplicate metrics are preserved; use activity_metrics_enriched for canonical analysis.",
+        {"file_path": str, "activity_id": int, "strava_activity_id": int, "user_id": int},
+    )
+    async def garmin_fit_import(args: dict) -> dict:
+        args = _parse_args(args)
+        file_path = (args.get("file_path") or "").strip()
+        activity_id = args.get("activity_id")
+        strava_activity_id = args.get("strava_activity_id")
+
+        if not file_path:
+            return {"content": [{"type": "text", "text": "file_path is required."}], "is_error": True}
+
+        try:
+            user_id = int(args.get("user_id") or os.environ.get("SPORT_USER_ID", "1"))
+            from agents.dos.fit_import import (
+                import_fit_data,
+                parse_fit_file,
+                resolve_activity_id,
+            )
+
+            parsed = parse_fit_file(Path(file_path))
+
+            import asyncpg
+            url = os.environ.get("SPORT_POSTGRES_URL", "")
+            if not url:
+                return {"content": [{"type": "text", "text": "SPORT_POSTGRES_URL not configured."}], "is_error": True}
+
+            conn = await asyncpg.connect(url)
+            try:
+                resolved_activity_id = await resolve_activity_id(
+                    conn,
+                    activity_id=int(activity_id) if activity_id else None,
+                    strava_activity_id=int(strava_activity_id) if strava_activity_id else None,
+                    user_id=user_id,
+                )
+                result = await import_fit_data(
+                    conn,
+                    parsed,
+                    activity_id=resolved_activity_id,
+                    user_id=user_id,
+                )
+            finally:
+                await conn.close()
+
+            return {"content": [{"type": "text", "text": json.dumps(result, default=str, indent=2)}]}
+        except Exception as exc:
+            logger.error("garmin_fit_import: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"FIT import error: {exc}"}], "is_error": True}
+
     # --- Cron tools ---------------------------------------------------------
 
     @sdk_tool(
@@ -937,7 +993,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         get_activities, get_body_measurements, get_strength_sets, get_weekly_summaries,
         nutrition_query, nutrition_execute, nutrition_ddl,
         run_rules_engine,
-        strava_list_recent, strava_download,
+        strava_list_recent, strava_download, garmin_fit_import,
         cron_create, cron_list, cron_update, cron_delete, report_issue,
     ]
     if send_message is not None:

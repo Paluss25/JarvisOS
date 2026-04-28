@@ -1,3 +1,4 @@
+import asyncio
 import datetime as dt
 import sys
 from pathlib import Path
@@ -35,6 +36,14 @@ class FakeTransaction:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+
+def _run(coro):
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def test_field_dict_from_frame_keeps_values_and_units():
@@ -382,3 +391,31 @@ async def test_insert_record_batches_chunks_large_inputs():
     await _insert_record_batches(conn, fit_file_id=1, activity_id=123, records=records, batch_size=2)
 
     assert conn.executemany.await_count == 3
+
+
+def test_garmin_fit_import_tool_is_registered():
+    from agents.dos.tools import create_chief_mcp_server
+
+    server = create_chief_mcp_server(Path("/tmp"), redis_a2a=None)
+    names = {tool.name for tool in server._tools}
+
+    assert "garmin_fit_import" in names
+
+
+def test_garmin_fit_import_bad_user_id_returns_mcp_error():
+    from agents.dos.tools import create_chief_mcp_server
+
+    server = create_chief_mcp_server(Path("/tmp"), redis_a2a=None)
+    tool = next(tool for tool in server._tools if tool.name == "garmin_fit_import")
+
+    result = _run(tool.fn({"file_path": "/tmp/activity.fit", "user_id": "not-an-int"}))
+
+    assert result["is_error"] is True
+    assert "FIT import error" in result["content"][0]["text"]
+
+
+def test_dos_sport_query_documents_fit_tables_and_enriched_view():
+    text = Path("src/agents/dos/tools.py").read_text(encoding="utf-8")
+
+    assert "activity_fit_records" in text
+    assert "activity_metrics_enriched" in text
