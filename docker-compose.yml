@@ -56,7 +56,7 @@ services:
       - /home/paluss/docker/compose/jarvisOS/var/audit:/app/var/audit:rw
       - /home/paluss/docker/compose/jarvisOS/memory/schemas:/app/memory/schemas:ro
       - /home/paluss/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
-      - /home/paluss/nas/hr-docs:/app/hr-docs:rw
+      - /mnt/Brains/HR:/app/hr-docs:rw
     depends_on:
       redis:
         condition: service_healthy
