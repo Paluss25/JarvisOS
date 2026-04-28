@@ -52,3 +52,13 @@ def test_sanitize_pii_preserves_numeric_fields():
     text = "Retribuzione netta: 2.450,00 EUR"
     result = sanitize_pii(text)
     assert "2.450,00" in result
+
+
+def test_classify_document_payslip_keywords():
+    """classify_document_from_text should classify payslip-like text correctly."""
+    from agents.chro.tools import classify_document_from_text
+
+    text = "Retribuzione lorda: 3.000,00 EUR\nIRPEF: 450,00\nFerie residue: 12 gg"
+    result = classify_document_from_text(text)
+    assert result in ("payslip", "leave_statement", "inps_extract", "expense_report", "unknown")
+    assert result == "payslip"

@@ -121,6 +121,22 @@ def sanitize_pii(text: str, extra_names: list[str] | None = None) -> str:
     return result
 
 
+_CLASSIFY_KEYWORDS = {
+    "payslip": ["retribuzione", "cedolino", "busta paga", "netto", "lordo", "irpef", "inps a carico dipendente", "tfr competenza"],
+    "leave_statement": ["ferie residue", "prospetto ferie", "rol residuo", "permessi residui"],
+    "inps_extract": ["estratto conto inps", "anzianità contributiva", "contributi versati", "gestione separata"],
+    "expense_report": ["nota spese", "rimborso spese", "trasferta", "km percorsi"],
+}
+
+
+def classify_document_from_text(text: str) -> str:
+    """Fast keyword-based document classification. Used as pre-LLM check."""
+    lower = text.lower()
+    scores = {dtype: sum(1 for kw in kws if kw in lower) for dtype, kws in _CLASSIFY_KEYWORDS.items()}
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else "unknown"
+
+
 def extract_text_from_bytes(content: bytes, filename: str) -> str:
     """Extract text from PDF bytes using pdfplumber, fallback to pytesseract for scanned PDFs."""
     import pdfplumber
@@ -341,6 +357,111 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         return _text(sanitize_pii(text))
 
     @sdk_tool(
+        "classify_document",
+        "Classify a sanitized document text into one of: payslip, leave_statement, inps_extract, expense_report, unknown. "
+        "Uses keyword matching first; falls back to LLM (Haiku) when ambiguous. "
+        "text MUST already be PII-sanitized before calling this tool.",
+        {"text": str},
+    )
+    async def classify_document(args: dict) -> dict:
+        args = _parse_args(args)
+        text = (args.get("text") or "").strip()
+        if not text:
+            return _text("No text provided.")
+        text = sanitize_pii(text)  # enforce PII sanitization before any LLM call
+
+        doc_type = classify_document_from_text(text)
+        if doc_type != "unknown":
+            return _text(doc_type)
+
+        # Slow path: LLM classification (Haiku)
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+            model = os.environ.get("CLAUDE_FALLBACK_MODEL", "claude-haiku-4-5-20251001")
+            response = client.messages.create(
+                model=model,
+                max_tokens=50,
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        "Classify this Italian HR document into exactly one category. "
+                        "Reply with only one word from: payslip, leave_statement, inps_extract, expense_report, unknown.\n\n"
+                        f"DOCUMENT (first 1500 chars):\n{text[:1500]}"
+                    ),
+                }],
+            )
+            result = response.content[0].text.strip().lower()
+            valid = {"payslip", "leave_statement", "inps_extract", "expense_report", "unknown"}
+            return _text(result if result in valid else "unknown")
+        except Exception as exc:
+            logger.error("classify_document LLM fallback failed: %s", exc)
+            return _text("unknown")
+
+    @sdk_tool(
+        "extract_fields",
+        "Extract structured fields from a sanitized HR document text using LLM + Italian locale vocabulary. "
+        "doc_type must be one of: payslip, leave_statement, inps_extract, expense_report. "
+        "text MUST already be PII-sanitized. Returns a JSON object with extracted fields.",
+        {"text": str, "doc_type": str},
+    )
+    async def extract_fields(args: dict) -> dict:
+        args = _parse_args(args)
+        text = (args.get("text") or "").strip()
+        doc_type = (args.get("doc_type") or "").strip()
+        if not text or not doc_type:
+            return _text("text and doc_type are required.")
+        text = sanitize_pii(text)  # enforce PII sanitization before any LLM call
+
+        locale_path = workspace_path / "knowledge" / "it-IT-locale.json"
+        locale = {}
+        if locale_path.exists():
+            try:
+                locale = json.loads(locale_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        payroll_vocab = json.dumps(locale.get("payroll_fields", {}), ensure_ascii=False)
+        law_ref = json.dumps(locale.get("law_reference", {}), ensure_ascii=False)
+
+        schema_hints = {
+            "payslip": "period_from (YYYY-MM-DD), period_to (YYYY-MM-DD), employer (string), gross_pay (number EUR), net_pay (number EUR), inps_employee (number EUR), irpef_withheld (number EUR), tfr_accrued (number EUR), leave_residual_days (number), rol_residual_hours (number)",
+            "leave_statement": "snapshot_date (YYYY-MM-DD), ferie_accrued (number days), ferie_used (number days), ferie_remaining (number days), rol_accrued (number hours), rol_used (number hours), rol_remaining (number hours)",
+            "inps_extract": "document_date (YYYY-MM-DD), contribution_period (string e.g. '2010-01 / 2026-03'), total_contributions (number EUR), projected_pension_age (integer), projected_monthly_pension (number EUR)",
+            "expense_report": "expense_date (YYYY-MM-DD), category (string), amount_eur (number), reimbursed (boolean), employer_reference (string)",
+        }.get(doc_type, "")
+
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+            model = os.environ.get("CLAUDE_FALLBACK_MODEL", "claude-haiku-4-5-20251001")
+            prompt = (
+                f"Extract structured fields from this Italian HR document (type: {doc_type}).\n\n"
+                f"Italian field vocabulary mapping:\n{payroll_vocab}\n\n"
+                f"Italian labor law reference:\n{law_ref}\n\n"
+                f"Required output fields:\n{schema_hints}\n\n"
+                "Return a JSON object only — no explanation, no markdown. "
+                "Use null for missing fields. All monetary values as plain numbers (EUR).\n\n"
+                f"DOCUMENT (PII already redacted):\n{text[:3000]}"
+            )
+            response = client.messages.create(
+                model=model,
+                max_tokens=1000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text.strip()
+            if raw.startswith("```"):
+                raw = re.sub(r"^```[a-z]*\n?", "", raw)
+                raw = re.sub(r"\n?```$", "", raw)
+            extracted = json.loads(raw)
+            return {"content": [{"type": "text", "text": json.dumps(extracted, ensure_ascii=False)}]}
+        except json.JSONDecodeError as exc:
+            return _text(f"LLM returned non-JSON response: {exc}")
+        except Exception as exc:
+            logger.error("extract_fields failed: %s", exc)
+            return {"content": [{"type": "text", "text": f"Extraction error: {exc}"}], "is_error": True}
+
+    @sdk_tool(
         "sanitize_pii",
         "Redact PII from document text before passing to any LLM. "
         "Replaces: codice fiscale → [CF_REDACTED], IBAN → [IBAN_REDACTED], "
@@ -376,7 +497,11 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
     else:
         send_message = None
 
-    all_tools = [daily_log, memory_search, memory_get, query_db, receive_document, extract_text, sanitize_pii_tool]
+    all_tools = [
+        daily_log, memory_search, memory_get, query_db,
+        receive_document, extract_text,
+        sanitize_pii_tool, classify_document, extract_fields,
+    ]
     if send_message is not None:
         all_tools.append(send_message)
 
