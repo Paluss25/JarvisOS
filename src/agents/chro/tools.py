@@ -176,7 +176,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         params = raw_params if isinstance(raw_params, list) else []
         if not sql:
             return _text("No query provided.")
-        if not sql.upper().startswith("SELECT"):
+        if not re.match(r'\s*SELECT\b', sql, re.IGNORECASE):
             return _text("query_db only accepts SELECT statements.")
         if not re.search(r'\bchro\.', sql, re.IGNORECASE):
             return _text("query_db only allows queries against the chro schema.")
@@ -186,6 +186,40 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         except Exception as exc:
             logger.error("query_db: error — %s", exc)
             return {"content": [{"type": "text", "text": f"Query error: {exc}"}], "is_error": True}
+
+    # ---- Memory read tool ---------------------------------------------------
+
+    @sdk_tool(
+        "memory_get",
+        "Read a specific memory file from the workspace. "
+        "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
+        "Optionally specify start_line and num_lines to read a slice.",
+        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
+    )
+    async def memory_get(args: dict) -> dict:
+        args = _parse_args(args)
+        rel_path = args.get("path", "").strip()
+        if not rel_path:
+            return _text("No path provided.")
+        target = (workspace_path / rel_path).resolve()
+        try:
+            target.relative_to(workspace_path.resolve())
+        except ValueError:
+            return _text("Access denied: path is outside the workspace directory.")
+        if not target.exists():
+            return _text(f"File not found: {rel_path}")
+        try:
+            content = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            return _text(f"Error reading {rel_path}: {exc}")
+        start_line = args.get("start_line")
+        num_lines = args.get("num_lines")
+        if start_line is not None or num_lines is not None:
+            lines = content.split("\n")
+            s = int(start_line or 1) - 1
+            n = int(num_lines) if num_lines is not None else len(lines)
+            content = "\n".join(lines[s: s + n])
+        return _text(content)
 
     # ---- A2A send_message ---------------------------------------------------
 
@@ -206,7 +240,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
     else:
         send_message = None
 
-    all_tools = [daily_log, memory_search, query_db]
+    all_tools = [daily_log, memory_search, memory_get, query_db]
     if send_message is not None:
         all_tools.append(send_message)
 
