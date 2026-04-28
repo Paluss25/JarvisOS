@@ -62,3 +62,30 @@ def test_classify_document_payslip_keywords():
     result = classify_document_from_text(text)
     assert result in ("payslip", "leave_statement", "inps_extract", "expense_report", "unknown")
     assert result == "payslip"
+
+
+import pytest
+
+
+def test_validate_schema_payslip_valid():
+    from agents.chro.tools import validate_extracted_fields
+    fields = {
+        "period_from": "2026-03-01",
+        "period_to": "2026-03-31",
+        "employer": "Acme SRL",
+        "gross_pay": 3000.0,
+        "net_pay": 2200.0,
+        "inps_employee": 275.7,
+        "irpef_withheld": 450.0,
+        "tfr_accrued": 207.3,
+        "leave_residual_days": 12.0,
+        "rol_residual_hours": 24.0,
+    }
+    validate_extracted_fields("payslip", fields)
+
+
+def test_validate_schema_payslip_missing_net_pay():
+    from agents.chro.tools import validate_extracted_fields, ValidationError
+    fields = {"period_from": "2026-03-01", "period_to": "2026-03-31", "gross_pay": 3000.0}
+    with pytest.raises(ValidationError):
+        validate_extracted_fields("payslip", fields)

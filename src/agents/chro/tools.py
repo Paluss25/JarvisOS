@@ -129,6 +129,35 @@ _CLASSIFY_KEYWORDS = {
 }
 
 
+class ValidationError(ValueError):
+    pass
+
+
+_SCHEMA_PATHS = {
+    "payslip": "/app/memory/schemas/payslip.json",
+    "leave_statement": "/app/memory/schemas/leave_statement.json",
+    "inps_extract": "/app/memory/schemas/inps_extract.json",
+    "expense_report": "/app/memory/schemas/expense_report.json",
+}
+
+
+def validate_extracted_fields(doc_type: str, fields: dict) -> None:
+    """Validate extracted fields against the JSON schema. Raises ValidationError on failure."""
+    schema_path = _SCHEMA_PATHS.get(doc_type)
+    if not schema_path:
+        raise ValidationError(f"No schema registered for doc_type: {doc_type}")
+    # Fall back to local dev path when running outside container
+    if not Path(schema_path).exists():
+        local_path = Path(__file__).parent.parent.parent.parent / "memory" / "schemas" / f"{doc_type}.json"
+        if local_path.exists():
+            schema_path = str(local_path)
+    try:
+        from chro_cpo.schemas.validators import validate_payload
+        validate_payload(schema_path, fields)
+    except Exception as exc:
+        raise ValidationError(str(exc)) from exc
+
+
 def classify_document_from_text(text: str) -> str:
     """Fast keyword-based document classification. Used as pre-LLM check."""
     lower = text.lower()
@@ -478,6 +507,150 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         redacted = sanitize_pii(text, extra_names=extra_names or None)
         return _text(redacted)
 
+    @sdk_tool(
+        "validate_schema",
+        "Validate extracted fields against the expected schema for the document type. "
+        "doc_type: payslip | leave_statement | inps_extract | expense_report. "
+        "fields: the JSON object returned by extract_fields. "
+        "Returns 'valid' or raises a validation error message.",
+        {"doc_type": str, "fields": {"type": "object"}},
+    )
+    async def validate_schema(args: dict) -> dict:
+        args = _parse_args(args)
+        doc_type = (args.get("doc_type") or "").strip()
+        fields = args.get("fields") or {}
+        if isinstance(fields, str):
+            try:
+                fields = json.loads(fields)
+            except Exception:
+                return _text("fields must be a JSON object.")
+        if not doc_type:
+            return _text("doc_type is required.")
+        try:
+            validate_extracted_fields(doc_type, fields)
+            return _text("valid")
+        except ValidationError as exc:
+            return {"content": [{"type": "text", "text": str(exc)}], "is_error": True}
+
+    @sdk_tool(
+        "save_to_db",
+        "INSERT validated extracted fields into the appropriate chro.* table. "
+        "doc_type: payslip | leave_statement | inps_extract | expense_report. "
+        "fields: the validated JSON object. case_id: UUID string for audit log grouping. "
+        "source_file: the NAS path of the original document.",
+        {"doc_type": str, "fields": {"type": "object"}, "case_id": str, "source_file": str},
+    )
+    async def save_to_db(args: dict) -> dict:
+        args = _parse_args(args)
+        doc_type = (args.get("doc_type") or "").strip()
+        fields = args.get("fields") or {}
+        if isinstance(fields, str):
+            try:
+                fields = json.loads(fields)
+            except Exception:
+                return _text("fields must be a JSON object.")
+        case_id = (args.get("case_id") or "").strip()
+        source_file = (args.get("source_file") or "").strip()
+
+        import asyncpg
+        import datetime as _dt
+        import uuid as _uuid
+
+        def _to_date(val):
+            if val is None:
+                return None
+            if isinstance(val, _dt.date):
+                return val
+            return _dt.date.fromisoformat(str(val))
+
+        def _to_uuid(val):
+            if val is None:
+                return None
+            if isinstance(val, _uuid.UUID):
+                return val
+            return _uuid.UUID(str(val))
+
+        url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
+        if not url:
+            return _text("CHRO_POSTGRES_URL not configured.")
+
+        try:
+            conn = await asyncpg.connect(url)
+            try:
+                if doc_type == "payslip":
+                    row = await conn.fetchrow(
+                        """INSERT INTO chro.payslips
+                           (period_from, period_to, employer, gross_pay, net_pay,
+                            inps_employee, irpef_withheld, tfr_accrued,
+                            leave_residual_days, rol_residual_hours, raw_json, source_file)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                           RETURNING id""",
+                        _to_date(fields.get("period_from")), _to_date(fields.get("period_to")),
+                        fields.get("employer"), fields.get("gross_pay"), fields.get("net_pay"),
+                        fields.get("inps_employee"), fields.get("irpef_withheld"),
+                        fields.get("tfr_accrued"), fields.get("leave_residual_days"),
+                        fields.get("rol_residual_hours"),
+                        json.dumps(fields), source_file,
+                    )
+                    record_id = str(row["id"])
+
+                elif doc_type == "leave_statement":
+                    row = await conn.fetchrow(
+                        """INSERT INTO chro.leave_snapshots
+                           (snapshot_date, ferie_accrued, ferie_used, ferie_remaining,
+                            rol_accrued, rol_used, rol_remaining)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7)
+                           RETURNING id""",
+                        _to_date(fields.get("snapshot_date")),
+                        fields.get("ferie_accrued"), fields.get("ferie_used"), fields.get("ferie_remaining"),
+                        fields.get("rol_accrued"), fields.get("rol_used"), fields.get("rol_remaining"),
+                    )
+                    record_id = str(row["id"])
+
+                elif doc_type == "inps_extract":
+                    row = await conn.fetchrow(
+                        """INSERT INTO chro.pension_extracts
+                           (document_date, contribution_period, total_contributions,
+                            projected_pension_age, projected_monthly_pension, raw_json, source_file)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7)
+                           RETURNING id""",
+                        _to_date(fields.get("document_date")), fields.get("contribution_period"),
+                        fields.get("total_contributions"), fields.get("projected_pension_age"),
+                        fields.get("projected_monthly_pension"),
+                        json.dumps(fields), source_file,
+                    )
+                    record_id = str(row["id"])
+
+                elif doc_type == "expense_report":
+                    row = await conn.fetchrow(
+                        """INSERT INTO chro.expense_items
+                           (expense_date, category, amount_eur, reimbursed, employer_reference)
+                           VALUES ($1,$2,$3,$4,$5)
+                           RETURNING id""",
+                        _to_date(fields.get("expense_date")), fields.get("category"),
+                        fields.get("amount_eur"), bool(fields.get("reimbursed", False)),
+                        fields.get("employer_reference"),
+                    )
+                    record_id = str(row["id"])
+
+                else:
+                    return _text(f"Unknown doc_type: {doc_type}")
+
+                await conn.execute(
+                    """INSERT INTO chro.hr_audit_log
+                       (case_id, agent_id, action, output_schema_version, confidence)
+                       VALUES ($1, $2, $3, $4, $5)""",
+                    _to_uuid(case_id or record_id), "chro", f"save_to_db:{doc_type}", "1.0",
+                    float(fields.get("confidence", 0.0)) if fields.get("confidence") else None,
+                )
+
+                return _text(f"Saved {doc_type} record id={record_id}")
+            finally:
+                await conn.close()
+        except Exception as exc:
+            logger.error("save_to_db(%s): error — %s", doc_type, exc)
+            return {"content": [{"type": "text", "text": f"DB error: {exc}"}], "is_error": True}
+
     # ---- A2A send_message ---------------------------------------------------
 
     if redis_a2a is not None:
@@ -501,6 +674,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         daily_log, memory_search, memory_get, query_db,
         receive_document, extract_text,
         sanitize_pii_tool, classify_document, extract_fields,
+        validate_schema, save_to_db,
     ]
     if send_message is not None:
         all_tools.append(send_message)
