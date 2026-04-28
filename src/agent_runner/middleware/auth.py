@@ -17,4 +17,4 @@ def is_authorized(chat_id: int, allowed_chat_id_env: str) -> bool:
     allowed = os.environ.get(allowed_chat_id_env, "")
     if not allowed:
         return False
-    return str(chat_id) == str(allowed)
+    return str(chat_id) in {cid.strip() for cid in allowed.split(",")}

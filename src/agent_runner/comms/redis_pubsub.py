@@ -4,10 +4,14 @@ import asyncio
 import json
 import logging
 import os
+from dataclasses import fields
 
 import redis.asyncio as aioredis
 
 from agent_runner.comms.message import A2AMessage
+
+_VALID_FIELDS = {f.name for f in fields(A2AMessage)}
+_FIELD_ALIASES = {"from": "from_agent", "to": "to_agent"}
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +54,38 @@ class RedisA2A:
         self._callbacks.append(callback)
 
     async def listen(self) -> None:
-        """Blocking listen loop — run as an asyncio task via lifespan."""
+        """Blocking listen loop — run as an asyncio task via lifespan.
+
+        Each callback is spawned as an independent asyncio task so a slow
+        callback (e.g. one that triggers a long agent.query() turn) cannot
+        head-of-line block subsequent inbound messages on the same channel.
+        """
+        async def _safe_invoke(cb, m: A2AMessage) -> None:
+            try:
+                await cb(m)
+            except Exception as exc:
+                logger.warning("a2a[%s]: callback error — %s", self.agent_id, exc)
+
         try:
             async for message in self._pubsub.listen():
                 if message["type"] == "message":
                     try:
                         data = json.loads(message["data"])
+                        # Normalize field aliases (e.g. "from" → "from_agent")
+                        for alias, canonical in _FIELD_ALIASES.items():
+                            if alias in data and canonical not in data:
+                                data[canonical] = data.pop(alias)
+                        # Strip unknown fields to avoid dataclass init errors
+                        data = {k: v for k, v in data.items() if k in _VALID_FIELDS}
                         msg = A2AMessage(**data)
-                        for cb in self._callbacks:
-                            await cb(msg)
                     except Exception as exc:
                         logger.warning("a2a[%s]: bad message — %s", self.agent_id, exc)
+                        continue
+                    for cb in self._callbacks:
+                        # Fire-and-forget: dispatch happens immediately so the
+                        # listen loop returns to the next pubsub message even
+                        # if this callback awaits something slow.
+                        asyncio.create_task(_safe_invoke(cb, msg))
         except asyncio.CancelledError:
             pass
         finally:

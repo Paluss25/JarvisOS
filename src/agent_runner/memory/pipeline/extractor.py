@@ -1,5 +1,6 @@
 """Memory extractor + classifier — extract memory candidates from agent turns."""
 
+import asyncio
 import json
 import logging
 import os
@@ -28,9 +29,10 @@ If nothing worth remembering, return [].
 
 
 async def extract_memories(agent_id: str, message: str, response: str) -> list[dict[str, Any]]:
-    """Run Gemini Flash extraction on one agent turn.
+    """Extract memory candidates from one agent turn.
 
-    Falls back to Haiku if GEMINI_API_KEY is missing.
+    Primary: local `claude` CLI (OAuth — same auth as agents, no API cost).
+    Fallback: Gemini Flash (capped at 10s to avoid quota-retry hangs).
     Returns a list of {text, type, scope} dicts.
     """
     prompt = _PROMPT_TEMPLATE.format(
@@ -39,20 +41,53 @@ async def extract_memories(agent_id: str, message: str, response: str) -> list[d
         types=", ".join(_MEMORY_TYPES),
     )
 
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    # Primary: Claude CLI (free, OAuth)
+    result = await _extract_claude_cli(prompt, agent_id)
+    if result is not None:
+        return result
+
+    # Fallback: Gemini Flash (capped to avoid 429-retry hangs)
+    gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
     if gemini_key:
-        return await _extract_gemini(prompt, gemini_key)
+        try:
+            result = await asyncio.wait_for(_extract_gemini(prompt, gemini_key), timeout=10.0)
+            if result is not None:
+                return result
+        except asyncio.TimeoutError:
+            logger.warning("extractor[%s]: Gemini timed out — skipping", agent_id)
 
-    # Haiku fallback
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if anthropic_key:
-        return await _extract_haiku(prompt, anthropic_key)
-
-    logger.warning("extractor: no LLM API key — skipping memory extraction for %s", agent_id)
+    logger.debug("extractor[%s]: no memory extracted", agent_id)
     return []
 
 
-async def _extract_gemini(prompt: str, api_key: str) -> list[dict]:
+async def _extract_claude_cli(prompt: str, agent_id: str) -> list[dict] | None:
+    """Use the local `claude` CLI (OAuth) for extraction.
+
+    Returns a list (possibly empty) on success, None on failure.
+    Same authentication as the agents — no API key needed.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "claude", "--model", "claude-haiku-4-5-20251001", "-p", prompt,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        text = stdout.decode().strip()
+        start = text.find("[")
+        end = text.rfind("]") + 1
+        if start >= 0 and end > start:
+            return json.loads(text[start:end]) or []
+        logger.debug("extractor[%s]: claude CLI returned no JSON array — %r", agent_id, text[:200])
+    except asyncio.TimeoutError:
+        logger.warning("extractor[%s]: claude CLI timed out", agent_id)
+    except Exception as exc:
+        logger.warning("extractor[%s]: claude CLI extraction failed — %s", agent_id, exc)
+    return None
+
+
+async def _extract_gemini(prompt: str, api_key: str) -> list[dict] | None:
+    """Returns extracted memories, or None if Gemini errored."""
     from google import genai
 
     try:
@@ -67,24 +102,4 @@ async def _extract_gemini(prompt: str, api_key: str) -> list[dict]:
         return json.loads(resp.text) or []
     except Exception as exc:
         logger.warning("extractor: Gemini extraction failed — %s", exc)
-        return []
-
-
-async def _extract_haiku(prompt: str, api_key: str) -> list[dict]:
-    import anthropic
-
-    try:
-        client = anthropic.AsyncAnthropic(api_key=api_key)
-        msg = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = msg.content[0].text
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        if start >= 0 and end > start:
-            return json.loads(text[start:end]) or []
-    except Exception as exc:
-        logger.warning("extractor: Haiku extraction failed — %s", exc)
-    return []
+        return None

@@ -73,6 +73,21 @@ DEFAULT_BUILTIN_CRONS: list[dict] = [
         "telegram_notify": True,
         "builtin": True,
     },
+    {
+        "name": "nightly_dreaming",
+        "schedule": "daily@02:00",
+        "prompt": (
+            "Nightly dreaming. Review your recent activity logs and long-term memory. "
+            "Produce a DREAMS.md that captures: unresolved threads (things started but "
+            "not finished), emerging patterns (recurring themes across days), free "
+            "associations (unexpected connections between topics), and seeds (ideas worth "
+            "developing later). Be interpretive, not just descriptive — surface what the "
+            "logs don't explicitly say. Return ONLY the raw markdown for DREAMS.md."
+        ),
+        "session_id": "heartbeat-dreaming",
+        "telegram_notify": False,
+        "builtin": True,
+    },
 ]
 
 
@@ -130,6 +145,15 @@ class HeartbeatScheduler:
     # -----------------------------------------------------------------------
 
     async def _run(self, entry: CronEntry, reason: str = "due") -> None:
+        # Skip if the agent is mid-turn (user chat, A2A, or another cron).
+        # Running concurrent .query() calls on the same SDK subprocess wedges
+        # the response stream — see is_busy doc in BaseAgentClient.
+        if self._agent.is_busy:
+            logger.info(
+                "heartbeat: skipping '%s' (agent=%s busy) — will retry next tick",
+                entry.name, self._config.name,
+            )
+            return
         logger.info(
             "heartbeat: triggering '%s' (id=%s, reason=%s)",
             entry.name, entry.id, reason,
@@ -156,6 +180,9 @@ class HeartbeatScheduler:
         elif entry.name == "weekly_consolidation":
             prompt = self._build_weekly_prompt(workspace, entry.prompt)
 
+        elif entry.name == "nightly_dreaming":
+            prompt = self._build_dreaming_prompt(workspace, entry.prompt)
+
         # --- Run agent -----------------------------------------------------
         try:
             result = await self._run_agent(prompt, entry.session_id)
@@ -177,14 +204,28 @@ class HeartbeatScheduler:
             self._write_memory(workspace, result)
             logger.info("heartbeat: weekly MEMORY.md updated")
 
+        elif entry.name == "nightly_dreaming":
+            self._write_dreams(workspace, result)
+            logger.info("heartbeat: nightly DREAMS.md updated")
+
         # --- Record success and notify -------------------------------------
         self._store.record_run(entry.id, "ok")
 
         if entry.telegram_notify:
             label = entry.name.replace("_", " ").title()
-            await self._send_telegram(
-                f"*{label} — {date.today().isoformat()}*\n\n{result[:3800]}"
-            )
+            msg = f"{label} — {date.today().isoformat()}\n\n{result[:3800]}"
+            # Shield lets the HTTP call complete even if the scheduler task is
+            # cancelled during graceful shutdown (SIGTERM race after session ends).
+            notify_task = asyncio.create_task(self._send_telegram(msg))
+            try:
+                await asyncio.shield(notify_task)
+            except asyncio.CancelledError:
+                # Session already completed — let the notify task finish, then stop.
+                try:
+                    await asyncio.wait_for(notify_task, timeout=12.0)
+                except Exception:
+                    pass
+                raise
 
     # -----------------------------------------------------------------------
     # Helpers
@@ -222,22 +263,71 @@ class HeartbeatScheduler:
             lines = lines[:-1]
         (workspace / "MEMORY.md").write_text("\n".join(lines), encoding="utf-8")
 
+    def _build_dreaming_prompt(self, workspace: Path, base_prompt: str) -> str:
+        """Build the nightly dreaming prompt with recent logs + current MEMORY.md."""
+        daily = DailyLogger(workspace)
+        memory_path = workspace / "MEMORY.md"
+        current_memory = (
+            memory_path.read_text(encoding="utf-8") if memory_path.exists() else ""
+        )
+
+        today = date.today()
+        recent_parts: list[str] = []
+        for i in range(3):
+            d = today - timedelta(days=i)
+            content = daily.read_date(d)
+            if content:
+                label = "Today" if i == 0 else f"{i}d ago ({d.isoformat()})"
+                recent_parts.append(f"### {label}\n{content[:2000]}")
+        recent_log = "\n\n".join(recent_parts)
+
+        return (
+            f"{base_prompt}\n\n"
+            f"CURRENT MEMORY.md:\n{current_memory[:3000]}\n\n"
+            f"RECENT LOGS (last 3 days):\n{recent_log[:5000]}"
+        )
+
+    def _write_dreams(self, workspace: Path, raw_output: str) -> None:
+        """Strip markdown fences and write workspace/DREAMS.md."""
+        lines = raw_output.strip().splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        content = "\n".join(lines)
+        (workspace / "DREAMS.md").write_text(content, encoding="utf-8")
+
     async def _run_agent(self, prompt: str, session_id: str) -> str:
         return await self._agent.query(prompt, session_id=session_id)
 
     async def _send_telegram(self, text: str) -> None:
         """Send a Telegram notification using this agent's configured token."""
         token = os.environ.get(self._config.telegram_token_env, "")
-        chat_id = os.environ.get(self._config.telegram_chat_id_env, "")
-        if not token or not chat_id:
+        chat_id_str = os.environ.get(self._config.telegram_chat_id_env, "")
+        if not token or not chat_id_str:
             logger.debug("heartbeat: Telegram not configured — skipping notification")
             return
 
+        try:
+            chat_id = int(chat_id_str)
+        except ValueError:
+            logger.warning(
+                "heartbeat: invalid chat_id '%s' for %s — skipping notification",
+                chat_id_str[:20], self._config.name,
+            )
+            return
+
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {"chat_id": int(chat_id), "text": text, "parse_mode": "Markdown"}
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
+        # No parse_mode — avoids Markdown escape errors in complex agent responses
+        payload = {"chat_id": chat_id, "text": text}
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(url, json=payload)
                 resp.raise_for_status()
-            except Exception as exc:
-                logger.warning("heartbeat: Telegram notification failed — %s", exc)
+        except asyncio.CancelledError:
+            logger.warning(
+                "heartbeat: Telegram send cancelled (shutdown race) for %s", self._config.name
+            )
+            raise
+        except Exception as exc:
+            logger.warning("heartbeat: Telegram notification failed — %s", exc)

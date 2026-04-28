@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 import uuid
 
 import httpx
@@ -26,15 +27,37 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
         agent_id: This agent's ID (used as from_agent in the envelope).
         redis_a2a: Shared RedisA2A instance (already connected in lifespan).
     """
-    # Pending futures keyed by correlation_id — resolved by the response callback
-    _pending: dict[str, asyncio.Future] = {}
+    # Pending futures keyed by correlation_id — resolved by the response callback.
+    # Each entry stores (future, expected_from) so we can verify the response
+    # actually came from the target agent we addressed.
+    _pending: dict[str, tuple[asyncio.Future, str]] = {}
+    # Cooldown: after *consecutive* timeouts on an agent, skip subsequent calls
+    # for a short window so Claude doesn't retry 5+ times at 120s each. A single
+    # transient timeout no longer suppresses follow-up requests.
+    _timeout_count: dict[str, int] = {}
+    _timeout_ts: dict[str, float] = {}
+    _COOLDOWN_S: float = 15.0
+    _COOLDOWN_MIN_FAILS: int = 2
 
     async def _handle_response(msg: A2AMessage) -> None:
         """Callback registered with redis_a2a — resolves pending request futures."""
-        if msg.type == "response" and msg.correlation_id in _pending:
-            fut = _pending[msg.correlation_id]
-            if not fut.done():
-                fut.set_result(msg.payload)
+        if msg.type != "response":
+            return
+        entry = _pending.get(msg.correlation_id)
+        if entry is None:
+            return
+        fut, expected_from = entry
+        if msg.from_agent != expected_from:
+            # Stray response with a colliding correlation_id from another agent.
+            # Drop it instead of resolving the wrong future.
+            logger.warning(
+                "send_message[%s]: response with cid=%.8s from '%s' "
+                "but expected '%s' — discarding",
+                agent_id, msg.correlation_id, msg.from_agent, expected_from,
+            )
+            return
+        if not fut.done():
+            fut.set_result(msg.payload)
 
     redis_a2a.on_message(_handle_response)
 
@@ -42,7 +65,7 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
         """Send a message to another agent and wait for their response.
 
         Args (in dict):
-            to: Target agent ID (e.g. "roger", "jarvis")
+            to: Target agent ID (e.g. "dos", "ceo")
             message: Natural language message to send
         Returns:
             The target agent's response text, or an error string.
@@ -53,6 +76,21 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
             return "Error: 'to' (target agent ID) is required."
         if not message:
             return "Error: 'message' is required."
+
+        # Fast-fail only after a *streak* of timeouts. A single transient
+        # 120s timeout no longer suppresses unrelated follow-up requests.
+        last_timeout = _timeout_ts.get(to)
+        if last_timeout is not None and _timeout_count.get(to, 0) >= _COOLDOWN_MIN_FAILS:
+            elapsed = time.monotonic() - last_timeout
+            if elapsed < _COOLDOWN_S:
+                return (
+                    f"Error: agent '{to}' is unreachable "
+                    f"(timed out {elapsed:.0f}s ago, cooldown active). "
+                    "Proceed without this data."
+                )
+            # Cooldown expired — clear streak and try again.
+            _timeout_ts.pop(to, None)
+            _timeout_count.pop(to, None)
 
         correlation_id = str(uuid.uuid4())
         msg = A2AMessage(
@@ -65,7 +103,7 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
 
         loop = asyncio.get_event_loop()
         future: asyncio.Future = loop.create_future()
-        _pending[correlation_id] = future
+        _pending[correlation_id] = (future, to)
 
         try:
             await redis_a2a.publish(msg)
@@ -93,8 +131,13 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
 
         try:
             result = await asyncio.wait_for(future, timeout=_RESPONSE_TIMEOUT)
+            # Reset failure streak on success.
+            _timeout_count.pop(to, None)
+            _timeout_ts.pop(to, None)
             return result
         except asyncio.TimeoutError:
+            _timeout_ts[to] = time.monotonic()
+            _timeout_count[to] = _timeout_count.get(to, 0) + 1
             return f"Error: agent '{to}' did not respond within {_RESPONSE_TIMEOUT}s."
         finally:
             _pending.pop(correlation_id, None)

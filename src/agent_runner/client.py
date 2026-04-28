@@ -25,8 +25,12 @@ from claude_agent_sdk import (
 from agent_runner.config import AgentConfig
 from agent_runner.memory.daily_logger import DailyLogger
 from agent_runner.memory.pipeline.queue import PipelineItem, PipelineQueue
+from agent_runner.telemetry import AGENT_BUSY, get_tracer, record_llm_turn
+from opentelemetry.trace import StatusCode
 
 logger = logging.getLogger(__name__)
+
+_tracer = get_tracer(__name__)
 
 _STREAM_TIMEOUT = 480   # seconds — raised from 300; fast-path meal logging ~10s, full pipeline safety margin
 _IMAGE_TIMEOUT = 120    # seconds — generous for large vision requests
@@ -50,8 +54,17 @@ class BaseAgentClient:
         self._options = options
         self._sdk: ClaudeSDKClient | None = None
         self._lock = asyncio.Lock()
+        # True while *any* code path is consuming `_sdk.receive_response()`.
+        # The dispatch lock alone is not sufficient: stream() releases the lock
+        # right after the SDK query is sent and iterates the response outside
+        # of it (see Issue 1 fix below). A second concurrent caller of
+        # query()/stream() would open a second async-iterator on the same
+        # underlying anyio MemoryObjectReceiveStream and the two consumers
+        # would steal messages from each other, wedging at least one of them.
+        self._stream_active: bool = False
         self._daily = DailyLogger(config.workspace_path)
         self._pipeline_queue: PipelineQueue | None = None
+        self._last_result_msg = None
 
     def set_pipeline_queue(self, queue: PipelineQueue) -> None:
         """Attach the memory pipeline queue. Called by the lifespan before serving."""
@@ -59,8 +72,8 @@ class BaseAgentClient:
 
     @property
     def is_busy(self) -> bool:
-        """True while a query() or stream() call holds the dispatch lock."""
-        return self._lock.locked()
+        """True while any caller holds the dispatch lock OR is consuming the SDK stream."""
+        return self._lock.locked() or self._stream_active
 
     # -- Lifecycle ----------------------------------------------------------
 
@@ -205,6 +218,7 @@ class BaseAgentClient:
                     text_parts.append(block.text)
 
         if isinstance(msg, ResultMessage):
+            self._last_result_msg = msg
             try:
                 self._daily.log(
                     f"[COST] ${msg.total_cost_usd:.4f} | {msg.duration_ms}ms"
@@ -248,34 +262,60 @@ class BaseAgentClient:
     async def query(self, message: str, session_id: str | None = None, source: str = "user") -> str:
         if not self._sdk:
             raise RuntimeError(f"{self.name} not connected")
-        # Fix Issue 2: guard the retry path with a null-check and wrap the
-        # second query() call in its own try/except.
-        async with self._lock:
+        self._last_result_msg = None
+        AGENT_BUSY.labels(agent_id=self.config.id).set(1)
+        with _tracer.start_as_current_span(
+            "llm.turn",
+            attributes={"agent.id": self.config.id, "llm.source": source},
+        ) as span:
             try:
-                await self._sdk.query(message, session_id=session_id or "default")
+                # Fix Issue 2: guard the retry path with a null-check and wrap the
+                # second query() call in its own try/except.
+                async with self._lock:
+                    try:
+                        await self._sdk.query(message, session_id=session_id or "default")
+                    except Exception as exc:
+                        logger.warning("agent[%s]: subprocess error on query — %s", self.config.id, exc)
+                        await self._reconnect()
+                        if not self._sdk:
+                            raise RuntimeError(f"{self.name} reconnect failed") from exc
+                        try:
+                            await self._sdk.query(message, session_id=session_id or "default")
+                        except Exception as retry_exc:
+                            logger.error("agent[%s]: query failed after reconnect — %s", self.config.id, retry_exc)
+                            raise
+                    text_parts: list[str] = []
+                    self._stream_active = True
+                    try:
+                        async with asyncio.timeout(_STREAM_TIMEOUT):
+                            async for msg in self._sdk.receive_response():
+                                if self._process_message(msg, text_parts):
+                                    break
+                    except TimeoutError:
+                        logger.error(
+                            "agent[%s]: query timed out after %ss — reconnecting",
+                            self.config.id, _STREAM_TIMEOUT,
+                        )
+                        await self._reconnect()
+                        raise
+                    finally:
+                        self._stream_active = False
+                if self._last_result_msg is not None:
+                    rm = self._last_result_msg
+                    span.set_attribute("llm.cost_usd", float(rm.total_cost_usd or 0))
+                    span.set_attribute("llm.duration_ms", int(rm.duration_ms or 0))
+                    span.set_attribute("llm.num_turns", int(rm.num_turns or 0))
+                    record_llm_turn(
+                        agent_id=self.config.id,
+                        source=source,
+                        cost_usd=float(rm.total_cost_usd or 0),
+                        duration_ms=int(rm.duration_ms or 0),
+                    )
             except Exception as exc:
-                logger.warning("agent[%s]: subprocess error on query — %s", self.config.id, exc)
-                await self._reconnect()
-                if not self._sdk:
-                    raise RuntimeError(f"{self.name} reconnect failed") from exc
-                try:
-                    await self._sdk.query(message, session_id=session_id or "default")
-                except Exception as retry_exc:
-                    logger.error("agent[%s]: query failed after reconnect — %s", self.config.id, retry_exc)
-                    raise
-            text_parts: list[str] = []
-            try:
-                async with asyncio.timeout(_STREAM_TIMEOUT):
-                    async for msg in self._sdk.receive_response():
-                        if self._process_message(msg, text_parts):
-                            break
-            except TimeoutError:
-                logger.error(
-                    "agent[%s]: query timed out after %ss — reconnecting",
-                    self.config.id, _STREAM_TIMEOUT,
-                )
-                await self._reconnect()
+                span.set_status(StatusCode.ERROR, str(exc))
                 raise
+            finally:
+                AGENT_BUSY.labels(agent_id=self.config.id).set(0)
         response_text = "".join(text_parts)
         if self._pipeline_queue:
             priority = 0 if source == "a2a" else 1
@@ -291,6 +331,7 @@ class BaseAgentClient:
     async def stream(self, message: str, session_id: str | None = None):
         if not self._sdk:
             raise RuntimeError(f"{self.name} not connected")
+        self._last_result_msg = None
         # Fix Issue 1: only hold the lock for the query dispatch, not across
         # yields — an early break / cancellation by the caller would otherwise
         # permanently hold the lock and deadlock future query() calls.
@@ -303,15 +344,30 @@ class BaseAgentClient:
                 if not self._sdk:
                     raise RuntimeError(f"{self.name} reconnect failed")
                 await self._sdk.query(message, session_id=session_id or "default")
-        # Iterate outside the lock — safe because only one caller can dispatch at a time.
+        # Iterate outside the lock — safe because only one caller can dispatch
+        # at a time, and `_stream_active` blocks any concurrent A2A receivers.
+        AGENT_BUSY.labels(agent_id=self.config.id).set(1)
+        self._stream_active = True
         try:
             async with asyncio.timeout(_STREAM_TIMEOUT):
                 async for chunk in self._iter_stream_response():
                     yield chunk
+            if self._last_result_msg is not None:
+                rm = self._last_result_msg
+                record_llm_turn(
+                    agent_id=self.config.id,
+                    source="stream",
+                    cost_usd=float(rm.total_cost_usd or 0),
+                    duration_ms=int(rm.duration_ms or 0),
+                )
         except TimeoutError:
             logger.error("agent[%s]: stream timed out after %ss — reconnecting", self.config.id, _STREAM_TIMEOUT)
             await self._reconnect()
             raise
+        finally:
+            # Cleared even on cancellation before the first yield.
+            self._stream_active = False
+            AGENT_BUSY.labels(agent_id=self.config.id).set(0)
 
     async def stream_image(
         self,
@@ -349,8 +405,12 @@ class BaseAgentClient:
                     raise RuntimeError(f"{self.name} reconnect failed")
                 await self._sdk.query(_prompt_stream(), session_id=session_id or "default")
         # Iterate outside the lock — deduplicated via _iter_stream_response.
-        async for chunk in self._iter_stream_response():
-            yield chunk
+        self._stream_active = True
+        try:
+            async for chunk in self._iter_stream_response():
+                yield chunk
+        finally:
+            self._stream_active = False
 
 
 def create_agent_client(config: AgentConfig, redis_a2a=None) -> "BaseAgentClient":
@@ -421,6 +481,7 @@ def _build_system_prompt(ctx: dict) -> str:
         ("user", "About Your User"),
         ("identity", "Self-Image"),
         ("memory", "Long-Term Memory"),
+        ("dreams", "Dream Log"),
         ("daily", "Today's Memory Log"),
         ("yesterday", "Yesterday's Memory Log"),
         ("tools_md", "Tool Conventions"),

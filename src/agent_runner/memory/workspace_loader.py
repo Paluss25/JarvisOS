@@ -14,7 +14,15 @@ logger = logging.getLogger(__name__)
 _REQUIRED = ["SOUL.md", "AGENTS.md", "USER.md"]
 
 # Optional files (silently empty if missing)
-_OPTIONAL = ["TOOLS.md", "MEMORY.md", "HEARTBEAT.md", "IDENTITY.md", "ARCHITECTURE.md"]
+_OPTIONAL = ["TOOLS.md", "MEMORY.md", "HEARTBEAT.md", "IDENTITY.md", "ARCHITECTURE.md", "DREAMS.md"]
+
+# Truncation limits — daily logs are append-only and can grow large; capped to
+# avoid hitting the kernel ARG_MAX limit when the system prompt is passed to the
+# Claude Code subprocess.  We take the TAIL of log files so recent entries survive.
+_DAILY_MAX_CHARS = 8_000
+_YESTERDAY_MAX_CHARS = 4_000
+_MEMORY_MAX_CHARS = 10_000
+_DREAMS_MAX_CHARS = 6_000
 
 
 def _read(path: Path) -> str:
@@ -28,6 +36,24 @@ def _read(path: Path) -> str:
         return ""
 
 
+def _read_tail(path: Path, max_chars: int) -> str:
+    """Read a file and return the last `max_chars` characters (tail of log files)."""
+    content = _read(path)
+    if len(content) > max_chars:
+        logger.debug("workspace_loader: truncating %s (%d→%d chars)", path.name, len(content), max_chars)
+        return content[-max_chars:]
+    return content
+
+
+def _read_head(path: Path, max_chars: int) -> str:
+    """Read a file and return the first `max_chars` characters."""
+    content = _read(path)
+    if len(content) > max_chars:
+        logger.debug("workspace_loader: truncating %s (%d→%d chars)", path.name, len(content), max_chars)
+        return content[:max_chars]
+    return content
+
+
 def load_workspace_context(workspace_path: str | Path) -> dict:
     """Load all workspace MD files into a dict for agent instructions.
 
@@ -38,6 +64,7 @@ def load_workspace_context(workspace_path: str | Path) -> dict:
         - user         — USER.md
         - tools_md     — TOOLS.md
         - memory       — MEMORY.md
+        - dreams       — DREAMS.md (nightly dream log)
         - heartbeat    — HEARTBEAT.md
         - identity     — IDENTITY.md
         - daily        — memory/YYYY-MM-DD.md (today)
@@ -56,11 +83,12 @@ def load_workspace_context(workspace_path: str | Path) -> dict:
         "agents":    _read(root / "AGENTS.md"),
         "user":      _read(root / "USER.md"),
         "tools_md":  _read(root / "TOOLS.md"),
-        "memory":    _read(root / "MEMORY.md"),
+        "memory":    _read_head(root / "MEMORY.md", _MEMORY_MAX_CHARS),
+        "dreams":    _read_head(root / "DREAMS.md", _DREAMS_MAX_CHARS),
         "heartbeat": _read(root / "HEARTBEAT.md"),
         "identity":  _read(root / "IDENTITY.md"),
-        "daily":     _read(root / "memory" / f"{date.today().isoformat()}.md"),
-        "yesterday": _read(root / "memory" / f"{(date.today() - timedelta(days=1)).isoformat()}.md"),
+        "daily":     _read_tail(root / "memory" / f"{date.today().isoformat()}.md", _DAILY_MAX_CHARS),
+        "yesterday": _read_tail(root / "memory" / f"{(date.today() - timedelta(days=1)).isoformat()}.md", _YESTERDAY_MAX_CHARS),
         "architecture": _read(root / "ARCHITECTURE.md"),
     }
 
