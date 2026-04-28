@@ -15,7 +15,7 @@ services:
       - "8801:8001"   # Roger agent (Chief of Sport)
       - "8802:8002"   # Timothy agent (CIO)
       - "8803:8003"   # Warren agent (CFO)
-      - "8804:8004"   # Mark agent (legacy Chief of Staff)
+      - "8804:8004"   # CHRO agent (Chief People Officer)
       - "8805:8005"   # EmailIntelligence agent
       - "8806:8006"   # DrHouse agent (Chief of Health)
       - "8807:8007"   # NutritionDirector agent

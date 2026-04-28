@@ -4,7 +4,7 @@ platform:
   postgresql_url_env: JARVIOS_POSTGRES_URL
   redis_url_env: REDIS_URL
 agents:
-- id: jarvis
+- id: ceo
   module: ceo
   role: ChiefExecutiveOfficer
   port: 8000
@@ -20,12 +20,12 @@ agents:
   - general-knowledge
   memory:
     backend: filesystem
-- id: roger
+- id: dos
   module: dos
   role: DirectorOfSport
   port: 8001
   workspace: workspace/dos
-  reports_to: drhouse
+  reports_to: coh
   domains:
   - sport
   - fitness
@@ -36,7 +36,7 @@ agents:
   - performance-tracking
   memory:
     backend: filesystem
-- id: timothy
+- id: cio
   module: cio
   role: ChiefInformationOfficer
   port: 8002
@@ -76,7 +76,7 @@ agents:
   - fiscal-compliance
   memory:
     backend: filesystem
-- id: email_intelligence
+- id: email_intelligence_agent
   module: email_intelligence_agent
   role: EmailIntelligenceAgent
   port: 8005
@@ -94,12 +94,12 @@ agents:
   - security-pipeline
   memory:
     backend: filesystem
-- id: chief_of_staff
+- id: cos
   module: cos
   role: ChiefOfStaff
   port: 8008
-  workspace: workspace/chief_of_staff
-  telegram_token_env: TELEGRAM_CHIEF_OF_STAFF_TOKEN
+  workspace: workspace/cos
+  telegram_token_env: TELEGRAM_MARK_TOKEN
   telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
   domains:
   - email
@@ -114,14 +114,33 @@ agents:
   - cross-domain-coordination
   memory:
     backend: filesystem
-- id: drhouse
+- id: mt
+  module: mt
+  role: ExecutiveAssistant
+  port: 8009
+  workspace: workspace/mt
+  telegram_token_env: TELEGRAM_MT_TOKEN
+  telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
+  domains:
+  - inbox
+  - calendar
+  - drafting
+  - task_tracking
+  capabilities:
+  - email_triage
+  - calendar_management
+  - draft_preparation
+  - task_logging
+  memory:
+    backend: filesystem
+- id: coh
   module: coh
   role: ChiefOfHealth
   port: 8006
   workspace: workspace/coh
   telegram_token_env: TELEGRAM_DRHOUSE_TOKEN
   telegram_chat_id_env: TELEGRAM_HEALTH_CHAT_ID
-  reports_to: jarvis
+  reports_to: ceo
   domains:
   - health
   - sport
@@ -133,16 +152,16 @@ agents:
   - medical-screening
   - cross-domain-analysis
   directors:
-  - roger
-  - nutrition-director
+  - dos
+  - don
   memory:
     backend: filesystem
-- id: nutrition-director
+- id: don
   module: don
   role: DirectorOfNutrition
   port: 8007
   workspace: workspace/don
-  reports_to: drhouse
+  reports_to: coh
   domains:
   - nutrition
   - meals
@@ -153,6 +172,29 @@ agents:
   - barcode-lookup
   - meal-logging
   - food-coaching
+  memory:
+    backend: filesystem
+- id: chro
+  module: chro
+  role: ChiefPeopleOfficer
+  port: 8004
+  workspace: workspace/chro
+  telegram_token_env: TELEGRAM_CHRO_TOKEN
+  telegram_chat_id_env: TELEGRAM_ALLOWED_CHAT_ID
+  reports_to: ceo
+  domains:
+  - hr
+  - payroll
+  - leave
+  - pension
+  - expenses
+  - compliance
+  capabilities:
+  - payroll-analysis
+  - leave-tracking
+  - pension-monitoring
+  - document-processing
+  - italian-labor-law
   memory:
     backend: filesystem
 workers:
