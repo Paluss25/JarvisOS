@@ -4,7 +4,7 @@
 
 CREATE SCHEMA IF NOT EXISTS chro;
 
-CREATE TABLE chro.payslips (
+CREATE TABLE IF NOT EXISTS chro.payslips (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     period_from         DATE NOT NULL,
     period_to           DATE NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE chro.payslips (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE chro.leave_snapshots (
+CREATE TABLE IF NOT EXISTS chro.leave_snapshots (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     snapshot_date    DATE NOT NULL,
     ferie_accrued    NUMERIC(6,2),
@@ -34,7 +34,7 @@ CREATE TABLE chro.leave_snapshots (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE chro.pension_extracts (
+CREATE TABLE IF NOT EXISTS chro.pension_extracts (
     id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_date             DATE NOT NULL,
     contribution_period       TEXT,
@@ -46,7 +46,7 @@ CREATE TABLE chro.pension_extracts (
     created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE chro.expense_items (
+CREATE TABLE IF NOT EXISTS chro.expense_items (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     expense_date        DATE NOT NULL,
     category            TEXT,
@@ -56,7 +56,7 @@ CREATE TABLE chro.expense_items (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE chro.hr_audit_log (
+CREATE TABLE IF NOT EXISTS chro.hr_audit_log (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     case_id                 UUID NOT NULL,
     agent_id                TEXT NOT NULL,
@@ -69,19 +69,28 @@ CREATE TABLE chro.hr_audit_log (
 );
 
 -- hr_audit_log is append-only: block UPDATE, DELETE, and TRUNCATE
-CREATE RULE hr_audit_no_update AS ON UPDATE TO chro.hr_audit_log DO INSTEAD NOTHING;
-CREATE RULE hr_audit_no_delete AS ON DELETE TO chro.hr_audit_log DO INSTEAD NOTHING;
 REVOKE UPDATE, DELETE, TRUNCATE ON chro.hr_audit_log FROM PUBLIC;
 
-CREATE OR REPLACE FUNCTION chro_audit_no_truncate()
-RETURNS event_trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION chro_audit_immutable()
+RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_event_trigger_dropped_objects()
-    WHERE object_name = 'hr_audit_log' AND schema_name = 'chro'
-  ) THEN
-    RAISE EXCEPTION 'chro.hr_audit_log is append-only: TRUNCATE not allowed';
-  END IF;
+  RAISE EXCEPTION 'chro.hr_audit_log is append-only: % not allowed', TG_OP;
 END $$;
-CREATE EVENT TRIGGER chro_audit_truncate_guard
-  ON sql_drop EXECUTE FUNCTION chro_audit_no_truncate();
+
+CREATE TRIGGER hr_audit_no_update
+  BEFORE UPDATE ON chro.hr_audit_log
+  FOR EACH ROW EXECUTE FUNCTION chro_audit_immutable();
+
+CREATE TRIGGER hr_audit_no_delete
+  BEFORE DELETE ON chro.hr_audit_log
+  FOR EACH ROW EXECUTE FUNCTION chro_audit_immutable();
+
+CREATE OR REPLACE FUNCTION chro_audit_no_truncate()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'chro.hr_audit_log is append-only: TRUNCATE not allowed';
+END $$;
+
+CREATE TRIGGER hr_audit_no_truncate
+  BEFORE TRUNCATE ON chro.hr_audit_log
+  FOR EACH STATEMENT EXECUTE FUNCTION chro_audit_no_truncate();
