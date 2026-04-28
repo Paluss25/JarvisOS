@@ -50,6 +50,7 @@ def _make_client(calendar_name="personal"):
         # Attach mocks so tests can configure search/add_event/etc.
         client._mock_cal = mock_cal
         client._mock_dav = mock_dav
+        client._mock_principal = mock_principal
     return client
 
 
@@ -230,3 +231,56 @@ def test_get_events_raises_when_calendar_name_not_found():
 
     with pytest.raises(ValueError, match="not found"):
         client.get_events(date(2026, 4, 28), date(2026, 4, 28))
+
+
+# ---------------------------------------------------------------------------
+# _ensure_calendar
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_calendar_returns_existing_url():
+    client = _make_client(calendar_name="lavoro")
+    # mock_cal already has url "https://cal.prova9x.com/paluss/lavoro/"
+    url = client._ensure_calendar("lavoro")
+    assert url == "https://cal.prova9x.com/paluss/lavoro/"
+    # make_calendar should NOT have been called
+    client._mock_principal.make_calendar.assert_not_called()
+
+
+def test_ensure_calendar_appends_slash_when_missing():
+    client = _make_client(calendar_name="lavoro")
+    # Override mock_cal.url to lack trailing slash
+    client._mock_cal.url = "https://cal.prova9x.com/paluss/lavoro"
+    url = client._ensure_calendar("lavoro")
+    assert url.endswith("/")
+
+
+def test_ensure_calendar_creates_missing_calendar():
+    client = _make_client(calendar_name="lavoro")
+    new_cal = MagicMock()
+    new_cal.url = "https://cal.prova9x.com/paluss/TrainingPlan/"
+    client._mock_principal.make_calendar.return_value = new_cal
+    url = client._ensure_calendar("TrainingPlan")
+    client._mock_principal.make_calendar.assert_called_once_with(name="TrainingPlan")
+    assert url == "https://cal.prova9x.com/paluss/TrainingPlan/"
+
+
+# ---------------------------------------------------------------------------
+# upsert_event
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_event_puts_ical_to_correct_url():
+    client = _make_client()
+    ical_data = "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
+    client.upsert_event(
+        "https://cal.prova9x.com/paluss/TrainingPlan/",
+        "training-2026w21d0",
+        ical_data,
+    )
+    client._mock_dav.request.assert_called_once_with(
+        "https://cal.prova9x.com/paluss/TrainingPlan/training-2026w21d0.ics",
+        method="PUT",
+        headers={"Content-Type": "text/calendar; charset=utf-8"},
+        body=ical_data,
+    )

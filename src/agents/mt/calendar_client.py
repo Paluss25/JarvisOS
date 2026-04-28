@@ -35,6 +35,7 @@ class CalendarClient:
     # ------------------------------------------------------------------
 
     def _get_calendar(self) -> caldav.Calendar:
+        """Return the cached caldav.Calendar, resolving it from the principal on first access."""
         if self._calendar is not None:
             return self._calendar
         principal = self._client.principal()
@@ -54,6 +55,17 @@ class CalendarClient:
                     f"Calendar '{self._calendar_name}' not found. Available: {names}"
                 )
         return self._calendar
+
+    def _ensure_calendar(self, name: str) -> str:
+        """Return the URL for calendar *name*, creating it via MKCOL if absent."""
+        principal = self._client.principal()
+        for cal in principal.calendars():
+            if (cal.name or "").lower() == name.lower():
+                url = str(cal.url)
+                return url if url.endswith("/") else url + "/"
+        new_cal = principal.make_calendar(name=name)
+        url = str(new_cal.url)
+        return url if url.endswith("/") else url + "/"
 
     # ------------------------------------------------------------------
     # Public API
@@ -113,6 +125,18 @@ class CalendarClient:
         except _caldav_error.NotFoundError as exc:
             raise ValueError(f"Event not found: {uid}") from exc
         event.delete()
+
+    def upsert_event(self, calendar_url: str, uid: str, ical_data: str) -> None:
+        """PUT an iCal string to *calendar_url*/*uid*.ics, creating or replacing the event."""
+        try:
+            self._client.request(
+                f"{calendar_url}{uid}.ics",
+                method="PUT",
+                headers={"Content-Type": "text/calendar; charset=utf-8"},
+                body=ical_data,
+            )
+        except Exception as exc:
+            raise ValueError(f"Failed to upsert event {uid}: {exc}") from exc
 
 
 # ------------------------------------------------------------------
