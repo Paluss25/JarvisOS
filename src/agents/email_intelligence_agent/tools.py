@@ -19,6 +19,7 @@ Domain-specific tools:
 
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
 
@@ -83,6 +84,8 @@ def _run_security_pipeline(
     subject: str,
     body: str,
     attachments: list | None = None,
+    sender: str = "",
+    received_at: str = "",
 ) -> dict:
     """Run email through the 9-layer security pipeline. Returns EmailIntelligencePayload dict."""
     cfg = load_all()
@@ -163,6 +166,8 @@ def _run_security_pipeline(
         return {
             "email_id": email_id,
             "account": account,
+            "sender": sender,
+            "received_at": received_at,
             "blocked": True,
             "policy": {
                 "decision": policy_decision.decision,
@@ -209,6 +214,8 @@ def _run_security_pipeline(
     return {
         "email_id": email_id,
         "account": account,
+        "sender": sender,
+        "received_at": received_at,
         "subject": ingest.sanitized_subject,
         "body_redacted": redaction.redacted_text,
         "classification": {
@@ -243,6 +250,51 @@ def _run_security_pipeline(
     }
 
 
+def _compute_action_hint(payload: dict) -> str:
+    """Derive a deterministic MT action hint from an EIA payload."""
+    if payload.get("blocked"):
+        return "forward_to_cos"
+
+    policy = payload.get("policy", {})
+    if policy.get("decision") in {"deny", "escalate"}:
+        return "forward_to_cos"
+
+    classification = payload.get("classification", {})
+    risk = str(classification.get("risk_level", "low")).lower()
+    if risk in {"high", "critical"}:
+        return "forward_to_cos"
+
+    domain = str(classification.get("primary_domain", "")).lower()
+    if domain in {"newsletter", "marketing", "automated", "spam", "notification"}:
+        return "archive"
+
+    if (
+        str(classification.get("sensitivity", "")).lower() == "public"
+        and str(classification.get("priority", "")).lower() == "low"
+    ):
+        return "archive"
+
+    subject = str(payload.get("subject", "")).lower()
+    action_keywords = (
+        "fattura", "invoice", "scadenza", "deadline", "urgente", "urgent",
+        "action required", "da fare", "ricorda", "reminder", "todo",
+    )
+    if any(keyword in subject for keyword in action_keywords):
+        return "create_task"
+
+    if domain == "personal" and bool(policy.get("allow")):
+        return "draft_reply"
+
+    return "forward_to_cos"
+
+
+def _write_to_digest(entry: dict, digest_path: Path) -> None:
+    """Append one JSON object per line to the MT digest file."""
+    digest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(digest_path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # MCP server factory
 # ---------------------------------------------------------------------------
@@ -261,8 +313,8 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "daily_log",
         "Append a timestamped entry to today's memory log. "
-        "Use this to record significant events, decisions, or facts worth remembering.",
-        {"message": str},
+        "Use this to record significant events, decisions, or facts worth remembering. message is required.",
+        {"message": {"type": "string", "default": ""}},
     )
     async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
@@ -282,7 +334,7 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
         "Search across long-term memory (MEMORY.md) and all daily logs (memory/*.md) "
         "using text matching. Use this to recall past events, decisions, or facts. "
         "Results include matching lines with surrounding context, most recent files first.",
-        {"query": str, "top_k": int},
+        {"query": str, "top_k": {"type": "integer", "default": 5}},
     )
     async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
@@ -326,7 +378,7 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a specific memory file from the workspace. "
         "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
         "Optionally specify start_line and num_lines to read a slice.",
-        {"path": str, "start_line": int, "num_lines": int},
+        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
     )
     async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
@@ -335,8 +387,9 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
-        # Security: path traversal guard — must stay inside workspace
-        if not str(target).startswith(str(workspace_path.resolve())):
+        try:
+            target.relative_to(workspace_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
@@ -484,8 +537,9 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
         "then pass them here. Returns a full EmailIntelligencePayload with classification, "
         "security signals, routing decision, policy decision, and redaction metadata. "
         "'account' must be 'protonmail' or 'gmx'. "
+        "Optional sender and received_at fields are propagated into the payload. "
         "'attachments_json' is an optional JSON array of {filename, mime_type, size_bytes} objects.",
-        {"email_id": str, "account": str, "subject": str, "body": str, "attachments_json": str},
+        {"email_id": str, "account": str, "subject": str, "body": str, "attachments_json": str, "sender": str, "received_at": str},
     )
     async def process_email(args: dict) -> dict:
         args = _parse_args(args)
@@ -508,13 +562,26 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
                 pass  # ignore malformed — pipeline handles empty list fine
 
         try:
+            sender = args.get("sender", "").strip()
+            received_at = args.get("received_at", "").strip()
             payload = _run_security_pipeline(
                 email_id=email_id,
                 account=account,
                 subject=subject or "(no subject)",
                 body=body or "(empty body)",
                 attachments=attachments,
+                sender=sender,
+                received_at=received_at,
             )
+            if not payload.get("blocked") and payload.get("policy", {}).get("allow"):
+                digest_path = Path(os.environ.get("MT_DIGEST_PATH", "/app/shared/mt_digest.json"))
+                try:
+                    _write_to_digest(
+                        {**payload, "mt_action_hint": _compute_action_hint(payload)},
+                        digest_path,
+                    )
+                except Exception as digest_exc:
+                    logger.warning("process_email: digest write failed — %s", digest_exc)
             return _text(json.dumps(payload))
         except Exception as exc:
             logger.error("process_email: failed — %s", exc)
@@ -523,10 +590,13 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "process_unread",
         "Process a batch of emails through the 9-layer security pipeline. "
-        "First use the protonmail-email or gmx-email MCP tools to fetch unread email list and content, "
+        "Use the protonmail-email or gmx-email MCP tools to fetch unread emails first, "
         "then pass the result as a JSON array via 'emails_json'. Each item must have: "
         "email_id (str), account ('protonmail'|'gmx'), subject (str), body (str). "
+        "Optional sender and received_at fields are propagated. "
         "'max_emails' caps how many are processed (default 20). "
+        "Successfully classified, allowed emails are appended to the MT digest "
+        "(same handoff as process_email). "
         "Returns a summary list of {email_id, decision_type, route_to, blocked, status}.",
         {"emails_json": str, "max_emails": int},
     )
@@ -542,6 +612,8 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
         except (json.JSONDecodeError, ValueError) as exc:
             return _text(f"Invalid emails_json: {exc}")
 
+        digest_path = Path(os.environ.get("MT_DIGEST_PATH", "/app/shared/mt_digest.json"))
+
         emails = emails[:max_emails]
         results = []
         for item in emails:
@@ -549,6 +621,8 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
             account = str(item.get("account", "")).strip()
             subject = str(item.get("subject", "")).strip() or "(no subject)"
             body = str(item.get("body", "")).strip() or "(empty body)"
+            sender = str(item.get("sender", "")).strip()
+            received_at = str(item.get("received_at", "")).strip()
             if not email_id or not account:
                 continue
             try:
@@ -557,7 +631,21 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
                     account=account,
                     subject=subject,
                     body=body,
+                    sender=sender,
+                    received_at=received_at,
                 )
+                # MT digest handoff parity with process_email
+                if not payload.get("blocked") and payload.get("policy", {}).get("allow"):
+                    try:
+                        _write_to_digest(
+                            {**payload, "mt_action_hint": _compute_action_hint(payload)},
+                            digest_path,
+                        )
+                    except Exception as digest_exc:
+                        logger.warning(
+                            "process_unread: digest write failed for %s — %s",
+                            email_id, digest_exc,
+                        )
                 results.append({
                     "email_id": email_id,
                     "decision_type": payload.get("policy", {}).get("decision"),
@@ -593,7 +681,8 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "quarantine_email",
-        "Move email to Quarantine folder and write an audit entry. "
+        "Move an email to the Quarantine folder via the email-mcp /sort endpoint "
+        "and write an audit entry. Fails the call if the move does not succeed. "
         "'reason' should describe why the email is being quarantined.",
         {"email_id": str, "account": str, "reason": str},
     )
@@ -604,6 +693,41 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
         reason = args.get("reason", "").strip()
         if not email_id or not account or not reason:
             return _text("email_id, account, and reason are required.")
+
+        # 1) Perform the move first via email-mcp /sort.
+        # If the move fails, return an error WITHOUT writing a misleading
+        # "quarantined" audit entry — only successful moves are recorded.
+        import httpx
+        sort_base = os.environ.get(
+            "EMAIL_SORT_BASE_URL",
+            "http://protonmail-mcp:3000" if account == "protonmail" else "http://gmx-mcp:3001",
+        )
+        move_payload = {
+            "email_id": email_id,
+            "target_folder": "Quarantine",
+            "reason": reason,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(f"{sort_base.rstrip('/')}/sort", json=move_payload)
+            if resp.status_code >= 300:
+                return {
+                    "content": [{"type": "text", "text": (
+                        f"quarantine_email failed: /sort returned HTTP {resp.status_code} — "
+                        f"{resp.text[:200]}"
+                    )}],
+                    "is_error": True,
+                }
+        except Exception as move_exc:
+            logger.error("quarantine_email: move failed — %s", move_exc)
+            return {
+                "content": [{"type": "text", "text": (
+                    f"quarantine_email failed to move email {email_id}: {move_exc}"
+                )}],
+                "is_error": True,
+            }
+
+        # 2) Audit only after a confirmed move.
         try:
             audit_path = Path("var/audit/audit.jsonl")
             audit_path.parent.mkdir(parents=True, exist_ok=True)
@@ -617,7 +741,6 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
                 email_id=email_id,
                 details={"account": account, "reason": reason},
             ))
-            # In production: also calls move_email MCP tool to move to "Quarantine" folder
             return _text(json.dumps({
                 "status": "quarantined",
                 "email_id": email_id,
@@ -625,15 +748,24 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
                 "reason": reason,
             }))
         except Exception as exc:
-            logger.error("quarantine_email: failed — %s", exc)
-            return _text(f"Error quarantining email {email_id}: {exc}")
+            logger.error("quarantine_email: audit write failed — %s", exc)
+            return _text(
+                f"Email {email_id} moved to Quarantine but audit write failed: {exc}"
+            )
 
     # --- Assemble server ----------------------------------------------------
-    from agent_runner.tools.report_issue import create_report_issue_tool, REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA
+
+    from agent_runner.tools.report_issue import (
+        create_report_issue_tool,
+        REPORT_ISSUE_DESCRIPTION,
+        REPORT_ISSUE_SCHEMA,
+    )
+
+    _report_issue_fn = create_report_issue_tool("email_intelligence_agent")
 
     @sdk_tool("report_issue", REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA)
     async def report_issue(args: dict) -> dict:
-        return await create_report_issue_tool("email_intelligence_agent")(args)
+        return await _report_issue_fn(args)
 
     all_tools = [
         daily_log, memory_search, memory_get,
