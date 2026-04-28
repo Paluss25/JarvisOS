@@ -17,7 +17,7 @@ def test_write_creates_jsonl_entry(tmp_path):
     event = writer.make_event(
         event_id="evt-001",
         event_type="pipeline_run",
-        agent_id="email_intelligence",
+        agent_id="email_intelligence_agent",
         action="route_and_review",
         outcome="allow",
     )
@@ -38,7 +38,7 @@ def test_multiple_entries_appended(tmp_path):
         event = writer.make_event(
             event_id=f"evt-{i:03d}",
             event_type="pipeline_run",
-            agent_id="email_intelligence",
+            agent_id="email_intelligence_agent",
             action="route_and_review",
             outcome="allow",
         )
@@ -57,7 +57,7 @@ def test_audit_entry_has_timestamp(tmp_path):
     event = writer.make_event(
         event_id="evt-ts-001",
         event_type="pipeline_run",
-        agent_id="email_intelligence",
+        agent_id="email_intelligence_agent",
         action="route_and_review",
         outcome="allow",
     )
@@ -76,7 +76,7 @@ def test_audit_parent_dir_created_automatically(tmp_path):
     event = writer.make_event(
         event_id="evt-dir-001",
         event_type="pipeline_run",
-        agent_id="email_intelligence",
+        agent_id="email_intelligence_agent",
         action="route_and_review",
         outcome="allow",
     )
@@ -91,7 +91,7 @@ def test_forbidden_detail_keys_are_stripped(tmp_path):
     event = writer.make_event(
         event_id="evt-redact-001",
         event_type="pipeline_run",
-        agent_id="email_intelligence",
+        agent_id="email_intelligence_agent",
         action="route_and_review",
         outcome="allow",
         details={
@@ -119,7 +119,7 @@ def test_make_event_returns_audit_event(tmp_path):
     event = writer.make_event(
         event_id="evt-type-001",
         event_type="quarantine",
-        agent_id="email_intelligence",
+        agent_id="email_intelligence_agent",
         action="quarantine",
         outcome="quarantined",
         email_id="email-abc",

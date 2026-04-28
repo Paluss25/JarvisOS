@@ -44,7 +44,7 @@ _make_agno_stubs()
 
 MINIMAL_AGENT_MODELS_YAML = """
 agents:
-  jarvis:
+  ceo:
     role: "CEO"
     primary:
       provider: openai-codex
@@ -123,7 +123,7 @@ class TestBuildAgentModel:
             with patch("src.models.factory._build_single_model",
                        side_effect=[mock_codex, mock_groq]):
                 from src.models.factory import build_agent_model
-                result = build_agent_model("jarvis")
+                result = build_agent_model("ceo")
 
         from src.models.fallback_model import FallbackModel
         assert isinstance(result, FallbackModel)
@@ -156,7 +156,7 @@ class TestBuildAgentModel:
         with patch("src.config.settings", _settings_mock(str(tmp_path))):
             from src.models.factory import build_agent_model
             with pytest.raises(FileNotFoundError):
-                build_agent_model("jarvis")
+                build_agent_model("ceo")
 
     def test_repr_shows_chain(self, workspace_dir):
         """FallbackModel repr shows the full fallback chain."""
@@ -166,7 +166,7 @@ class TestBuildAgentModel:
             with patch("src.models.factory._build_single_model",
                        side_effect=models):
                 from src.models.factory import build_agent_model
-                result = build_agent_model("jarvis")
+                result = build_agent_model("ceo")
 
         assert "gpt-5.4" in repr(result)
         assert "llama-3.3" in repr(result)

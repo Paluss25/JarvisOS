@@ -26,10 +26,10 @@ def test_agent_config_minimal():
 def test_agent_config_defaults():
     """AgentConfig has sensible defaults for optional fields."""
     config = AgentConfig(
-        id="jarvis",
+        id="ceo",
         name="Jarvis",
         port=8000,
-        workspace_path=Path("/app/workspace/jarvis"),
+        workspace_path=Path("/app/workspace/ceo"),
         telegram_token_env="TELEGRAM_JARVIS_TOKEN",
         telegram_chat_id_env="TELEGRAM_ALLOWED_CHAT_ID",
     )

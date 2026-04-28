@@ -14,7 +14,7 @@ def test_unknown_agent_denied():
 def test_denied_tool_blocked():
     config = {
         "agents": {
-            "email_intelligence": {
+            "email_intelligence_agent": {
                 "permissions": {
                     "denied": ["delete_email"],
                     "execute": []
@@ -23,7 +23,7 @@ def test_denied_tool_blocked():
         }
     }
     layer = PermissionLayer(permissions_config=config)
-    result = layer.check(agent_id="email_intelligence", requested_tools=["delete_email"])
+    result = layer.check(agent_id="email_intelligence_agent", requested_tools=["delete_email"])
     assert result.allowed is False
     assert any("TOOL_DENIED" in r for r in result.reasons)
 
@@ -31,7 +31,7 @@ def test_denied_tool_blocked():
 def test_tool_not_in_execute_list_blocked():
     config = {
         "agents": {
-            "email_intelligence": {
+            "email_intelligence_agent": {
                 "permissions": {
                     "denied": [],
                     "execute": ["read_email", "quarantine_email"]
@@ -40,7 +40,7 @@ def test_tool_not_in_execute_list_blocked():
         }
     }
     layer = PermissionLayer(permissions_config=config)
-    result = layer.check(agent_id="email_intelligence", requested_tools=["send_email"])
+    result = layer.check(agent_id="email_intelligence_agent", requested_tools=["send_email"])
     assert result.allowed is False
     assert any("TOOL_NOT_ALLOWED" in r for r in result.reasons)
 
@@ -48,7 +48,7 @@ def test_tool_not_in_execute_list_blocked():
 def test_allowed_tools_pass():
     config = {
         "agents": {
-            "email_intelligence": {
+            "email_intelligence_agent": {
                 "permissions": {
                     "denied": [],
                     "execute": ["read_email", "quarantine_email"]
@@ -57,7 +57,7 @@ def test_allowed_tools_pass():
         }
     }
     layer = PermissionLayer(permissions_config=config)
-    result = layer.check(agent_id="email_intelligence", requested_tools=["read_email"])
+    result = layer.check(agent_id="email_intelligence_agent", requested_tools=["read_email"])
     assert result.allowed is True
     assert result.denied_tools == []
 
@@ -66,7 +66,7 @@ def test_empty_execute_list_allows_any_tool():
     """When execute list is empty, no whitelist constraint — only denied list applies."""
     config = {
         "agents": {
-            "email_intelligence": {
+            "email_intelligence_agent": {
                 "permissions": {
                     "denied": [],
                     "execute": []
@@ -75,7 +75,7 @@ def test_empty_execute_list_allows_any_tool():
         }
     }
     layer = PermissionLayer(permissions_config=config)
-    result = layer.check(agent_id="email_intelligence", requested_tools=["any_tool"])
+    result = layer.check(agent_id="email_intelligence_agent", requested_tools=["any_tool"])
     assert result.allowed is True
 
 
@@ -83,7 +83,7 @@ def test_multiple_tools_mixed_result():
     """One allowed, one denied — overall allowed=False."""
     config = {
         "agents": {
-            "email_intelligence": {
+            "email_intelligence_agent": {
                 "permissions": {
                     "denied": ["delete_email"],
                     "execute": []
@@ -92,7 +92,7 @@ def test_multiple_tools_mixed_result():
         }
     }
     layer = PermissionLayer(permissions_config=config)
-    result = layer.check(agent_id="email_intelligence", requested_tools=["read_email", "delete_email"])
+    result = layer.check(agent_id="email_intelligence_agent", requested_tools=["read_email", "delete_email"])
     assert result.allowed is False
     assert "delete_email" in result.denied_tools
     assert "read_email" not in result.denied_tools
