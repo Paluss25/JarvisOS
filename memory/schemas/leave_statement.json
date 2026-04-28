@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Leave statement extracted fields",
+  "type": "object",
+  "required": ["snapshot_date"],
+  "properties": {
+    "snapshot_date": {"type": "string", "format": "date"},
+    "ferie_accrued": {"type": ["number", "null"]},
+    "ferie_used": {"type": ["number", "null"]},
+    "ferie_remaining": {"type": ["number", "null"]},
+    "rol_accrued": {"type": ["number", "null"]},
+    "rol_used": {"type": ["number", "null"]},
+    "rol_remaining": {"type": ["number", "null"]}
+  }
+}
