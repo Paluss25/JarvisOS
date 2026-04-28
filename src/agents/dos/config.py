@@ -16,15 +16,7 @@ ROGER_BUILTIN_CRONS = [
             "3. Any pending body measurements (last measurement date)\n"
             "Direct, no fluff. "
             "Send the result to DrHouse via send_message(to='coh', message=<your briefing>). "
-            "Also forward a copy to Timothy (CIO) via send_message(to='cio', message=<your briefing>). "
-            "After producing and sending this briefing, you MUST call report_issue. "
-            "Extract all technical issues detected during this session: failed connections, "
-            "unreachable databases, MCP servers not responding, unexpected restarts, "
-            "elevated error rates, authentication failures. "
-            "Call report_issue(issues=[...]) with all issues found. "
-            "If no technical issues were detected: call report_issue(issues=[]). "
-            "Never skip this call."
-        ),
+            "Also forward a copy to Timothy (CIO) via send_message(to='cio', message=<your briefing>). "        ),
         "session_id": "heartbeat-morning",
         "telegram_notify": False,
         "builtin": True,
@@ -70,10 +62,25 @@ ROGER_BUILTIN_CRONS = [
         "telegram_notify": False,
         "builtin": True,
     },
+    {
+        "name": "nightly_dreaming",
+        "schedule": "daily@02:00",
+        "prompt": (
+            "Nightly dreaming. Review your recent activity logs and long-term memory. "
+            "Produce a DREAMS.md that captures: unresolved threads (things started but "
+            "not finished), emerging patterns (recurring themes across days), free "
+            "associations (unexpected connections between topics), and seeds (ideas worth "
+            "developing later). Be interpretive, not just descriptive — surface what the "
+            "logs don't explicitly say. Return ONLY the raw markdown for DREAMS.md."
+        ),
+        "session_id": "heartbeat-dreaming",
+        "telegram_notify": False,
+        "builtin": True,
+    },
 ]
 
 
-def build_roger_config(workspace_root: Path = Path("/app/workspace/dos")) -> AgentConfig:
+def build_dos_config(workspace_root: Path = Path("/app/workspace/dos")) -> AgentConfig:
     from agents.dos.tools import create_chief_mcp_server
     return AgentConfig(
         id="dos",
@@ -101,3 +108,7 @@ def build_roger_config(workspace_root: Path = Path("/app/workspace/dos")) -> Age
             "Agent",
         ],
     )
+
+
+# Backward-compatible alias for older imports.
+build_roger_config = build_dos_config
