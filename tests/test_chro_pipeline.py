@@ -109,3 +109,39 @@ def test_archive_doc_moves_file():
         assert Path(dest).exists()
         assert "2026" in dest
         assert "payslip" in dest
+
+
+def test_route_payroll_keywords():
+    from chro_cpo.core.types import CaseEnvelope
+    from chro_cpo.core.routing import Router
+
+    case = CaseEnvelope(
+        case_id="test-001",
+        domain="hr",
+        intent="analyze",
+        risk="low",
+        data_sensitivity="medium",
+        jurisdiction="IT",
+        actionability="immediate",
+        input_text="Analizza il mio cedolino di marzo, voglio vedere il netto e l'IRPEF.",
+    )
+    route = Router().route(case)
+    assert route == "payroll_intelligence"
+
+
+def test_route_multi_domain_goes_to_director():
+    from chro_cpo.core.types import CaseEnvelope
+    from chro_cpo.core.routing import Router
+
+    case = CaseEnvelope(
+        case_id="test-002",
+        domain="hr",
+        intent="analyze",
+        risk="low",
+        data_sensitivity="medium",
+        jurisdiction="IT",
+        actionability="immediate",
+        input_text="Confronta lo stipendio di marzo con le ferie residue e la pensione INPS.",
+    )
+    route = Router().route(case)
+    assert route == "director_workforce_admin"
