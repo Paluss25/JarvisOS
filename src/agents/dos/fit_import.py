@@ -13,6 +13,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+try:
+    import fitdecode
+except ImportError:  # pragma: no cover - exercised in deployed env after dependency install
+    fitdecode = None
+
 
 SEMICIRCLE_TO_DEGREES = 180.0 / (2**31)
 
@@ -49,6 +54,16 @@ def _json_default(value: Any) -> str:
     if isinstance(value, datetime):
         return value.isoformat()
     return str(value)
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def _field_dict_from_frame(frame: Any) -> tuple[dict[str, Any], dict[str, str | None]]:
@@ -88,7 +103,7 @@ def _promote_session(fields: dict[str, Any]) -> dict[str, Any]:
         "total_ascent_m": fields.get("total_ascent"),
         "training_effect": fields.get("total_training_effect"),
         "anaerobic_training_effect": fields.get("total_anaerobic_training_effect"),
-        "raw_json": fields,
+        "raw_json": _json_safe(fields),
     }
 
 
@@ -106,7 +121,7 @@ def _promote_lap(fields: dict[str, Any], lap_index: int) -> dict[str, Any]:
         "max_cadence": fields.get("max_cadence"),
         "avg_power": fields.get("avg_power"),
         "max_power": fields.get("max_power"),
-        "raw_json": fields,
+        "raw_json": _json_safe(fields),
     }
 
 
@@ -123,5 +138,72 @@ def _promote_record(fields: dict[str, Any]) -> dict[str, Any]:
         "power_w": fields.get("power"),
         "temperature_c": fields.get("temperature"),
         "fractional_cadence": fields.get("fractional_cadence"),
-        "raw_json": fields,
+        "raw_json": _json_safe(fields),
     }
+
+
+def _generic_field_rows(
+    fit_file_message_name: str,
+    message_index: int,
+    values: dict[str, Any],
+    units: dict[str, str | None],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for field_name, value in values.items():
+        number = _coerce_number(value)
+        rows.append({
+            "message_name": fit_file_message_name,
+            "message_index": message_index,
+            "field_name": field_name,
+            "field_value_text": None if number is not None else json.dumps(value, default=_json_default),
+            "field_value_num": number,
+            "field_unit": units.get(field_name),
+        })
+    return rows
+
+
+def parse_fit_file(path: Path) -> FitActivityData:
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    if path.suffix.lower() != ".fit":
+        raise ValueError(f"Expected a .fit file, got: {path}")
+    if not path.is_file():
+        raise ValueError(f"Expected a regular file, got: {path}")
+    if fitdecode is None:
+        raise RuntimeError("fitdecode is not installed")
+
+    parsed = FitActivityData(source_path=path, file_sha256=compute_sha256(path))
+    message_counts: dict[str, int] = {}
+    lap_index = 0
+
+    with fitdecode.FitReader(str(path)) as fit:
+        for frame in fit:
+            if not isinstance(frame, fitdecode.FitDataMessage):
+                continue
+            message_name = getattr(frame, "name", "")
+            fields, units = _field_dict_from_frame(frame)
+            message_index = message_counts.get(message_name, 0)
+            message_counts[message_name] = message_index + 1
+
+            parsed.fields.extend(_generic_field_rows(message_name, message_index, fields, units))
+
+            if message_name == "file_id":
+                parsed.file_id.update(fields)
+            elif message_name == "session":
+                parsed.sessions.append(_promote_session(fields))
+            elif message_name == "lap":
+                parsed.laps.append(_promote_lap(fields, lap_index))
+                lap_index += 1
+            elif message_name == "record":
+                parsed.records.append(_promote_record(fields))
+
+    parsed.raw_summary = {
+        "file_id": _json_safe(parsed.file_id),
+        "counts": {
+            "sessions": len(parsed.sessions),
+            "laps": len(parsed.laps),
+            "records": len(parsed.records),
+            "fields": len(parsed.fields),
+        },
+    }
+    return parsed
