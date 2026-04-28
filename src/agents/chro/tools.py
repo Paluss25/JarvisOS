@@ -246,14 +246,14 @@ async def _run_payroll_specialist(case) -> dict:
     escalations = []
     if len(rows) >= 2:
         prev = rows[1]
-        if prev["net_pay"] and latest["net_pay"]:
+        if prev["net_pay"] is not None and prev["net_pay"] != 0 and latest["net_pay"] is not None:
             delta_pct = abs((latest["net_pay"] - prev["net_pay"]) / prev["net_pay"])
             if delta_pct > 0.05:
                 anomalies.append(
                     f"Net pay changed {delta_pct:.1%} vs previous month "
                     f"({prev['net_pay']:.2f} → {latest['net_pay']:.2f} EUR)"
                 )
-        if prev["inps_employee"] and latest["inps_employee"]:
+        if prev["inps_employee"] is not None and prev["inps_employee"] != 0 and latest["inps_employee"] is not None:
             inps_delta = abs((latest["inps_employee"] - prev["inps_employee"]) / prev["inps_employee"])
             if inps_delta > 0.10:
                 anomalies.append(
@@ -281,7 +281,7 @@ async def _run_leave_specialist(case) -> dict:
     )
     if not rows:
         return {"agent_id": "leave_time_travel", "confidence": 0.5,
-                "payload": {"note": "No leave snapshots in DB yet."}}
+                "payload": {"note": "No leave snapshots in DB yet."}, "escalations": []}
     latest = rows[0]
     flags = []
     if latest.get("ferie_remaining") is not None and latest["ferie_remaining"] < 5:
@@ -290,6 +290,7 @@ async def _run_leave_specialist(case) -> dict:
         "agent_id": "leave_time_travel",
         "confidence": 0.90,
         "payload": {"latest_snapshot": dict(latest), "flags": flags},
+        "escalations": [],
     }
 
 
@@ -302,11 +303,12 @@ async def _run_pension_specialist(case) -> dict:
     )
     if not rows:
         return {"agent_id": "pension_benefits", "confidence": 0.5,
-                "payload": {"note": "No pension extracts in DB yet."}}
+                "payload": {"note": "No pension extracts in DB yet."}, "escalations": []}
     return {
         "agent_id": "pension_benefits",
         "confidence": 0.85,
         "payload": {"latest_extract": dict(rows[0])},
+        "escalations": [],
     }
 
 
@@ -325,6 +327,7 @@ async def _run_director(case) -> dict:
             "leave": leave["payload"],
             "pension": pension["payload"],
         },
+        "escalations": payroll.get("escalations", []),
     }
 
 
@@ -857,10 +860,11 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             if route in ("payroll_intelligence", "director_workforce_admin"):
                 escalations = result.get("escalations", [])
                 if "inps_anomaly_escalate_to_ceo" in escalations and _local_send_fn:
-                    anomaly_text = ", ".join(
-                        a for a in result.get("payload", {}).get("anomalies", [])
-                        if "INPS" in a
-                    )
+                    if route == "director_workforce_admin":
+                        anomaly_list = result.get("payload", {}).get("payroll", {}).get("anomalies", [])
+                    else:
+                        anomaly_list = result.get("payload", {}).get("anomalies", [])
+                    anomaly_text = ", ".join(a for a in anomaly_list if "INPS" in a)
                     try:
                         await _local_send_fn({
                             "to": "jarvis",
