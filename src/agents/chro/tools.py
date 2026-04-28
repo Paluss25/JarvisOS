@@ -205,6 +205,25 @@ def extract_text_from_bytes(content: bytes, filename: str) -> str:
         return ""
 
 
+def archive_document(
+    src_path: str,
+    doc_type: str,
+    archive_root: Path | None = None,
+    period_year: int | None = None,
+) -> str:
+    """Move a file from inbox to archive/YYYY/doc_type/ and return the new path."""
+    src = Path(src_path)
+    if not src.exists():
+        raise FileNotFoundError(f"Source not found: {src_path}")
+    root = archive_root or Path("/app/hr-docs/archive")
+    year = period_year if period_year else datetime.now().year
+    dest_dir = root / str(year) / doc_type
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+    shutil.move(str(src), str(dest))
+    return str(dest)
+
+
 def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
     if not _SDK_AVAILABLE or create_sdk_mcp_server is None:
         logger.warning("mcp_server: claude_agent_sdk not available — CHRO tools disabled")
@@ -651,6 +670,31 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             logger.error("save_to_db(%s): error — %s", doc_type, exc)
             return {"content": [{"type": "text", "text": f"DB error: {exc}"}], "is_error": True}
 
+    @sdk_tool(
+        "archive_doc",
+        "Move a processed document from /app/hr-docs/inbox/ to /app/hr-docs/archive/YYYY/doc_type/. "
+        "Call this AFTER save_to_db succeeds. "
+        "src_path: full path of the file in inbox (e.g. /app/hr-docs/inbox/cedolino-2026-03.pdf). "
+        "doc_type: payslip | leave_statement | inps_extract | expense_report. "
+        "period_year: the year from the document's period_from or document_date field (e.g. 2026).",
+        {"src_path": str, "doc_type": str, "period_year": int},
+    )
+    async def archive_doc(args: dict) -> dict:
+        args = _parse_args(args)
+        src_path = (args.get("src_path") or "").strip()
+        doc_type = (args.get("doc_type") or "").strip()
+        period_year = args.get("period_year") or None
+        if not src_path or not doc_type:
+            return _text("src_path and doc_type are required.")
+        try:
+            dest = archive_document(src_path, doc_type, period_year=period_year)
+            return _text(f"Archived to {dest}")
+        except FileNotFoundError as exc:
+            return _text(str(exc))
+        except Exception as exc:
+            logger.error("archive_doc: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"Archive error: {exc}"}], "is_error": True}
+
     # ---- A2A send_message ---------------------------------------------------
 
     if redis_a2a is not None:
@@ -674,7 +718,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         daily_log, memory_search, memory_get, query_db,
         receive_document, extract_text,
         sanitize_pii_tool, classify_document, extract_fields,
-        validate_schema, save_to_db,
+        validate_schema, save_to_db, archive_doc,
     ]
     if send_message is not None:
         all_tools.append(send_message)

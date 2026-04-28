@@ -89,3 +89,23 @@ def test_validate_schema_payslip_missing_net_pay():
     fields = {"period_from": "2026-03-01", "period_to": "2026-03-31", "gross_pay": 3000.0}
     with pytest.raises(ValidationError):
         validate_extracted_fields("payslip", fields)
+
+
+import tempfile
+
+
+def test_archive_doc_moves_file():
+    from agents.chro.tools import archive_document
+
+    with tempfile.TemporaryDirectory() as tmp:
+        inbox = Path(tmp) / "inbox"
+        inbox.mkdir()
+        archive_root = Path(tmp) / "archive"
+        src = inbox / "cedolino-2026-03.pdf"
+        src.write_bytes(b"%PDF fake")
+
+        dest = archive_document(str(src), "payslip", archive_root=archive_root, period_year=2026)
+        assert not src.exists()
+        assert Path(dest).exists()
+        assert "2026" in dest
+        assert "payslip" in dest
