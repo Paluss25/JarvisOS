@@ -76,8 +76,8 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "daily_log",
         "Append a timestamped entry to today's Timothy memory log. "
-        "Use this to record infrastructure changes, incidents, decisions, findings, and resolved issues.",
-        {"message": str},
+        "Use this to record infrastructure changes, incidents, decisions, findings, and resolved issues. message is required.",
+        {"message": {"type": "string", "default": ""}},
     )
     async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
@@ -97,7 +97,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Search across long-term memory (MEMORY.md) and all daily logs (memory/*.md) using text matching. "
         "Use this to recall past incidents, infrastructure changes, decisions, or known issues. "
         "Results include the matching lines with surrounding context, most recent files first.",
-        {"query": str, "top_k": int},
+        {"query": str, "top_k": {"type": "integer", "default": 5}},
     )
     async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
@@ -142,7 +142,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a specific memory file from the workspace. "
         "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
         "Optionally specify start_line and num_lines to read a slice.",
-        {"path": str, "start_line": int, "num_lines": int},
+        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
     )
     async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
@@ -448,7 +448,15 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "sql: a SELECT statement. "
         "params: optional list of query parameters (for $1/$2 placeholders). "
         "Returns rows as JSON. Use this to check DB health, counts, or diagnose data issues.",
-        {"db": str, "sql": str, "params": {"type": "array", "items": {}, "default": []}},
+        {
+            "type": "object",
+            "properties": {
+                "db": {"type": "string"},
+                "sql": {"type": "string"},
+                "params": {"type": "array", "items": {}, "default": []},
+            },
+            "required": ["db", "sql"],
+        },
     )
     async def pg_query(args: dict) -> dict:
         args = _parse_args(args)
@@ -520,7 +528,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         lookback = max(1, min(1440, int(args.get("start_minutes_ago") or 15)))
         limit = max(1, min(500, int(args.get("limit") or 100)))
 
-        loki_base = os.environ.get("LOKI_URL", "http://10.10.200.202:3100")
+        loki_base = os.environ.get("LOKI_URL", "http://10.10.200.71:3100")
         now = datetime.now(timezone.utc)
         start = now - timedelta(minutes=lookback)
         params = {
@@ -636,13 +644,48 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         except OSError as exc:
             return _text(f"Error writing {filename}: {exc}")
 
+    # Strict command allowlist — read-only inspection or safe lifecycle ops only.
+    # Adding to this list requires a security review.
+    _CONTAINER_EXEC_ALLOWLIST = {
+        "supervisorctl status",
+        "supervisorctl tail ceo",
+        "supervisorctl tail cio",
+        "supervisorctl tail cfo",
+        "supervisorctl tail cos",
+        "supervisorctl tail coh",
+        "supervisorctl tail don",
+        "supervisorctl tail dos",
+        "supervisorctl tail mt",
+        "supervisorctl tail email_intelligence_agent",
+        "supervisorctl tail platform-api",
+        "supervisorctl tail worker-ops-detector",
+        "supervisorctl tail worker-market",
+        "supervisorctl restart worker-market",
+        "supervisorctl restart worker-ops-detector",
+        "supervisorctl restart cfo",
+        "supervisorctl restart cio",
+        "supervisorctl restart cos",
+        "supervisorctl restart coh",
+        "supervisorctl restart don",
+        "supervisorctl restart dos",
+        "supervisorctl restart mt",
+        "supervisorctl restart email-intelligence-agent",
+        "supervisorctl restart ceo",
+    }
+
+    _CONTAINER_EXEC_ALLOWED_CONTAINERS = {
+        "jarvios-platform",
+    }
+
     @sdk_tool(
         "container_exec",
-        "Execute a command inside a named Docker container via the socket proxy. "
-        "Intended for supervisorctl restart commands — other commands require "
-        "Telegram approval via the permission hook. "
-        "container: container name (e.g. 'jarvios-platform'). "
-        "command: shell command to run (e.g. 'supervisorctl restart worker-roger'). "
+        "Execute a pre-approved command inside an allowlisted Docker container. "
+        "Only commands and containers on the static allowlist are accepted; any "
+        "other request is rejected. "
+        "container: container name (only 'jarvios-platform' is currently allowed). "
+        "command: must exactly match an allowlisted command (e.g. "
+        "'supervisorctl status', 'supervisorctl tail coh', 'supervisorctl restart worker-market'). "
+        "Use 'supervisorctl tail <agent>' to read recent stdout of a specific process. "
         "Returns combined stdout+stderr output.",
         {"container": str, "command": str},
     )
@@ -654,6 +697,17 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("container is required.")
         if not command:
             return _text("command is required.")
+        if container not in _CONTAINER_EXEC_ALLOWED_CONTAINERS:
+            return _text(
+                f"Container '{container}' is not on the allowlist. "
+                f"Allowed: {sorted(_CONTAINER_EXEC_ALLOWED_CONTAINERS)}"
+            )
+        if command not in _CONTAINER_EXEC_ALLOWLIST:
+            return _text(
+                f"Command not on allowlist. Reject reason: arbitrary shell "
+                f"execution disabled. Use one of: "
+                f"{sorted(_CONTAINER_EXEC_ALLOWLIST)}"
+            )
 
         proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")
 
@@ -725,27 +779,26 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "container_file_patch",
-        "Write a file into a running Docker container. "
-        "Uses docker cp (PUT /archive) via the socket proxy. "
-        "This tool ALWAYS requires Telegram operator approval (HITL). "
-        "container: container name (e.g. 'jarvios-platform'). "
-        "path: absolute path inside the container (e.g. '/app/src/workers/market/journal.py'). "
-        "content: full file content to write.",
+        "DISABLED — arbitrary in-container file writes are not permitted from "
+        "the agent runtime. To patch a file in a running container, the operator "
+        "must perform `docker cp` manually after review. "
+        "Calling this tool returns a clear rejection.",
         {"container": str, "path": str, "content": str},
     )
     async def container_file_patch(args: dict) -> dict:
         args = _parse_args(args)
         container = args.get("container", "").strip()
         path = args.get("path", "").strip()
-        content = args.get("content", "")
-        if not container:
-            return _text("container is required.")
-        if not path:
-            return _text("path is required.")
-        if not path.startswith("/"):
-            return _text("path must be absolute (start with '/').")
-
-        proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")
+        return _text(
+            "container_file_patch is disabled: arbitrary file writes into "
+            "running containers must be performed by a human operator via "
+            f"`docker cp`. Requested target was '{container}:{path}'. "
+            "If a recurring patch is required, add a wrapper in the agent "
+            "image and an explicit allowlist before re-enabling this tool."
+        )
+        # Unreachable code below kept for reference if the tool is ever
+        # re-enabled with a real HITL gate + path allowlist.
+        proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")  # noqa: E501
 
         # Build a tar archive in memory with the single file
         filename = os.path.basename(path)
@@ -904,12 +957,6 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
 
     # --- Issue reporting and HITL remediation --------------------------------
 
-    from agent_runner.tools.report_issue import create_report_issue_tool, REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA
-
-    @sdk_tool("report_issue", REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA)
-    async def report_issue(args: dict) -> dict:
-        return await create_report_issue_tool("cio")(args)
-
     @sdk_tool(
         "collect_and_remediate",
         "Collect all morning issue reports from agents, deduplicate by component, "
@@ -936,8 +983,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         docker_query, docker_action, tcp_check, dns_lookup, pg_query,
         loki_query, runbook_list, runbook_read, runbook_write,
         container_exec, container_file_patch,
-        cron_create, cron_list, cron_update, cron_delete,
-        report_issue, collect_and_remediate,
+        cron_create, cron_list, cron_update, cron_delete, collect_and_remediate,
     ]
     if send_message is not None:
         all_tools.append(send_message)

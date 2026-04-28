@@ -86,6 +86,21 @@ TIMOTHY_BUILTIN_CRONS = [
         "telegram_notify": True,
         "builtin": True,
     },
+    {
+        "name": "nightly_dreaming",
+        "schedule": "daily@02:00",
+        "prompt": (
+            "Nightly dreaming. Review your recent activity logs and long-term memory. "
+            "Produce a DREAMS.md that captures: unresolved threads (things started but "
+            "not finished), emerging patterns (recurring themes across days), free "
+            "associations (unexpected connections between topics), and seeds (ideas worth "
+            "developing later). Be interpretive, not just descriptive — surface what the "
+            "logs don't explicitly say. Return ONLY the raw markdown for DREAMS.md."
+        ),
+        "session_id": "heartbeat-dreaming",
+        "telegram_notify": False,
+        "builtin": True,
+    },
 ]
 
 
@@ -116,4 +131,7 @@ def build_timothy_config(workspace_root: Path = Path("/app/workspace/cio")) -> A
             "WebSearch", "WebFetch", "Glob", "Grep",
             "Agent",
         ],
+        voice_enabled=True,
+        voice_language="it",
+        voice_tts_voice="it-IT-ElsaNeural",
     )
