@@ -1,7 +1,7 @@
 import datetime as dt
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -27,6 +27,14 @@ class FakeFrame:
     def __init__(self, name, fields):
         self.name = name
         self.fields = fields
+
+
+class FakeTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 def test_field_dict_from_frame_keeps_values_and_units():
@@ -193,3 +201,184 @@ def test_promoted_raw_json_is_json_safe():
         "flag": True,
     }
     assert promoted["raw_json"] == safe
+
+
+@pytest.mark.asyncio
+async def test_resolve_activity_id_by_direct_id():
+    from agents.dos.fit_import import resolve_activity_id
+
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value={"id": 123})
+
+    resolved = await resolve_activity_id(conn, activity_id=123, strava_activity_id=None, user_id=1)
+
+    assert resolved == 123
+    conn.fetchrow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resolve_activity_id_direct_id_wrong_user_raises():
+    from agents.dos.fit_import import resolve_activity_id
+
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value=None)
+
+    with pytest.raises(ValueError, match="No activity found"):
+        await resolve_activity_id(conn, activity_id=123, strava_activity_id=None, user_id=1)
+
+
+@pytest.mark.asyncio
+async def test_resolve_activity_id_by_strava_id():
+    from agents.dos.fit_import import resolve_activity_id
+
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value={"id": 77})
+
+    resolved = await resolve_activity_id(conn, activity_id=None, strava_activity_id=999, user_id=1)
+
+    assert resolved == 77
+    conn.fetchrow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resolve_activity_id_unknown_strava_id_raises():
+    from agents.dos.fit_import import resolve_activity_id
+
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value=None)
+
+    with pytest.raises(ValueError, match="No activity found"):
+        await resolve_activity_id(conn, activity_id=None, strava_activity_id=999, user_id=1)
+
+
+@pytest.mark.asyncio
+async def test_import_fit_data_skips_duplicate_sha():
+    from agents.dos.fit_import import FitActivityData, import_fit_data
+
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=FakeTransaction())
+    conn.fetchrow = AsyncMock(side_effect=[
+        {"id": 123},
+        None,
+        {"id": 9, "activity_id": 123, "user_id": 1},
+    ])
+    parsed = FitActivityData(source_path=Path("/tmp/activity.fit"), file_sha256="abc")
+
+    result = await import_fit_data(conn, parsed, activity_id=123, user_id=1)
+
+    assert result["status"] == "already_exists"
+    assert result["fit_file_id"] == 9
+
+
+@pytest.mark.asyncio
+async def test_import_fit_data_inserts_sessions_laps_records_and_fields():
+    from agents.dos.fit_import import FitActivityData, import_fit_data
+
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=FakeTransaction())
+    conn.fetchrow = AsyncMock(side_effect=[{"id": 123}, {"id": 44}])
+    conn.execute = AsyncMock()
+    conn.executemany = AsyncMock()
+    timestamp = dt.datetime(2026, 4, 27, 10, 31, tzinfo=dt.timezone.utc)
+    parsed = FitActivityData(
+        source_path=Path("/tmp/activity.fit"),
+        file_sha256="abc",
+        file_id={"manufacturer": "garmin", "time_created": timestamp},
+        raw_summary={"file_id": {"time_created": timestamp}},
+        sessions=[{
+            "sport": "running",
+            "start_time": timestamp,
+            "total_distance_m": 1000,
+            "avg_heart_rate": 145,
+            "raw_json": {"start_time": timestamp},
+        }],
+        laps=[{"lap_index": 0, "raw_json": {"start_time": timestamp}}],
+        records=[{"timestamp": timestamp, "heart_rate": 140, "raw_json": {"timestamp": timestamp}}],
+        fields=[{
+            "message_name": "record",
+            "message_index": 0,
+            "field_name": "heart_rate",
+            "field_value_text": None,
+            "field_value_num": 140,
+            "field_unit": "bpm",
+        }],
+    )
+
+    result = await import_fit_data(conn, parsed, activity_id=123, user_id=1)
+
+    assert result == {
+        "status": "imported",
+        "fit_file_id": 44,
+        "activity_id": 123,
+        "sessions": 1,
+        "laps": 1,
+        "records": 1,
+        "fields": 1,
+    }
+    assert conn.execute.await_count == 2
+    assert conn.executemany.await_count == 2
+    conn.transaction.assert_called_once()
+    file_insert_args = conn.fetchrow.await_args_list[1].args
+    assert '"2026-04-27T10:31:00+00:00"' in file_insert_args[-1]
+
+
+@pytest.mark.asyncio
+async def test_import_fit_data_on_conflict_returns_existing():
+    from agents.dos.fit_import import FitActivityData, import_fit_data
+
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=FakeTransaction())
+    conn.fetchrow = AsyncMock(side_effect=[
+        {"id": 123},
+        None,
+        {"id": 9, "activity_id": 123, "user_id": 1},
+    ])
+    parsed = FitActivityData(source_path=Path("/tmp/activity.fit"), file_sha256="abc")
+
+    result = await import_fit_data(conn, parsed, activity_id=123, user_id=1)
+
+    assert result["status"] == "already_exists"
+    assert result["fit_file_id"] == 9
+
+
+@pytest.mark.asyncio
+async def test_import_fit_data_duplicate_sha_for_different_activity_raises():
+    from agents.dos.fit_import import FitActivityData, import_fit_data
+
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=FakeTransaction())
+    conn.fetchrow = AsyncMock(side_effect=[
+        {"id": 456},
+        None,
+        {"id": 9, "activity_id": 123, "user_id": 1},
+    ])
+    parsed = FitActivityData(source_path=Path("/tmp/activity.fit"), file_sha256="abc")
+
+    with pytest.raises(ValueError, match="already linked"):
+        await import_fit_data(conn, parsed, activity_id=456, user_id=1)
+
+
+@pytest.mark.asyncio
+async def test_import_fit_data_validates_activity_owner_before_insert():
+    from agents.dos.fit_import import FitActivityData, import_fit_data
+
+    conn = MagicMock()
+    conn.transaction = MagicMock(return_value=FakeTransaction())
+    conn.fetchrow = AsyncMock(return_value=None)
+    parsed = FitActivityData(source_path=Path("/tmp/activity.fit"), file_sha256="abc")
+
+    with pytest.raises(ValueError, match="No activity found"):
+        await import_fit_data(conn, parsed, activity_id=123, user_id=1)
+
+
+@pytest.mark.asyncio
+async def test_insert_record_batches_chunks_large_inputs():
+    from agents.dos.fit_import import _insert_record_batches
+
+    conn = MagicMock()
+    conn.executemany = AsyncMock()
+    records = [{"heart_rate": i, "raw_json": {"heart_rate": i}} for i in range(5)]
+
+    await _insert_record_batches(conn, fit_file_id=1, activity_id=123, records=records, batch_size=2)
+
+    assert conn.executemany.await_count == 3
