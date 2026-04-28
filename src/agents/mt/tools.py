@@ -796,7 +796,7 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         if send_message is None:
             return _text("A2A bus not available — Redis not configured.")
         message = f"MT escalation: {reason}\n\nPayload:\n{payload_raw}"
-        return await send_message({"to": "cos", "message": message})
+        return _text(await _send_message_fn({"to": "cos", "message": message}))
 
     from agent_runner.tools.report_issue import (
         create_report_issue_tool,
@@ -926,4 +926,5 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
     if send_message is not None:
         all_tools.append(send_message)
 
-    return create_sdk_mcp_server("mt-tools", all_tools)
+    logger.info("mcp_server: MT tools registered (%d tools)", len(all_tools))
+    return create_sdk_mcp_server(name="mt-tools", tools=all_tools)
