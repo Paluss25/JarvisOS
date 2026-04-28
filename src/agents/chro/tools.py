@@ -102,9 +102,13 @@ _PII_PATTERNS: list[tuple[re.Pattern, str]] = [
     # P.IVA bare number (11 digits following typical IT VAT context)
     (re.compile(r'\bIT\s?\d{11}\b'), '[PIVA_REDACTED]'),
     # Street address patterns — including abbreviated forms (P.zza, C.so, Via S., c/o)
+    # Corso/Largo require an uppercase first letter after the keyword to avoid false positives
+    # on common Italian HR phrases like "Corso di formazione..." or "Largo accordo..."
     (re.compile(
-        r'\b(Via|Viale|Corso|C\.so|Piazza|P\.zza|Largo|Vicolo|Via\s+S\.|c/o)\s+[A-Za-zÀ-ÿ\s.]+,?\s*\d+\b',
-        re.IGNORECASE,
+        r'\b(Via|Viale|C\.so|Piazza|P\.zza|Vicolo|Via\s+S\.|c/o)\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.]*,?\s*\d+\b'
+        r'|'
+        r'\b(Corso|Largo)\s+[A-Z][A-Za-zÀ-ÿ\s.]*,?\s*\d+\b',
+        re.UNICODE,
     ), '[ADDR_REDACTED]'),
 ]
 
@@ -220,6 +224,9 @@ def archive_document(
     dest_dir = root / str(year) / doc_type
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / src.name
+    if dest.exists():
+        stem, suffix = src.stem, src.suffix
+        dest = dest_dir / f"{stem}_{int(datetime.now().timestamp())}{suffix}"
     shutil.move(str(src), str(dest))
     return str(dest)
 
@@ -596,72 +603,73 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         try:
             conn = await asyncpg.connect(url)
             try:
-                if doc_type == "payslip":
-                    row = await conn.fetchrow(
-                        """INSERT INTO chro.payslips
-                           (period_from, period_to, employer, gross_pay, net_pay,
-                            inps_employee, irpef_withheld, tfr_accrued,
-                            leave_residual_days, rol_residual_hours, raw_json, source_file)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-                           RETURNING id""",
-                        _to_date(fields.get("period_from")), _to_date(fields.get("period_to")),
-                        fields.get("employer"), fields.get("gross_pay"), fields.get("net_pay"),
-                        fields.get("inps_employee"), fields.get("irpef_withheld"),
-                        fields.get("tfr_accrued"), fields.get("leave_residual_days"),
-                        fields.get("rol_residual_hours"),
-                        json.dumps(fields), source_file,
+                async with conn.transaction():
+                    if doc_type == "payslip":
+                        row = await conn.fetchrow(
+                            """INSERT INTO chro.payslips
+                               (period_from, period_to, employer, gross_pay, net_pay,
+                                inps_employee, irpef_withheld, tfr_accrued,
+                                leave_residual_days, rol_residual_hours, raw_json, source_file)
+                               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                               RETURNING id""",
+                            _to_date(fields.get("period_from")), _to_date(fields.get("period_to")),
+                            fields.get("employer"), fields.get("gross_pay"), fields.get("net_pay"),
+                            fields.get("inps_employee"), fields.get("irpef_withheld"),
+                            fields.get("tfr_accrued"), fields.get("leave_residual_days"),
+                            fields.get("rol_residual_hours"),
+                            json.dumps(fields), source_file,
+                        )
+                        record_id = str(row["id"])
+
+                    elif doc_type == "leave_statement":
+                        row = await conn.fetchrow(
+                            """INSERT INTO chro.leave_snapshots
+                               (snapshot_date, ferie_accrued, ferie_used, ferie_remaining,
+                                rol_accrued, rol_used, rol_remaining)
+                               VALUES ($1,$2,$3,$4,$5,$6,$7)
+                               RETURNING id""",
+                            _to_date(fields.get("snapshot_date")),
+                            fields.get("ferie_accrued"), fields.get("ferie_used"), fields.get("ferie_remaining"),
+                            fields.get("rol_accrued"), fields.get("rol_used"), fields.get("rol_remaining"),
+                        )
+                        record_id = str(row["id"])
+
+                    elif doc_type == "inps_extract":
+                        row = await conn.fetchrow(
+                            """INSERT INTO chro.pension_extracts
+                               (document_date, contribution_period, total_contributions,
+                                projected_pension_age, projected_monthly_pension, raw_json, source_file)
+                               VALUES ($1,$2,$3,$4,$5,$6,$7)
+                               RETURNING id""",
+                            _to_date(fields.get("document_date")), fields.get("contribution_period"),
+                            fields.get("total_contributions"), fields.get("projected_pension_age"),
+                            fields.get("projected_monthly_pension"),
+                            json.dumps(fields), source_file,
+                        )
+                        record_id = str(row["id"])
+
+                    elif doc_type == "expense_report":
+                        row = await conn.fetchrow(
+                            """INSERT INTO chro.expense_items
+                               (expense_date, category, amount_eur, reimbursed, employer_reference)
+                               VALUES ($1,$2,$3,$4,$5)
+                               RETURNING id""",
+                            _to_date(fields.get("expense_date")), fields.get("category"),
+                            fields.get("amount_eur"), bool(fields.get("reimbursed", False)),
+                            fields.get("employer_reference"),
+                        )
+                        record_id = str(row["id"])
+
+                    else:
+                        return _text(f"Unknown doc_type: {doc_type}")
+
+                    await conn.execute(
+                        """INSERT INTO chro.hr_audit_log
+                           (case_id, agent_id, action, output_schema_version, confidence)
+                           VALUES ($1, $2, $3, $4, $5)""",
+                        _to_uuid(case_id or record_id), "chro", f"save_to_db:{doc_type}", "1.0",
+                        float(fields.get("confidence", 0.0)) if fields.get("confidence") else None,
                     )
-                    record_id = str(row["id"])
-
-                elif doc_type == "leave_statement":
-                    row = await conn.fetchrow(
-                        """INSERT INTO chro.leave_snapshots
-                           (snapshot_date, ferie_accrued, ferie_used, ferie_remaining,
-                            rol_accrued, rol_used, rol_remaining)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7)
-                           RETURNING id""",
-                        _to_date(fields.get("snapshot_date")),
-                        fields.get("ferie_accrued"), fields.get("ferie_used"), fields.get("ferie_remaining"),
-                        fields.get("rol_accrued"), fields.get("rol_used"), fields.get("rol_remaining"),
-                    )
-                    record_id = str(row["id"])
-
-                elif doc_type == "inps_extract":
-                    row = await conn.fetchrow(
-                        """INSERT INTO chro.pension_extracts
-                           (document_date, contribution_period, total_contributions,
-                            projected_pension_age, projected_monthly_pension, raw_json, source_file)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7)
-                           RETURNING id""",
-                        _to_date(fields.get("document_date")), fields.get("contribution_period"),
-                        fields.get("total_contributions"), fields.get("projected_pension_age"),
-                        fields.get("projected_monthly_pension"),
-                        json.dumps(fields), source_file,
-                    )
-                    record_id = str(row["id"])
-
-                elif doc_type == "expense_report":
-                    row = await conn.fetchrow(
-                        """INSERT INTO chro.expense_items
-                           (expense_date, category, amount_eur, reimbursed, employer_reference)
-                           VALUES ($1,$2,$3,$4,$5)
-                           RETURNING id""",
-                        _to_date(fields.get("expense_date")), fields.get("category"),
-                        fields.get("amount_eur"), bool(fields.get("reimbursed", False)),
-                        fields.get("employer_reference"),
-                    )
-                    record_id = str(row["id"])
-
-                else:
-                    return _text(f"Unknown doc_type: {doc_type}")
-
-                await conn.execute(
-                    """INSERT INTO chro.hr_audit_log
-                       (case_id, agent_id, action, output_schema_version, confidence)
-                       VALUES ($1, $2, $3, $4, $5)""",
-                    _to_uuid(case_id or record_id), "chro", f"save_to_db:{doc_type}", "1.0",
-                    float(fields.get("confidence", 0.0)) if fields.get("confidence") else None,
-                )
 
                 return _text(f"Saved {doc_type} record id={record_id}")
             finally:
