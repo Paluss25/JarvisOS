@@ -146,7 +146,7 @@ class PolicyEngine:
             return PolicyDecision(
                 allow=False,
                 decision="escalate",
-                constraints={"quarantine": True, "route_to": "CISOAgent"},
+                constraints={"quarantine": True, "route_to": "cio"},
                 reasons=["PROMPT_INJECTION_RISK_HIGH"],
             )
 
@@ -156,7 +156,7 @@ class PolicyEngine:
             return PolicyDecision(
                 allow=False,
                 decision="escalate",
-                constraints={"quarantine": True, "route_to": "CISOAgent"},
+                constraints={"quarantine": True, "route_to": "cio"},
                 reasons=["SUSPICIOUS_DOMAIN_WITH_ACTION_REQUEST"],
             )
 

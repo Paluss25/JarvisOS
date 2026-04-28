@@ -18,8 +18,8 @@ stores:
     forbidden_content:
       - embeddings
     access_roles:
-      - EmailIntelligenceAgent
-      - ChiefOfStaffAgent
+      - email_intelligence_agent
+      - cos
     retention_days: 90
     vectorization_allowed: false
 
@@ -36,14 +36,14 @@ stores:
     forbidden_content:
       - raw_attachment_binary
     access_roles:
-      - EmailIntelligenceAgent
-      - ChiefOfStaffAgent
-      - CFOAgent
-      - CISOAgent
-      - CIOAgent
-      - CLOAgent
-      - COOAgent
-      - CEOAgent
+      - email_intelligence_agent
+      - cos
+      - cfo
+      - cio
+      - cio
+      - cos
+      - cos
+      - ceo
     retention_days: 180
     pii_minimized: true
 
@@ -60,11 +60,11 @@ stores:
       - credentials
       - raw_financial_identifiers
     access_roles:
-      - ChiefOfStaffAgent
-      - CFOAgent
-      - CISOAgent
-      - CIOAgent
-      - CLOAgent
+      - cos
+      - cfo
+      - cio
+      - cio
+      - cos
     retention_days: 60
     namespace_per_domain: true
     vectorization_allowed: true
