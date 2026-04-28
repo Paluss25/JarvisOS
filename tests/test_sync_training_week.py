@@ -83,6 +83,8 @@ def _make_row(
     day_of_week=0,
     planned_duration=45,
     notes="",
+    planned_intensity="Zone 3",
+    status="planned",
     created_at=None,
 ):
     return {
@@ -90,6 +92,8 @@ def _make_row(
         "day_of_week": day_of_week,
         "planned_duration": planned_duration,
         "notes": notes,
+        "planned_intensity": planned_intensity,
+        "status": status,
         "created_at": created_at or datetime.datetime(2026, 5, 1, 0, 0, 0, tzinfo=_UTC),
     }
 

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import uuid
+import zoneinfo
 from pathlib import Path
 
 import httpx
@@ -157,6 +158,33 @@ def _task_list(workspace: Path, status: str = "") -> list[dict]:
         tasks = [task for task in tasks if task.get("status", "").lower() == status.lower()]
     tasks.sort(key=lambda task: task.get("due_date") or "9999-12-31")
     return tasks
+
+
+_TRAINING_TITLE_MAP = {
+    "run": "🏃 Run",
+    "walk": "🚶 Walk",
+    "strength_metabolic": "💪 Strength & Metabolic",
+    "strength": "💪 Strength",
+}
+
+
+def _build_training_ical(uid: str, title: str, dtstart: datetime.datetime, dtend: datetime.datetime, description: str) -> str:
+    """Build a VCALENDAR iCal string for a single training session event."""
+    fmt = "%Y%m%dT%H%M%S"
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//JarvisOS//TrainingSync//EN",
+        "BEGIN:VEVENT",
+        f"UID:{uid}",
+        f"SUMMARY:{title}",
+        f"DTSTART;TZID=Europe/Rome:{dtstart.strftime(fmt)}",
+        f"DTEND;TZID=Europe/Rome:{dtend.strftime(fmt)}",
+    ]
+    if description:
+        lines.append(f"DESCRIPTION:{_ics_escape(description)}")
+    lines += ["END:VEVENT", "END:VCALENDAR"]
+    return "\r\n".join(lines) + "\r\n"
 
 
 try:
@@ -782,6 +810,92 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
     async def report_issue(args: dict) -> dict:
         return await _report_issue_fn(args)
 
+    @sdk_tool(
+        "sync_training_week",
+        "Sync a week's training plan from sport_metrics DB to the TrainingPlan Radicale calendar. "
+        "Reads rows from training_plan table, computes real dates, and upserts CalDAV events. "
+        "week_number is the ISO week number (1-53). year defaults to current year if omitted.",
+        {"week_number": int, "year": int},
+    )
+    async def sync_training_week(args: dict) -> dict:
+        import asyncpg
+        args = _parse_args(args)
+        week_number = int(args.get("week_number", 0))
+        if not week_number:
+            return _text("week_number is required.")
+        year = int(args.get("year", 0))
+        db_url = os.environ.get("SPORT_POSTGRES_URL")
+        if not db_url:
+            return {"error": "SPORT_POSTGRES_URL not configured"}
+        calendar_name = os.environ.get("RADICALE_TRAINING_CALENDAR", "TrainingPlan")
+
+        try:
+            conn = await asyncpg.connect(db_url)
+            try:
+                rows = await conn.fetch(
+                    "SELECT session_type, day_of_week, planned_duration, notes, "
+                    "planned_intensity, status, created_at "
+                    "FROM training_plan WHERE week_number = $1 AND user_id = 1 "
+                    "ORDER BY day_of_week",
+                    week_number,
+                )
+            finally:
+                await conn.close()
+        except Exception as exc:
+            return {"error": f"DB unavailable: {exc}"}
+
+        if not rows:
+            return {"synced": 0, "skipped": 0, "week": week_number, "year": year or datetime.date.today().isocalendar()[0], "calendar": calendar_name}
+
+        # Resolve year
+        if year <= 0:
+            year = rows[0]["created_at"].year
+
+        client = _get_calendar_client()
+        if client is None:
+            return {"error": "CalDAV unavailable: RADICALE_URL not set"}
+        try:
+            cal_url = await asyncio.to_thread(client._ensure_calendar, calendar_name)
+        except Exception as exc:
+            return {"error": f"CalDAV unavailable: {exc}"}
+
+        rome = zoneinfo.ZoneInfo("Europe/Rome")
+        synced = 0
+        skipped = 0
+
+        for row in rows:
+            session_type = row["session_type"]
+            planned_duration = row["planned_duration"]
+            if session_type == "rest" or planned_duration == 0:
+                skipped += 1
+                continue
+
+            day_of_week = row["day_of_week"]
+            uid = f"training-{year}w{week_number:02d}d{day_of_week}"
+            title = _TRAINING_TITLE_MAP.get(session_type, f"🏋️ {session_type.replace('_', ' ').title()}")
+
+            date = datetime.date.fromisocalendar(year, week_number, day_of_week + 1)
+            dtstart = datetime.datetime(date.year, date.month, date.day, 18, 0, 0, tzinfo=rome)
+            dtend = dtstart + datetime.timedelta(minutes=planned_duration)
+
+            notes = row.get("notes") or ""
+            intensity = row.get("planned_intensity") or ""
+            status_val = row.get("status") or "planned"
+            description = (
+                f"Type: {session_type.replace('_', ' ').title()} | "
+                f"Intensity: {intensity} | "
+                f"Duration: {planned_duration}min | "
+                f"Status: {status_val}"
+            )
+            if notes:
+                description += f"\n{notes}"
+
+            ical = _build_training_ical(uid, title, dtstart, dtend, description)
+            await asyncio.to_thread(client.upsert_event, cal_url, uid, ical)
+            synced += 1
+
+        return {"synced": synced, "skipped": skipped, "week": week_number, "year": year, "calendar": calendar_name}
+
     all_tools = [
         daily_log,
         memory_search,
@@ -807,6 +921,7 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         contacts_delete,
         forward_to_cos,
         report_issue,
+        sync_training_week,
     ]
     if send_message is not None:
         all_tools.append(send_message)
