@@ -231,6 +231,103 @@ def archive_document(
     return str(dest)
 
 
+async def _run_payroll_specialist(case) -> dict:
+    """Payroll Intelligence Agent — queries payslips DB for the case."""
+    rows = await _pg_query(
+        "SELECT id, period_from, period_to, employer, gross_pay, net_pay, irpef_withheld, "
+        "inps_employee, tfr_accrued, leave_residual_days, rol_residual_hours "
+        "FROM chro.payslips ORDER BY period_to DESC LIMIT 6"
+    )
+    if not rows:
+        return {"agent_id": "payroll_intelligence", "confidence": 0.5,
+                "payload": {"note": "No payslips in DB yet."}, "escalations": []}
+    latest = rows[0]
+    anomalies = []
+    escalations = []
+    if len(rows) >= 2:
+        prev = rows[1]
+        if prev["net_pay"] and latest["net_pay"]:
+            delta_pct = abs((latest["net_pay"] - prev["net_pay"]) / prev["net_pay"])
+            if delta_pct > 0.05:
+                anomalies.append(
+                    f"Net pay changed {delta_pct:.1%} vs previous month "
+                    f"({prev['net_pay']:.2f} → {latest['net_pay']:.2f} EUR)"
+                )
+        if prev["inps_employee"] and latest["inps_employee"]:
+            inps_delta = abs((latest["inps_employee"] - prev["inps_employee"]) / prev["inps_employee"])
+            if inps_delta > 0.10:
+                anomalies.append(
+                    f"INPS contribution changed {inps_delta:.1%} — possible rate change or base change"
+                )
+                escalations.append("inps_anomaly_escalate_to_ceo")
+    return {
+        "agent_id": "payroll_intelligence",
+        "confidence": 0.90,
+        "payload": {
+            "latest_payslip": dict(latest),
+            "payslip_history": rows,
+            "anomalies": anomalies,
+        },
+        "escalations": escalations,
+    }
+
+
+async def _run_leave_specialist(case) -> dict:
+    """Leave, Time & Travel Agent — queries leave_snapshots DB."""
+    rows = await _pg_query(
+        "SELECT snapshot_date, ferie_accrued, ferie_used, ferie_remaining, "
+        "rol_accrued, rol_used, rol_remaining "
+        "FROM chro.leave_snapshots ORDER BY snapshot_date DESC LIMIT 3"
+    )
+    if not rows:
+        return {"agent_id": "leave_time_travel", "confidence": 0.5,
+                "payload": {"note": "No leave snapshots in DB yet."}}
+    latest = rows[0]
+    flags = []
+    if latest.get("ferie_remaining") is not None and latest["ferie_remaining"] < 5:
+        flags.append(f"Ferie residue criticamente basse: {latest['ferie_remaining']} giorni")
+    return {
+        "agent_id": "leave_time_travel",
+        "confidence": 0.90,
+        "payload": {"latest_snapshot": dict(latest), "flags": flags},
+    }
+
+
+async def _run_pension_specialist(case) -> dict:
+    """Pension & Benefits Agent — queries pension_extracts DB."""
+    rows = await _pg_query(
+        "SELECT document_date, contribution_period, total_contributions, "
+        "projected_pension_age, projected_monthly_pension "
+        "FROM chro.pension_extracts ORDER BY document_date DESC LIMIT 2"
+    )
+    if not rows:
+        return {"agent_id": "pension_benefits", "confidence": 0.5,
+                "payload": {"note": "No pension extracts in DB yet."}}
+    return {
+        "agent_id": "pension_benefits",
+        "confidence": 0.85,
+        "payload": {"latest_extract": dict(rows[0])},
+    }
+
+
+async def _run_director(case) -> dict:
+    """Director of Workforce Administration — parallel multi-domain dispatch."""
+    import asyncio
+    payroll_task = asyncio.create_task(_run_payroll_specialist(case))
+    leave_task = asyncio.create_task(_run_leave_specialist(case))
+    pension_task = asyncio.create_task(_run_pension_specialist(case))
+    payroll, leave, pension = await asyncio.gather(payroll_task, leave_task, pension_task)
+    return {
+        "agent_id": "director_workforce_admin",
+        "confidence": min(payroll["confidence"], leave["confidence"], pension["confidence"]),
+        "payload": {
+            "payroll": payroll["payload"],
+            "leave": leave["payload"],
+            "pension": pension["payload"],
+        },
+    }
+
+
 def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
     if not _SDK_AVAILABLE or create_sdk_mcp_server is None:
         logger.warning("mcp_server: claude_agent_sdk not available — CHRO tools disabled")
@@ -703,6 +800,84 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             logger.error("archive_doc: error — %s", exc)
             return {"content": [{"type": "text", "text": f"Archive error: {exc}"}], "is_error": True}
 
+    # ---- Specialist routing tool --------------------------------------------
+
+    _local_send_fn = None
+    if redis_a2a is not None:
+        from agent_runner.tools.send_message import create_send_message_tool
+        _local_send_fn = create_send_message_tool("chro", redis_a2a)
+
+    @sdk_tool(
+        "dispatch_to_specialist",
+        "Dispatch an HR task to the appropriate headless specialist agent via the Director of Workforce Administration. "
+        "The Director uses keyword-based routing to select: payroll_intelligence, leave_time_travel, or pension_benefits. "
+        "Multi-domain queries are handled by the Director directly (parallel dispatch). "
+        "text: the sanitized request text (PII already removed). "
+        "domain: optional hint ('payroll', 'leave', 'pension', 'multi'). "
+        "Returns a specialist result dict.",
+        {"text": str, "domain": str},
+    )
+    async def dispatch_to_specialist(args: dict) -> dict:
+        args = _parse_args(args)
+        text = (args.get("text") or "").strip()
+        domain = (args.get("domain") or "").strip()
+        if not text:
+            return _text("text is required.")
+
+        from chro_cpo.core.types import CaseEnvelope
+        from chro_cpo.core.routing import Router
+        import uuid
+
+        case = CaseEnvelope(
+            case_id=str(uuid.uuid4()),
+            domain=domain or "hr",
+            intent="analyze",
+            risk="low",
+            data_sensitivity="high",
+            jurisdiction="IT",
+            actionability="immediate",
+            input_text=text,
+        )
+
+        route = Router().route(case)
+        logger.info("dispatch_to_specialist: routing to %s", route)
+
+        try:
+            if route == "payroll_intelligence":
+                result = await _run_payroll_specialist(case)
+            elif route == "leave_time_travel":
+                result = await _run_leave_specialist(case)
+            elif route == "pension_benefits":
+                result = await _run_pension_specialist(case)
+            else:
+                # director_workforce_admin: multi-domain parallel dispatch
+                result = await _run_director(case)
+
+            # Explicit INPS escalation — not left to agent reasoning
+            if route in ("payroll_intelligence", "director_workforce_admin"):
+                escalations = result.get("escalations", [])
+                if "inps_anomaly_escalate_to_ceo" in escalations and _local_send_fn:
+                    anomaly_text = ", ".join(
+                        a for a in result.get("payload", {}).get("anomalies", [])
+                        if "INPS" in a
+                    )
+                    try:
+                        await _local_send_fn({
+                            "to": "jarvis",
+                            "message": (
+                                f"INPS anomaly detected during payroll analysis: {anomaly_text}. "
+                                "Please review and advise."
+                            ),
+                        })
+                        logger.info("dispatch_to_specialist: INPS escalation sent to jarvis")
+                    except Exception as exc:
+                        logger.warning("dispatch_to_specialist: INPS escalation failed — %s", exc)
+
+            return {"content": [{"type": "text", "text": json.dumps(result, default=str, indent=2)}]}
+        except Exception as exc:
+            logger.error("dispatch_to_specialist(%s): error — %s", route, exc)
+            return {"content": [{"type": "text", "text": f"Specialist error: {exc}"}], "is_error": True}
+
     # ---- A2A send_message ---------------------------------------------------
 
     if redis_a2a is not None:
@@ -727,6 +902,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         receive_document, extract_text,
         sanitize_pii_tool, classify_document, extract_fields,
         validate_schema, save_to_db, archive_doc,
+        dispatch_to_specialist,
     ]
     if send_message is not None:
         all_tools.append(send_message)
