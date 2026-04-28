@@ -67,7 +67,7 @@ def create_jarvis_agent() -> Agent:
     ctx = load_workspace_context(workspace_path)
     instructions = _build_instructions(ctx)
 
-    primary_model, fallback_models = build_agent_model_native("jarvis")
+    primary_model, fallback_models = build_agent_model_native("ceo")
     primary_id = f"{getattr(primary_model, 'provider', '?')}/{getattr(primary_model, 'id', '?')}"
     fallback_ids = [f"{getattr(m, 'provider', '?')}/{getattr(m, 'id', '?')}" for m in fallback_models]
     logger.info("agent: model chain — %s", " → ".join([primary_id] + fallback_ids))
@@ -83,7 +83,7 @@ def create_jarvis_agent() -> Agent:
     # --- Tool suite ----------------------------------------------------------
     from tools.code_executor import CodeExecutorTools
     from tools.file_tools import WorkspaceFileTools
-    from tools.perplexity_search import PerplexitySearchTools
+    from agent_runner.tools.perplexity_search import PerplexitySearchTools
     from tools.shell_tools import ShellTools
 
     tools = [

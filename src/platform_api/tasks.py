@@ -207,9 +207,9 @@ async def _handle_failure(pool, task: dict) -> None:
             retry_count,
             task_id,
         )
-        # Escalate to Jarvis via A2A channel
-        await _publish_event("a2a:jarvis", f"task_failed:{task_id}")
-        logger.warning("tasks: task %s exhausted retries — escalated to Jarvis", task_id)
+        # Escalate to CEO via A2A channel
+        await _publish_event("a2a:ceo", f"task_failed:{task_id}")
+        logger.warning("tasks: task %s exhausted retries — escalated to CEO", task_id)
 
     # Check parent task completion
     parent_id = task.get("parent_id")

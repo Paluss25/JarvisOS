@@ -1,7 +1,7 @@
 """Client for the centralized memory API (memory-api.prova9x.com).
 
 Shared Qdrant + Graphiti backend — used by both Jarvis and Claude Code.
-user_id="jarvis" keeps Jarvis memories distinct from "claude-code" entries.
+user_id="ceo" keeps CEO memories distinct from "claude-code" entries.
 """
 
 import logging
@@ -23,12 +23,12 @@ class MemoryAPIClient:
 
     Usage::
 
-        client = MemoryAPIClient("https://memory-api.prova9x.com", "jarvis")
+        client = MemoryAPIClient("https://memory-api.prova9x.com", "ceo")
         await client.write("Paluss deployed Jarvis today")
         results = await client.query("recent deployments")
     """
 
-    def __init__(self, base_url: str, user_id: str = "jarvis"):
+    def __init__(self, base_url: str, user_id: str = "ceo"):
         self.base_url = base_url.rstrip("/")
         self.user_id = user_id
 

@@ -106,6 +106,73 @@ async def _cmd_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("No active session.")
 
 
+_WHITELIST_HELP = (
+    "*Sender Whitelist — commands:*\n\n"
+    "`/whitelist list`\n"
+    "  Show all current entries.\n\n"
+    "`/whitelist add <email|@domain> <domain> [confidence] [note]`\n"
+    "  Add or update an entry. confidence is 0.0–1.0 (default 1.0).\n"
+    "  Examples:\n"
+    "    `/whitelist add noreply@unicredit.it finance`\n"
+    "    `/whitelist add @bancaintesa.it finance 1.0 Intesa statements`\n\n"
+    "`/whitelist remove <email|@domain>`\n"
+    "  Remove an entry.\n"
+    "  Example: `/whitelist remove @unicredit.it`"
+)
+
+
+async def _cmd_whitelist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_authorized(update.effective_chat.id):
+        return
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text(_WHITELIST_HELP, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    subcommand = args[0].lower()
+
+    try:
+        from security.whitelist_manager import list_entries, add_entry, remove_entry, WhitelistError
+    except ImportError as exc:
+        await update.message.reply_text(f"Whitelist module not available: {exc}")
+        return
+
+    try:
+        if subcommand == "list":
+            text = list_entries()
+
+        elif subcommand == "add":
+            if len(args) < 3:
+                await update.message.reply_text(
+                    "Usage: `/whitelist add <email|@domain> <domain> [confidence] [note]`",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+            key = args[1]
+            domain = args[2]
+            confidence = float(args[3]) if len(args) > 3 else 1.0
+            note = " ".join(args[4:]) if len(args) > 4 else None
+            text = add_entry(key, domain, confidence, note)
+
+        elif subcommand == "remove":
+            if len(args) < 2:
+                await update.message.reply_text(
+                    "Usage: `/whitelist remove <email|@domain>`",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+            text = remove_entry(args[1])
+
+        else:
+            text = f"Unknown subcommand `{subcommand}`.\n\n" + _WHITELIST_HELP
+
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+    except Exception as exc:
+        await update.message.reply_text(f"Error: {exc}")
+
+
 # ---------------------------------------------------------------------------
 # Permission gate callback handler
 # ---------------------------------------------------------------------------
@@ -225,6 +292,7 @@ async def start_polling(agent: Any, session_manager: Any) -> None:
     app.add_handler(CommandHandler("start", _cmd_start))
     app.add_handler(CommandHandler("status", _cmd_status))
     app.add_handler(CommandHandler("session", _cmd_session))
+    app.add_handler(CommandHandler("whitelist", _cmd_whitelist))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
     app.add_handler(CallbackQueryHandler(_handle_callback, pattern=r"^gate:"))
 
