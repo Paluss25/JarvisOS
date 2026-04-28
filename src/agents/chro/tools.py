@@ -89,6 +89,38 @@ async def _pg_query(sql: str, params: list | None = None) -> list[dict]:
         await conn.close()
 
 
+# PII redaction patterns — ordered most-specific first
+_PII_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # Italian codice fiscale: 16 alphanumeric chars (both upper and lower case)
+    (re.compile(r'\b[A-Za-z]{6}\d{2}[A-Za-z]\d{2}[A-Za-z]\d{3}[A-Za-z]\b', re.IGNORECASE), '[CF_REDACTED]'),
+    # IBAN with optional spaces (IT format and generic European)
+    (re.compile(r'\b[A-Z]{2}\d{2}[\s]?[A-Z0-9]{4}[\s]?\d{4}[\s]?\d{4}[\s]?\d{4}[\s]?[A-Z0-9]{0,3}\b'), '[IBAN_REDACTED]'),
+    # IBAN compact (no spaces) — covers long IBANs up to 34 chars
+    (re.compile(r'\b[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}[A-Z0-9]{0,16}\b'), '[IBAN_REDACTED]'),
+    # Italian VAT / P.IVA (with or without "IT" prefix, with or without spaces/dots)
+    (re.compile(r'\b(IT)?\s?P\.?\s?IVA\s*:?\s*\d{11}\b', re.IGNORECASE), '[PIVA_REDACTED]'),
+    # P.IVA bare number (11 digits following typical IT VAT context)
+    (re.compile(r'\bIT\s?\d{11}\b'), '[PIVA_REDACTED]'),
+    # Street address patterns — including abbreviated forms (P.zza, C.so, Via S., c/o)
+    (re.compile(
+        r'\b(Via|Viale|Corso|C\.so|Piazza|P\.zza|Largo|Vicolo|Via\s+S\.|c/o)\s+[A-Za-zÀ-ÿ\s.]+,?\s*\d+\b',
+        re.IGNORECASE,
+    ), '[ADDR_REDACTED]'),
+]
+
+
+def sanitize_pii(text: str, extra_names: list[str] | None = None) -> str:
+    """Redact PII from document text before any LLM call. Purely local — no network."""
+    result = text
+    for pattern, replacement in _PII_PATTERNS:
+        result = pattern.sub(replacement, result)
+    if extra_names:
+        for name in extra_names:
+            if len(name) >= 3:
+                result = re.sub(re.escape(name), '[NAME_REDACTED]', result, flags=re.IGNORECASE)
+    return result
+
+
 def extract_text_from_bytes(content: bytes, filename: str) -> str:
     """Extract text from PDF bytes using pdfplumber, fallback to pytesseract for scanned PDFs."""
     import pdfplumber
@@ -308,6 +340,23 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("Could not extract text — document may be empty or unsupported format.")
         return _text(sanitize_pii(text))
 
+    @sdk_tool(
+        "sanitize_pii",
+        "Redact PII from document text before passing to any LLM. "
+        "Replaces: codice fiscale → [CF_REDACTED], IBAN → [IBAN_REDACTED], "
+        "street addresses → [ADDR_REDACTED], P.IVA → [PIVA_REDACTED]. "
+        "Pass extra_names as a list of name strings to also redact (e.g. ['Mario Rossi']).",
+        {"text": str, "extra_names": {"type": "array", "items": {"type": "string"}, "default": []}},
+    )
+    async def sanitize_pii_tool(args: dict) -> dict:
+        args = _parse_args(args)
+        text = args.get("text", "")
+        extra_names = args.get("extra_names") or []
+        if not text:
+            return _text("No text provided.")
+        redacted = sanitize_pii(text, extra_names=extra_names or None)
+        return _text(redacted)
+
     # ---- A2A send_message ---------------------------------------------------
 
     if redis_a2a is not None:
@@ -327,7 +376,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
     else:
         send_message = None
 
-    all_tools = [daily_log, memory_search, memory_get, query_db, receive_document, extract_text]
+    all_tools = [daily_log, memory_search, memory_get, query_db, receive_document, extract_text, sanitize_pii_tool]
     if send_message is not None:
         all_tools.append(send_message)
 

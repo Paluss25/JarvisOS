@@ -29,3 +29,26 @@ def test_extract_text_from_pdf_bytes():
     pdf_bytes = _minimal_pdf_with_text("Test cedolino")
     result = extract_text_from_bytes(pdf_bytes, filename="test.pdf")
     assert "Test cedolino" in result
+
+
+def test_sanitize_pii_redacts_cf():
+    from agents.chro.tools import sanitize_pii
+    text = "Il dipendente RSSMRA85M01H703N ha ricevuto il cedolino."
+    result = sanitize_pii(text)
+    assert "RSSMRA85M01H703N" not in result
+    assert "[CF_REDACTED]" in result
+
+
+def test_sanitize_pii_redacts_iban():
+    from agents.chro.tools import sanitize_pii
+    text = "Bonifico su IBAN IT60X0542811101000000123456."
+    result = sanitize_pii(text)
+    assert "IT60X0542811101000000123456" not in result
+    assert "[IBAN_REDACTED]" in result
+
+
+def test_sanitize_pii_preserves_numeric_fields():
+    from agents.chro.tools import sanitize_pii
+    text = "Retribuzione netta: 2.450,00 EUR"
+    result = sanitize_pii(text)
+    assert "2.450,00" in result
