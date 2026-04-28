@@ -5,10 +5,13 @@ WORKDIR /app
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ffmpeg \
     nodejs \
     npm \
     openssh-client \
     supervisor \
+    tesseract-ocr \
+    tesseract-ocr-ita \
     && rm -rf /var/lib/apt/lists/*
 
 # Python deps
@@ -17,6 +20,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Claude CLI
 RUN npm install -g @anthropic-ai/claude-code
+
+# Install minimal cfo-cli package
+COPY cfo-cli-pkg /tmp/cfo-cli-pkg
+RUN pip install /tmp/cfo-cli-pkg
 
 # Source code
 COPY src/ ./src/

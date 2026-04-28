@@ -1,0 +1,2 @@
+# test fixtures (not installed in container)
+reportlab>=4.0.0
