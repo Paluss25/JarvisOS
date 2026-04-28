@@ -1,1 +1,0 @@
-"""Email Intelligence Agent agent."""
