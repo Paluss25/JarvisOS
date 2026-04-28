@@ -14,15 +14,7 @@ MARK_BUILTIN_CRONS = [
             "cases routed, any pending escalations, items awaiting human approval, "
             "routing anomalies or security flags detected. Be direct. "
             "After producing the briefing, forward a copy to Timothy (CIO) via: "
-            "send_message(to='cio', message=<your briefing>). "
-            "After producing and sending this briefing, you MUST call report_issue. "
-            "Extract all technical issues detected during this session: failed connections, "
-            "unreachable databases, MCP servers not responding, unexpected restarts, "
-            "elevated error rates, authentication failures. "
-            "Call report_issue(issues=[...]) with all issues found. "
-            "If no technical issues were detected: call report_issue(issues=[]). "
-            "Never skip this call."
-        ),
+            "send_message(to='cio', message=<your briefing>). "        ),
         "session_id": "heartbeat-morning",
         "telegram_notify": True,
         "builtin": True,
@@ -51,6 +43,21 @@ MARK_BUILTIN_CRONS = [
         "telegram_notify": True,
         "builtin": True,
     },
+    {
+        "name": "nightly_dreaming",
+        "schedule": "daily@02:00",
+        "prompt": (
+            "Nightly dreaming. Review your recent activity logs and long-term memory. "
+            "Produce a DREAMS.md that captures: unresolved threads (things started but "
+            "not finished), emerging patterns (recurring themes across days), free "
+            "associations (unexpected connections between topics), and seeds (ideas worth "
+            "developing later). Be interpretive, not just descriptive — surface what the "
+            "logs don't explicitly say. Return ONLY the raw markdown for DREAMS.md."
+        ),
+        "session_id": "heartbeat-dreaming",
+        "telegram_notify": False,
+        "builtin": True,
+    },
 ]
 
 
@@ -61,7 +68,7 @@ def build_chief_of_staff_config(workspace_root: Path = Path("/app/workspace/cos"
         name="ChiefOfStaffAgent",
         port=8008,
         workspace_path=workspace_root,
-        telegram_token_env="TELEGRAM_CHIEF_OF_STAFF_TOKEN",
+        telegram_token_env="TELEGRAM_MARK_TOKEN",
         telegram_chat_id_env="TELEGRAM_ALLOWED_CHAT_ID",
         domains=['chief-of-staff', 'email', 'communications', 'routing', 'coordination', 'triage', 'prioritization'],
         capabilities=['chief-of-staff', 'agent-coordination', 'email-triage', 'routing-decisions', 'escalation-management', 'priority-assessment', 'cross-domain-coordination'],
@@ -86,4 +93,7 @@ def build_chief_of_staff_config(workspace_root: Path = Path("/app/workspace/cos"
             "WebSearch", "WebFetch", "Glob", "Grep",
             "Agent",
         ],
+        voice_enabled=True,
+        voice_language="it",
+        voice_tts_voice="it-IT-ElsaNeural",
     )
