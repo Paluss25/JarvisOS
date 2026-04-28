@@ -88,4 +88,7 @@ def build_chro_config(workspace_root: Path = Path("/app/workspace/chro")) -> Age
             "WebSearch", "WebFetch", "Glob", "Grep",
             "Agent",
         ],
+        voice_enabled=True,
+        voice_language="it",
+        voice_tts_voice="it-IT-ElsaNeural",
     )
