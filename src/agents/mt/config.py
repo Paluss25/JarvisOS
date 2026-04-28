@@ -66,6 +66,7 @@ MT_BUILTIN_CRONS = [
 
 def build_mt_config(workspace_root: Path = Path("/app/workspace/mt")) -> AgentConfig:
     from agents.mt.tools import create_mt_mcp_server
+    from agents.mt.fast_actions import mt_fast_path
 
     return AgentConfig(
         id="mt",
@@ -86,6 +87,7 @@ def build_mt_config(workspace_root: Path = Path("/app/workspace/mt")) -> AgentCo
         env_prefix="MT_",
         memory_backend="filesystem",
         mcp_server_factory=create_mt_mcp_server,
+        a2a_fast_path=mt_fast_path,
         extra_mcp_servers={
             "protonmail-email": {"type": "sse", "url": "http://protonmail-mcp:3000/sse"},
         },

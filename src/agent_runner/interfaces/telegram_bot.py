@@ -23,6 +23,7 @@ Commands:
     /memory        — show or search MEMORY.md
     /note          — append a quick note to today's daily log
     /export        — download the daily log as a markdown file
+    /remind        — set a CalDAV reminder via MT: /remind 2h Walk the dog
 """
 
 import asyncio
@@ -637,6 +638,109 @@ async def _cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
     except Exception as exc:
         await update.message.reply_text(f"Could not export log: {exc}")
+
+
+def _parse_remind_time(token: str) -> datetime.datetime | None:
+    """Parse a time token into a future datetime.
+
+    Formats:
+    - Relative: ``30m``, ``2h``, ``1h30m``  → now + delta
+    - Absolute:  ``09:30``, ``14:00``        → today at HH:MM (tomorrow if past)
+    """
+    now = datetime.datetime.now()
+
+    # Relative — e.g. 30m, 2h, 1h30m
+    m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?", token, re.IGNORECASE)
+    if m and (m.group(1) or m.group(2)):
+        hours = int(m.group(1) or 0)
+        minutes = int(m.group(2) or 0)
+        if hours or minutes:
+            return now + datetime.timedelta(hours=hours, minutes=minutes)
+
+    # Absolute — HH:MM
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", token)
+    if m:
+        h, mn = int(m.group(1)), int(m.group(2))
+        if 0 <= h < 24 and 0 <= mn < 60:
+            target = now.replace(hour=h, minute=mn, second=0, microsecond=0)
+            if target <= now:
+                target += datetime.timedelta(days=1)
+            return target
+
+    return None
+
+
+async def _cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/remind <time> <title> — create a CalDAV event via MT.
+
+    Time formats: 30m | 2h | 1h30m | 09:30 | 14:00
+    Examples:
+      /remind 2h Dentist appointment
+      /remind 09:30 Morning standup
+    """
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+
+    args = list(context.args or [])
+    if len(args) < 2:
+        await update.message.reply_text(
+            "Usage: `/remind <time> <title>`\n"
+            "Examples:\n"
+            "  `/remind 2h Dentist`\n"
+            "  `/remind 09:30 Standup`\n"
+            "  `/remind 1h30m Call Marco`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    time_token = args[0]
+    title = " ".join(args[1:]).strip()
+
+    start = _parse_remind_time(time_token)
+    if start is None:
+        await update.message.reply_text(
+            f"Could not parse time `{time_token}`. Use: `30m`, `2h`, `1h30m`, `09:30`.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    end = start + datetime.timedelta(minutes=30)
+    start_iso = start.isoformat()
+    end_iso = end.isoformat()
+    time_str = start.strftime("%d/%m %H:%M")
+
+    redis_a2a = context.bot_data.get("redis_a2a")
+    if redis_a2a is None:
+        await update.message.reply_text(
+            "Redis A2A not available — cannot route reminder to MT."
+        )
+        return
+
+    try:
+        import json
+        from agent_runner.comms.message import A2AMessage
+
+        payload = json.dumps({
+            "action": "create_reminder",
+            "title": title,
+            "start": start_iso,
+            "end": end_iso,
+        })
+        msg = A2AMessage(
+            from_agent=config.id,
+            to_agent="mt",
+            type="request",
+            payload=payload,
+        )
+        await redis_a2a.publish(msg)
+        await update.message.reply_text(
+            f"📅 Reminder set: *{title}* at {time_str}",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception as exc:
+        logger.error("_cmd_remind: A2A publish failed — %s", exc)
+        await update.message.reply_text(f"Failed to set reminder: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -1715,7 +1819,7 @@ async def _handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # Polling entry point
 # ---------------------------------------------------------------------------
 
-async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
+async def start_polling(agent: Any, session_manager: Any, config: Any, redis_a2a: Any = None) -> None:
     """Start Telegram polling in the current asyncio event loop.
 
     Designed to be launched as an asyncio.Task from the agent lifespan.
@@ -1725,6 +1829,7 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
         agent: The agent instance.
         session_manager: SessionManager for per-chat session IDs.
         config: AgentConfig — provides telegram_token_env, telegram_chat_id_env, name.
+        redis_a2a: Optional RedisA2A instance for routing commands to other agents.
     """
     token = os.environ.get(config.telegram_token_env, "")
     chat_id_str = os.environ.get(config.telegram_chat_id_env, "")
@@ -1745,10 +1850,11 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
         try:
             app = Application.builder().token(token).build()
 
-            # Inject agent, session_manager, and config into bot_data for all handlers
+            # Inject agent, session_manager, config, and redis_a2a into bot_data
             app.bot_data["agent"] = agent
             app.bot_data["session_manager"] = session_manager
             app.bot_data["config"] = config
+            app.bot_data["redis_a2a"] = redis_a2a
 
             # Wire the async permission hook so tools can send approval requests
             async def _send_approval(text: str, request_id: str, _app=app) -> None:
@@ -1823,6 +1929,7 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
             app.add_handler(CommandHandler("memory",        _cmd_memory))
             app.add_handler(CommandHandler("note",          _cmd_note))
             app.add_handler(CommandHandler("export",        _cmd_export))
+            app.add_handler(CommandHandler("remind",        _cmd_remind))
 
             if getattr(config, "id", "").lower() == "dos":
                 app.add_handler(CommandHandler("pesi",        _cmd_pesi))
@@ -1863,6 +1970,7 @@ async def start_polling(agent: Any, session_manager: Any, config: Any) -> None:
                 ("memory",        "Show or search MEMORY.md"),
                 ("note",          "Save a quick note to today's log"),
                 ("export",        "Download daily log as a file"),
+                ("remind",        "Set a CalDAV reminder via MT — /remind 2h Walk the dog"),
             ]
 
             if getattr(config, "id", "").lower() == "dos":

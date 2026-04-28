@@ -172,7 +172,7 @@ def create_app(config: AgentConfig) -> FastAPI:
             try:
                 from agent_runner.interfaces.telegram_bot import start_polling
                 state["telegram_task"] = asyncio.create_task(
-                    start_polling(state["agent"], state["session_manager"], config)
+                    start_polling(state["agent"], state["session_manager"], config, redis_a2a=redis_a2a)
                 )
                 logger.info("%s: Telegram polling started", config.name)
             except Exception as exc:
