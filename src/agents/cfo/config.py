@@ -14,15 +14,7 @@ CFO_BUILTIN_CRONS = [
             "1. Check for any budget deviations flagged in yesterday's log\n"
             "2. If CFO_COST_WORKERS_URL is configured, dispatch cost/ai-cost for yesterday's LLM spend\n"
             "3. Note any anomalies or pending fiscal deadlines\n"
-            "Keep it under 150 words. Flag any HIGH severity items immediately to Jarvis via send_message. "
-            "After producing and sending this briefing, you MUST call report_issue. "
-            "Extract all technical issues detected during this session: failed connections, "
-            "unreachable databases, MCP servers not responding, unexpected restarts, "
-            "elevated error rates, authentication failures. "
-            "Call report_issue(issues=[...]) with all issues found. "
-            "If no technical issues were detected: call report_issue(issues=[]). "
-            "Never skip this call."
-        ),
+            "Keep it under 150 words. Flag any HIGH severity items immediately to Jarvis via send_message. "        ),
         "session_id": "heartbeat-morning",
         "telegram_notify": True,
         "builtin": True,
@@ -63,6 +55,21 @@ CFO_BUILTIN_CRONS = [
         "telegram_notify": False,
         "builtin": True,
     },
+    {
+        "name": "nightly_dreaming",
+        "schedule": "daily@02:00",
+        "prompt": (
+            "Nightly dreaming. Review your recent activity logs and long-term memory. "
+            "Produce a DREAMS.md that captures: unresolved threads (things started but "
+            "not finished), emerging patterns (recurring themes across days), free "
+            "associations (unexpected connections between topics), and seeds (ideas worth "
+            "developing later). Be interpretive, not just descriptive — surface what the "
+            "logs don't explicitly say. Return ONLY the raw markdown for DREAMS.md."
+        ),
+        "session_id": "heartbeat-dreaming",
+        "telegram_notify": False,
+        "builtin": True,
+    },
 ]
 
 
@@ -93,4 +100,7 @@ def build_cfo_config(workspace_root: Path = Path("/app/workspace/cfo")) -> Agent
             "WebSearch", "WebFetch", "Glob", "Grep",
             "Agent",
         ],
+        voice_enabled=True,
+        voice_language="it",
+        voice_tts_voice="it-IT-ElsaNeural",
     )
