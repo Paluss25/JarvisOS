@@ -23,6 +23,7 @@ services:
       - "8809:8009"   # MT agent (Executive Assistant)
       - "8900:8900"   # Platform API (dashboard, management)
       - "8013:8013"   # worker-ops-detector (Grafana webhook + health)
+      - "8014:8014"   # cfo-strategy-workers (heavy on-demand strategy sub-agents)
     env_file: /home/paluss/docker/.env
     environment:
       LOKI_URL: "http://10.10.200.71:3100"

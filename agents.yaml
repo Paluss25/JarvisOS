@@ -210,3 +210,7 @@ workers:
   port: 8012
   module: workers.market.app
   description: Polymarket positions, strategy, trade journal, Kelly sizing
+- id: strategy
+  port: 8014
+  module: workers.strategy.app
+  description: Heavy on-demand strategy sub-agents — investment-research, macro-scenario, correlation-engine, rebalancing-advisor, opportunity-scanner
