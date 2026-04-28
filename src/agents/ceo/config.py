@@ -14,15 +14,7 @@ JARVIS_BUILTIN_CRONS = [
             "Include: key items from yesterday's activity log, any tasks or appointments "
             "for today from HEARTBEAT.md, and anything actionable I should know. "
             "After producing the briefing, forward a copy to Timothy (CIO) via: "
-            "send_message(to='cio', message=<your briefing>). "
-            "After producing and sending this briefing, you MUST call report_issue. "
-            "Extract all technical issues detected during this session: failed connections, "
-            "unreachable databases, MCP servers not responding, unexpected restarts, "
-            "elevated error rates, authentication failures. "
-            "Call report_issue(issues=[...]) with all issues found. "
-            "If no technical issues were detected: call report_issue(issues=[]). "
-            "Never skip this call."
-        ),
+            "send_message(to='cio', message=<your briefing>). "        ),
         "session_id": "heartbeat-morning",
         "telegram_notify": True,
         "builtin": True,
@@ -47,6 +39,21 @@ JARVIS_BUILTIN_CRONS = [
         ),
         "session_id": "heartbeat-weekly",
         "telegram_notify": True,
+        "builtin": True,
+    },
+    {
+        "name": "nightly_dreaming",
+        "schedule": "daily@02:00",
+        "prompt": (
+            "Nightly dreaming. Review your recent activity logs and long-term memory. "
+            "Produce a DREAMS.md that captures: unresolved threads (things started but "
+            "not finished), emerging patterns (recurring themes across days), free "
+            "associations (unexpected connections between topics), and seeds (ideas worth "
+            "developing later). Be interpretive, not just descriptive — surface what the "
+            "logs don't explicitly say. Return ONLY the raw markdown for DREAMS.md."
+        ),
+        "session_id": "heartbeat-dreaming",
+        "telegram_notify": False,
         "builtin": True,
     },
 ]
@@ -75,4 +82,7 @@ def build_jarvis_config(workspace_root: Path = Path("/app/workspace/ceo")) -> Ag
         mcp_server_factory=create_jarvis_mcp_server,
         builtin_crons=JARVIS_BUILTIN_CRONS,
         default_image_caption="Analizza questa immagine nel contesto delle mie attivita.",
+        voice_enabled=True,
+        voice_language="it",
+        voice_tts_voice="it-IT-ElsaNeural",
     )
