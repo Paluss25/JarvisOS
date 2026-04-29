@@ -805,10 +805,10 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
     # ---- Specialist routing tool --------------------------------------------
 
-    _local_send_fn = None
+    _send_message_fn = None
     if redis_a2a is not None:
         from agent_runner.tools.send_message import create_send_message_tool
-        _local_send_fn = create_send_message_tool("chro", redis_a2a)
+        _send_message_fn = create_send_message_tool("chro", redis_a2a)
 
     @sdk_tool(
         "dispatch_to_specialist",
@@ -859,14 +859,14 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             # Explicit INPS escalation — not left to agent reasoning
             if route in ("payroll_intelligence", "director_workforce_admin"):
                 escalations = result.get("escalations", [])
-                if "inps_anomaly_escalate_to_ceo" in escalations and _local_send_fn:
+                if "inps_anomaly_escalate_to_ceo" in escalations and _send_message_fn:
                     if route == "director_workforce_admin":
                         anomaly_list = result.get("payload", {}).get("payroll", {}).get("anomalies", [])
                     else:
                         anomaly_list = result.get("payload", {}).get("anomalies", [])
                     anomaly_text = ", ".join(a for a in anomaly_list if "INPS" in a)
                     try:
-                        await _local_send_fn({
+                        await _send_message_fn({
                             "to": "jarvis",
                             "message": (
                                 f"INPS anomaly detected during payroll analysis: {anomaly_text}. "
