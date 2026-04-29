@@ -82,6 +82,30 @@ CHRO_BUILTIN_CRONS = [
         "telegram_notify": False,
         "builtin": True,
     },
+    {
+        "name": "gdpr_retention_audit",
+        "schedule": "once@2027-01-01@02:00",
+        # NOTE: JarvisOS does not support yearly cron. This fires once on 2027-01-01.
+        # After it fires, re-register it with: once@2028-01-01@02:00, etc.
+        "prompt": (
+            "Annual GDPR retention audit.\n"
+            "Run the following checks and report results to Paluss:\n\n"
+            "1. Payslips older than 5 years:\n"
+            "   SELECT COUNT(*) FROM chro.payslips WHERE period_to < NOW() - INTERVAL '5 years'\n"
+            "   If count > 0: 'GDPR: X payslips older than 5 years. Use delete_employee_data to remove.'\n\n"
+            "2. Audit log entries older than 7 years:\n"
+            "   SELECT COUNT(*) FROM chro.hr_audit_log WHERE ts < NOW() - INTERVAL '7 years'\n"
+            "   If count > 0: 'GDPR: X audit entries older than 7 years. Requires manual DBA action.'\n\n"
+            "3. Expense items older than 10 years:\n"
+            "   SELECT COUNT(*) FROM chro.expense_items WHERE expense_date < NOW() - INTERVAL '10 years'\n"
+            "   If count > 0: 'GDPR: X expense items older than 10 years. Use delete_employee_data to remove.'\n\n"
+            "After sending the summary, remind Paluss to re-register this cron for next year: "
+            "'once@2028-01-01@02:00'. No automated deletions — human confirmation required."
+        ),
+        "session_id": "heartbeat-gdpr-retention",
+        "telegram_notify": True,
+        "builtin": True,
+    },
 ]
 
 
