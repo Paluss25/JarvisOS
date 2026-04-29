@@ -450,6 +450,8 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "  athlete_profile: id, name, date_of_birth, height_cm, sex. "
         "  activity_fit_files, activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT import tables linked by activity_id. "
         "  activity_metrics_enriched: read view with Strava values, FIT values, and canonical_* metrics. "
+        "  daily_fit_files, daily_fit_fields, daily_wellness_records, daily_stress_records, daily_respiration_records, daily_sleep_levels, daily_hrv_values, daily_skin_temp_overnight: Garmin daily fitness FIT import tables linked by date and user_id. "
+        "  daily_fitness_enriched: read view combining recovery_metrics with imported daily FIT wellness/sleep/HRV/skin-temperature data. "
         "Returns rows as JSON. For meal and nutrition data use nutrition_query instead.",
         {"sql": str, "params": {"type": "array", "items": {}, "default": []}},
     )
@@ -876,6 +878,53 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
             logger.error("garmin_fit_import: error — %s", exc)
             return {"content": [{"type": "text", "text": f"FIT import error: {exc}"}], "is_error": True}
 
+    @sdk_tool(
+        "garmin_fitness_import",
+        "Import Garmin daily fitness FIT files from a *_fitness folder. "
+        "Use this for wellness, sleep, HRV, skin temperature, stress and respiration FIT files, "
+        "not for sport activities. Stores raw daily FIT tables and upserts recovery_metrics.",
+        {"folder_path": str, "date": str, "user_id": int},
+    )
+    async def garmin_fitness_import(args: dict) -> dict:
+        args = _parse_args(args)
+        folder_path = (args.get("folder_path") or "").strip()
+        date_text = (args.get("date") or "").strip()
+
+        if not folder_path:
+            return {"content": [{"type": "text", "text": "folder_path is required."}], "is_error": True}
+
+        try:
+            from datetime import date as date_type
+
+            user_id = int(args.get("user_id") or os.environ.get("SPORT_USER_ID", "1"))
+            import_date = date_type.fromisoformat(date_text) if date_text else None
+            if import_date is None:
+                name = Path(folder_path).name
+                import_date = date_type.fromisoformat(name.removesuffix("_fitness"))
+
+            from agents.dos.daily_fitness_import import (
+                import_daily_fitness_data,
+                parse_daily_fitness_folder,
+            )
+
+            parsed = parse_daily_fitness_folder(Path(folder_path), date=import_date)
+
+            import asyncpg
+            url = os.environ.get("SPORT_POSTGRES_URL", "")
+            if not url:
+                return {"content": [{"type": "text", "text": "SPORT_POSTGRES_URL not configured."}], "is_error": True}
+
+            conn = await asyncpg.connect(url)
+            try:
+                result = await import_daily_fitness_data(conn, parsed, user_id=user_id)
+            finally:
+                await conn.close()
+
+            return {"content": [{"type": "text", "text": json.dumps(result, default=str, indent=2)}]}
+        except Exception as exc:
+            logger.error("garmin_fitness_import: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"Fitness import error: {exc}"}], "is_error": True}
+
     # --- Cron tools ---------------------------------------------------------
 
     @sdk_tool(
@@ -993,7 +1042,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         get_activities, get_body_measurements, get_strength_sets, get_weekly_summaries,
         nutrition_query, nutrition_execute, nutrition_ddl,
         run_rules_engine,
-        strava_list_recent, strava_download, garmin_fit_import,
+        strava_list_recent, strava_download, garmin_fit_import, garmin_fitness_import,
         cron_create, cron_list, cron_update, cron_delete, report_issue,
     ]
     if send_message is not None:

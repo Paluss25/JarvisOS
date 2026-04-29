@@ -271,6 +271,8 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "  activity_metrics_enriched: activity_id, user_id, source, type, date, strava_activity_id, fit_file_id, fit_imported_at, strava_* values, fit_* values, canonical_duration_min, canonical_distance_km, canonical_avg_hr, canonical_max_hr, canonical_calories, canonical_avg_cadence, canonical_elevation_gain_m, canonical_avg_power, canonical_max_power, canonical_training_effect, canonical_anaerobic_training_effect. "
         "  activity_fit_files: id, activity_id, user_id, source_path, file_sha256, manufacturer, product, serial_number, time_created, imported_at, raw_summary_json. "
         "  activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT session/lap/record/field data linked by activity_id and fit_file_id. "
+        "  daily_fit_files, daily_fit_fields, daily_wellness_records, daily_stress_records, daily_respiration_records, daily_sleep_levels, daily_hrv_values, daily_skin_temp_overnight: Garmin daily fitness FIT data linked by date and user_id. "
+        "  daily_fitness_enriched: recovery_metrics plus imported Garmin daily wellness/sleep/HRV/skin-temperature data. "
         "Only SELECT statements are permitted — DrHouse has read-only access to both databases.",
         {
             "type": "object",
