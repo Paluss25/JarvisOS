@@ -751,7 +751,6 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
         import asyncpg
         import datetime as _dt
-        import uuid as _uuid
 
         def _to_date(val):
             if val is None:
@@ -763,9 +762,9 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         def _to_uuid(val):
             if val is None:
                 return None
-            if isinstance(val, _uuid.UUID):
+            if isinstance(val, uuid.UUID):
                 return val
-            return _uuid.UUID(str(val))
+            return uuid.UUID(str(val))
 
         url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
         if not url:
