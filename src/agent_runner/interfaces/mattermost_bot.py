@@ -55,10 +55,13 @@ def _get_or_create_session(user_id: str, session_manager: Any) -> str:
 async def start_mattermost(agent: Any, session_manager: Any, config: Any) -> None:
     """Start Mattermost WebSocket listener. Runs until the asyncio Task is cancelled.
 
+    Uses Driver (sync REST) + Websocket (async) from mattermostdriver 7.x.
+    Sync REST calls are run via asyncio.to_thread to avoid blocking the event loop.
     Retries on connection errors with exponential backoff (5s → 60s).
     """
     try:
-        from mattermostdriver import AsyncDriver
+        from mattermostdriver import Driver
+        from mattermostdriver.websocket import Websocket
     except ImportError:
         raise ImportError(
             "mattermost: mattermostdriver not installed — add mattermostdriver>=7.3.0 to requirements.txt"
@@ -78,6 +81,20 @@ async def start_mattermost(agent: Any, session_manager: Any, config: Any) -> Non
     port = parsed.port or (443 if (parsed.scheme or "https") == "https" else 80)
     scheme = parsed.scheme or "https"
 
+    driver_options = {
+        "url": hostname,
+        "token": token,
+        "port": port,
+        "scheme": scheme,
+        "verify": True,
+        "debug": False,
+        "timeout": 30,
+        "keepalive": True,
+        "keepalive_delay": 30,
+        "websocket_kw_args": None,
+        "basepath": "/api/v4",
+    }
+
     mode = getattr(config, "telegram_streaming_mode", "partial")
     retry_delay = 5
     attempt = 0
@@ -85,16 +102,10 @@ async def start_mattermost(agent: Any, session_manager: Any, config: Any) -> Non
     while True:
         driver: Any | None = None
         try:
-            driver = AsyncDriver({
-                "url": hostname,
-                "token": token,
-                "port": port,
-                "scheme": scheme,
-                "verify": True,
-            })
+            driver = Driver(driver_options)
 
-            await driver.login()
-            me = await driver.users.get_user("me")
+            await asyncio.to_thread(driver.login)
+            me = await asyncio.to_thread(driver.users.get_user, "me")
             my_user_id: str = me["id"]
             logger.info(
                 "mattermost: logged in as %s for %s (channel=%s)",
@@ -140,14 +151,15 @@ async def start_mattermost(agent: Any, session_manager: Any, config: Any) -> Non
                 )
 
             logger.info("mattermost: starting WebSocket for %s", config.name)
-            await driver.init_websocket(handle_event)
+            ws = Websocket(driver_options, token)
+            await ws.connect(handle_event)
             break  # clean exit — reset backoff
 
         except asyncio.CancelledError:
             logger.info("mattermost: WebSocket stopped for %s", config.name)
             if driver:
                 try:
-                    await driver.logout()
+                    await asyncio.to_thread(driver.logout)
                 except Exception:
                     pass
             raise
@@ -159,7 +171,7 @@ async def start_mattermost(agent: Any, session_manager: Any, config: Any) -> Non
             )
             if driver:
                 try:
-                    await driver.logout()
+                    await asyncio.to_thread(driver.logout)
                 except Exception:
                     pass
             await asyncio.sleep(retry_delay)
@@ -185,10 +197,10 @@ async def _process(
     _user_generations[sender_id] = my_gen
 
     try:
-        placeholder_post = await driver.posts.create_post({
-            "channel_id": channel_id,
-            "message": "⠋ _thinking…_",
-        })
+        placeholder_post = await asyncio.to_thread(
+            driver.posts.create_post,
+            {"channel_id": channel_id, "message": "⠋ _thinking…_"},
+        )
         placeholder_id: str = placeholder_post["id"]
     except Exception as exc:
         logger.error("mattermost: could not create placeholder post — %s", exc)
@@ -200,9 +212,11 @@ async def _process(
     async def _update(content: str) -> None:
         nonlocal last_edit
         try:
-            await driver.posts.patch_post(placeholder_id, options={
-                "message": (content[:16000] or "⠋ _thinking…_"),
-            })
+            await asyncio.to_thread(
+                driver.posts.patch_post,
+                placeholder_id,
+                {"message": (content[:16000] or "⠋ _thinking…_")},
+            )
             last_edit = time.monotonic()
         except Exception as exc:
             logger.warning("mattermost: patch_post failed — %s", exc)

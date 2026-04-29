@@ -34,6 +34,10 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://10.10.200.139:4317"
       OTEL_SERVICE_NAME: "jarvios-platform"
       MEMORY_BOX_URL: "http://10.10.200.139:8000"
+      MATTERMOST_URL: "https://mattermost.prova9x.com"
+      CEO_MATTERMOST_CHANNEL_ID: "mziuom3nxpbs8rbgsy99u9686a"
+      COH_MATTERMOST_CHANNEL_ID: "uc6ctusnrpf1ifi1cxb3eej5jo"
+      MT_MATTERMOST_CHANNEL_ID: "3ejph99crtrjtk5eeuc46fe4oa"
     labels:
       # Jarvis API — jarvis.prova9x.com
       - "traefik.enable=true"
