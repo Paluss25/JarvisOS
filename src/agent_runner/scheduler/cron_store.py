@@ -99,14 +99,19 @@ class CronEntry:
 # Schedule parsing
 # ---------------------------------------------------------------------------
 
+_QUARTERLY_MONTHS = {1, 4, 7, 10}  # Jan, Apr, Jul, Oct — quarter starts
+
+
 def parse_schedule(schedule: str) -> tuple[str, dict]:
     """Parse a schedule string. Returns (kind, params) or raises ValueError.
 
     kinds and params:
-        "daily"    → {"hour": int, "minute": int}
-        "weekly"   → {"dow": int, "hour": int, "minute": int}
-        "once"     → {"date": datetime.date, "hour": int, "minute": int}
-        "interval" → {"minutes": int}   e.g. interval@15m fires every 15 minutes (allowed: 5, 15, 30, 60)
+        "daily"     → {"hour": int, "minute": int}
+        "weekly"    → {"dow": int, "hour": int, "minute": int}
+        "monthly"   → {"day": int (1-28), "hour": int, "minute": int}
+        "quarterly" → {"day": int (1-28), "hour": int, "minute": int}  fires Jan/Apr/Jul/Oct
+        "once"      → {"date": datetime.date, "hour": int, "minute": int}
+        "interval"  → {"minutes": int}   e.g. interval@15m (allowed: 5, 15, 30, 60)
     """
     parts = schedule.strip().split("@")
     kind = parts[0].lower()
@@ -123,6 +128,19 @@ def parse_schedule(schedule: str) -> tuple[str, dict]:
             )
         h, m = _parse_hhmm(parts[2])
         return "weekly", {"dow": _DOW_MAP[dow_str], "hour": h, "minute": m}
+
+    if kind in ("monthly", "quarterly") and len(parts) == 3:
+        try:
+            day = int(parts[1])
+        except ValueError:
+            raise ValueError(f"Invalid day-of-month '{parts[1]}'. Use 1-28.")
+        if not (1 <= day <= 28):
+            raise ValueError(
+                f"Day-of-month {day} out of range (1-28). "
+                "Use 28 max so every month has the day."
+            )
+        h, m = _parse_hhmm(parts[2])
+        return kind, {"day": day, "hour": h, "minute": m}
 
     if kind == "once" and len(parts) == 3:
         from datetime import date as _date
@@ -149,8 +167,9 @@ def parse_schedule(schedule: str) -> tuple[str, dict]:
         return "interval", {"minutes": minutes}
 
     raise ValueError(
-        f"Invalid schedule '{schedule}'. "
-        "Valid: daily@HH:MM | weekly@DOW@HH:MM | once@YYYY-MM-DD@HH:MM | interval@Nm"
+        f"Invalid schedule '{schedule}'. Valid: "
+        "daily@HH:MM | weekly@DOW@HH:MM | monthly@DD@HH:MM | "
+        "quarterly@DD@HH:MM | once@YYYY-MM-DD@HH:MM | interval@Nm"
     )
 
 
@@ -216,6 +235,30 @@ def is_due(entry: CronEntry, now: datetime) -> bool:
                 return False  # already ran this ISO week
         return True
 
+    if kind == "monthly":
+        if (now.day != params["day"]
+                or now.hour != h
+                or not _in_window(now.minute)):
+            return False
+        if entry.last_run:
+            lr = datetime.fromisoformat(entry.last_run).astimezone(_TZ)
+            if lr.year == now.year and lr.month == now.month:
+                return False  # already ran this calendar month
+        return True
+
+    if kind == "quarterly":
+        if (now.month not in _QUARTERLY_MONTHS
+                or now.day != params["day"]
+                or now.hour != h
+                or not _in_window(now.minute)):
+            return False
+        if entry.last_run:
+            lr = datetime.fromisoformat(entry.last_run).astimezone(_TZ)
+            # Same calendar quarter (Jan/Apr/Jul/Oct anchor month) AND same year.
+            if lr.year == now.year and ((lr.month - 1) // 3) == ((now.month - 1) // 3):
+                return False
+        return True
+
     if kind == "once":
         if (now.date() != params["date"]
                 or now.hour != h
@@ -264,6 +307,30 @@ def was_missed(entry: CronEntry, now: datetime) -> bool:
             hour=h, minute=m_target, second=0, microsecond=0
         )
         if expected > now or (now - expected) > cutoff:
+            return False
+        if entry.last_run:
+            lr = datetime.fromisoformat(entry.last_run).astimezone(_TZ)
+            if lr >= expected:
+                return False
+        return True
+
+    if kind in ("monthly", "quarterly"):
+        target_day = params["day"]
+        # Latest occurrence of (target_day, h:m) at or before `now`.
+        if now.day < target_day:
+            # This month's target hasn't arrived yet; look back at last month's.
+            if now.month == 1:
+                expected = datetime(now.year - 1, 12, target_day, h, m_target, tzinfo=_TZ)
+            else:
+                expected = datetime(now.year, now.month - 1, target_day, h, m_target, tzinfo=_TZ)
+        else:
+            expected = datetime(now.year, now.month, target_day, h, m_target, tzinfo=_TZ)
+            if expected > now:
+                # Target time is later today — not missed yet.
+                return False
+        if kind == "quarterly" and expected.month not in _QUARTERLY_MONTHS:
+            return False
+        if (now - expected) > cutoff:
             return False
         if entry.last_run:
             lr = datetime.fromisoformat(entry.last_run).astimezone(_TZ)
