@@ -100,6 +100,23 @@ async def fetch_research_fundamentals(
         return response.json()
 
 
+async def fetch_correlation_matrix(*, recompute: bool = False, window_days: int = 90, timeout: float = 60.0) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        if recompute:
+            response = await client.post(
+                f"{sidecar_url()}/analytics/correlation/recompute",
+                params={"window": window_days},
+                headers=auth_headers(),
+            )
+        else:
+            response = await client.get(
+                f"{sidecar_url()}/analytics/correlation",
+                headers=auth_headers(),
+            )
+        response.raise_for_status()
+        return response.json()
+
+
 async def fetch_portfolio_snapshot(*, timeout: float = 30.0) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.get(
