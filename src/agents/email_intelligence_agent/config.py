@@ -1,8 +1,61 @@
 """Email Intelligence Agent configuration."""
 
+import asyncio
+import logging
 from pathlib import Path
 
 from agent_runner.config import AgentConfig
+
+logger = logging.getLogger(__name__)
+
+
+async def _emailintel_a2a_fast_path(payload: dict) -> dict | None:
+    """Bypass LLM for structured process_email A2A calls from COS."""
+    if payload.get("action") != "process_email":
+        return None
+    try:
+        import os
+        from pathlib import Path
+        from agents.email_intelligence_agent.tools import (
+            _run_security_pipeline,
+            _compute_action_hint,
+            _write_to_digest,
+        )
+        result = await asyncio.to_thread(
+            _run_security_pipeline,
+            email_id=payload.get("email_id", ""),
+            account=payload.get("account", ""),
+            subject=payload.get("subject", "(no subject)"),
+            body=payload.get("body", "(empty body)"),
+            sender=payload.get("sender", ""),
+            received_at=payload.get("received_at", ""),
+        )
+        if not result.get("blocked") and result.get("policy", {}).get("allow"):
+            digest_path = Path(os.environ.get("MT_DIGEST_PATH", "/app/shared/mt_digest.json"))
+            try:
+                _write_to_digest(
+                    {**result, "mt_action_hint": _compute_action_hint(result)},
+                    digest_path,
+                )
+            except Exception as digest_exc:
+                logger.warning("emailintel fast_path: digest write failed — %s", digest_exc)
+        logger.info("emailintel fast_path: processed email_id=%s", payload.get("email_id"))
+        return result
+    except Exception as exc:
+        logger.error("emailintel fast_path error: %s", exc)
+        # Fail closed — do not silently fall through to the LLM for a
+        # safety-critical structured email-processing request.
+        return {
+            "blocked": True,
+            "email_id": payload.get("email_id", ""),
+            "account": payload.get("account", ""),
+            "policy": {
+                "decision": "error",
+                "allow": False,
+                "reasons": [f"fast_path_exception: {exc}"],
+                "constraints": [],
+            },
+        }
 
 
 EMAIL_INTELLIGENCE_BUILTIN_CRONS = [
@@ -28,13 +81,6 @@ EMAIL_INTELLIGENCE_BUILTIN_CRONS = [
             "After processing, send a summary to cos via send_message: "
             "how many emails processed, breakdown by domain, any quarantined items, "
             "any high-risk items. Keep summary under 150 words. "
-            "After producing and sending this briefing, you MUST call report_issue. "
-            "Extract all technical issues detected during this session: failed connections, "
-            "unreachable databases, MCP servers not responding, unexpected restarts, "
-            "elevated error rates, authentication failures. "
-            "Call report_issue(issues=[...]) with all issues found. "
-            "If no technical issues were detected: call report_issue(issues=[]). "
-            "Never skip this call."
         ),
         "session_id": "heartbeat-morning",
         "telegram_notify": False,
@@ -64,11 +110,26 @@ EMAIL_INTELLIGENCE_BUILTIN_CRONS = [
         "telegram_notify": False,
         "builtin": True,
     },
+    {
+        "name": "nightly_dreaming",
+        "schedule": "daily@02:00",
+        "prompt": (
+            "Nightly dreaming. Review your recent activity logs and long-term memory. "
+            "Produce a DREAMS.md that captures: unresolved threads (things started but "
+            "not finished), emerging patterns (recurring themes across days), free "
+            "associations (unexpected connections between topics), and seeds (ideas worth "
+            "developing later). Be interpretive, not just descriptive — surface what the "
+            "logs don't explicitly say. Return ONLY the raw markdown for DREAMS.md."
+        ),
+        "session_id": "heartbeat-dreaming",
+        "telegram_notify": False,
+        "builtin": True,
+    },
 ]
 
 
 def build_email_intelligence_config(
-    workspace_root: Path = Path("/app/workspace/email_intelligence"),
+    workspace_root: Path = Path("/app/workspace/email_intelligence_agent"),
 ) -> AgentConfig:
     from agents.email_intelligence_agent.tools import create_email_intelligence_mcp_server
     return AgentConfig(
@@ -96,6 +157,7 @@ def build_email_intelligence_config(
             "gmx-email": {"type": "sse", "url": "http://gmx-mcp:3001/sse"},
         },
         builtin_crons=EMAIL_INTELLIGENCE_BUILTIN_CRONS,
+        a2a_fast_path=_emailintel_a2a_fast_path,
         allowed_tools=[
             "Bash", "Read", "Write", "Edit",
             "WebSearch", "WebFetch", "Glob", "Grep",

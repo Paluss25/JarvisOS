@@ -1,7 +1,11 @@
 """Layer 3 — Classifier: domain, sensitivity, risk, and priority classification."""
 
+import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
 
 
 @dataclass
@@ -61,8 +65,76 @@ class Classifier:
     # Domains that boost priority to "high" (if not already urgent)
     _HIGH_PRIORITY_DOMAINS = frozenset({"finance", "legal", "security"})
 
-    def classify(self, subject: str, body: str) -> ClassificationResult:
+    _WHITELIST_PATH = Path(__file__).parent.parent / "config" / "sender-whitelist.yaml"
+    _WHITELIST_RELOAD_INTERVAL = 30  # seconds between mtime checks
+
+    def __init__(self) -> None:
+        self._whitelist_data: Dict[str, Any] = {}
+        self._whitelist_mtime: float = 0.0
+        self._whitelist_checked_at: float = 0.0
+
+    def _load_whitelist(self) -> None:
+        now = time.monotonic()
+        if now - self._whitelist_checked_at < self._WHITELIST_RELOAD_INTERVAL:
+            return
+        self._whitelist_checked_at = now
+        try:
+            mtime = self._WHITELIST_PATH.stat().st_mtime
+            if mtime != self._whitelist_mtime:
+                with self._WHITELIST_PATH.open() as fh:
+                    data = yaml.safe_load(fh) or {}
+                self._whitelist_data = data
+                self._whitelist_mtime = mtime
+        except FileNotFoundError:
+            self._whitelist_data = {}
+
+    def _whitelist_lookup(self, sender: str) -> Optional[Dict[str, Any]]:
+        """Return override dict if sender matches, else None."""
+        self._load_whitelist()
+        sender = sender.strip().lower()
+
+        email_overrides: Dict[str, Any] = self._whitelist_data.get("email_overrides") or {}
+        if sender in email_overrides:
+            return email_overrides[sender]
+
+        domain_overrides: Dict[str, Any] = self._whitelist_data.get("domain_overrides") or {}
+        for pattern, entry in domain_overrides.items():
+            if sender.endswith(pattern.lower()):
+                return entry
+
+        return None
+
+    def classify(self, subject: str, body: str, sender: Optional[str] = None) -> ClassificationResult:
         text = (subject + " " + body).lower()
+
+        # ------------------------------------------------------------------
+        # 0. Sender whitelist (takes precedence over keyword scoring)
+        # ------------------------------------------------------------------
+        if sender:
+            override = self._whitelist_lookup(sender)
+            if override:
+                forced_domain: str = override.get("domain", "general")
+                forced_confidence: float = float(override.get("confidence", 1.0))
+                sensitivity = "public"
+                for level in ("critical", "sensitive", "internal"):
+                    for kw in self._SENSITIVITY_KEYWORDS[level]:
+                        if kw in text:
+                            sensitivity = level
+                            break
+                    if sensitivity != "public":
+                        break
+                _risk_map_wl = {"critical": "critical", "sensitive": "high", "internal": "medium", "public": "low"}
+                priority_wl = "urgent" if sensitivity == "critical" else (
+                    "high" if sensitivity == "sensitive" or forced_domain in self._HIGH_PRIORITY_DOMAINS else "normal"
+                )
+                return ClassificationResult(
+                    primary_domain=forced_domain,
+                    secondary_domain=None,
+                    sensitivity=sensitivity,
+                    risk_level=_risk_map_wl[sensitivity],
+                    priority=priority_wl,
+                    confidence=forced_confidence,
+                )
 
         # ------------------------------------------------------------------
         # 1. Domain scoring

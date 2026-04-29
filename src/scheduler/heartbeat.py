@@ -80,6 +80,10 @@ class HeartbeatScheduler:
         """Fire *task* at most once per calendar day."""
         if self._last_run.get(name) == today:
             return
+        # Skip while agent is consuming the SDK stream — see is_busy doc.
+        if getattr(self._agent, "is_busy", False):
+            logger.info("heartbeat: skipping '%s' (agent busy) — will retry next tick", name)
+            return
         self._last_run[name] = today
         logger.info("heartbeat: triggering '%s'", name)
         try:

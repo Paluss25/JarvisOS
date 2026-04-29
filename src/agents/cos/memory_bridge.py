@@ -16,7 +16,7 @@ MEMORY_BOX_URL = os.environ.get("MEMORY_BOX_URL", "http://10.10.200.139:8000")
 
 async def write_memory(
     text: str,
-    user_id: str = "chief_of_staff",
+    user_id: str = "cos",
     entities: list[dict] | None = None,
     relations: list[dict] | None = None,
 ):
@@ -24,7 +24,7 @@ async def write_memory(
     payload = {
         "text": text,
         "user_id": user_id,
-        "session_id": f"chief_of_staff-{__import__('datetime').date.today().isoformat()}",
+        "session_id": f"cos-{__import__('datetime').date.today().isoformat()}",
         "entities": entities or [],
         "relations": relations or [],
     }

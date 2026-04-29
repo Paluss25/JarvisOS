@@ -4,7 +4,7 @@ Runs two concurrent tasks in the same event loop:
   1. An aiohttp HTTP server on DETECTOR_PORT (default 8013) that accepts
      Grafana webhook alerts at POST /alert.
   2. A background poll loop that queries Loki every DETECTOR_POLL_INTERVAL
-     seconds and publishes matching patterns to Redis channel a2a:timothy.
+     seconds and publishes matching patterns to Redis channel a2a:cio.
 
 Redis payload format matches A2AMessage (agent_runner.comms.message):
   {from_agent, to_agent, type, payload, id, correlation_id, timestamp}
@@ -61,7 +61,7 @@ def _build_a2a_message(pattern_id: str, severity: str,
     })
     msg = {
         "from_agent": "ops-detector",
-        "to_agent": "timothy",
+        "to_agent": "cio",
         "type": "request",
         "payload": inner,
         "id": str(uuid.uuid4()),
@@ -73,7 +73,7 @@ def _build_a2a_message(pattern_id: str, severity: str,
 
 async def _publish(pattern_id: str, severity: str,
                    matched_lines: list[str], runbook: str) -> None:
-    """Publish alert to Redis channel a2a:timothy."""
+    """Publish alert to Redis channel a2a:cio."""
     cfg = _redis_kwargs()
     if not cfg["url"]:
         logger.warning("detector: REDIS_URL not configured — skipping publish")
@@ -83,7 +83,7 @@ async def _publish(pattern_id: str, severity: str,
         r = await aioredis.from_url(cfg["url"], **cfg["kwargs"])
         try:
             payload = _build_a2a_message(pattern_id, severity, matched_lines, runbook)
-            await r.publish("a2a:timothy", payload)
+            await r.publish("a2a:cio", payload)
             logger.info(
                 "detector: published alert pattern_id=%s (%d lines)",
                 pattern_id, len(matched_lines),

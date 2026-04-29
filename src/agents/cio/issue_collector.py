@@ -1,169 +1,224 @@
 # agents/cio/issue_collector.py
-"""IssueCollector — reads shared volume reports and produces deduplicated ConsolidatedIssues.
+"""LokiIssueCollector — detects issues by querying Loki and Prometheus.
 
-Reads /app/workspace/shared/issues/{today}/*.json (written by each agent's report_issue tool).
-Agents that did NOT write a file are flagged as silent → high-severity issue.
-Deduplicates by (component, issue_type) — takes highest severity across reporters.
-Returns list sorted: critical first, then high, then medium.
+Sources:
+  - Prometheus: node_exporter `up` metric → host-level infrastructure health
+  - Prometheus: cadvisor `up` metric → container daemon health per host
+  - Loki: agent memory logs → silent-agent detection (no entries today)
+  - Loki: aipal-runner container logs → agent-side error patterns
+
+Returns the same (ConsolidatedIssue, medium_descriptions) tuple as the previous
+file-based collector so that run_issue_collection.py needs no changes.
 """
 from __future__ import annotations
 
-import json
 import logging
+import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 
-from agent_runner.issues.schema import IssueReport, IssueSeverity, IssueType, severity_rank
+from agents.cio.loki_client import LokiClient, PrometheusClient
 
 logger = logging.getLogger(__name__)
 
-EXPECTED_REPORTERS = [
-    "ceo", "cos", "email_intelligence_agent", "cfo", "coh", "dos",
+# Hosts scraped by node_exporter (strip port at query time)
+EXPECTED_NODE_EXPORTER = [
+    "10.10.200.50:9100",
+    "10.10.200.51:9100",
+    "10.10.200.60:9100",
+    "10.10.200.61:9100",
+    "10.10.200.62:9100",
+    "10.10.200.139:9100",
+    "10.10.200.71:9100",
 ]
+
+# Agents expected to log activity every morning
+EXPECTED_AGENTS = ["ceo", "cos", "email_intelligence_agent", "cfo", "coh", "dos"]
+
+# Lookback for "has this agent logged anything today?" (8 hours)
+AGENT_SILENCE_LOOKBACK_S = 8 * 3600
+
+# Lookback for error pattern scan (6 hours)
+ERROR_SCAN_LOOKBACK_S = 6 * 3600
+
+# Minimum error occurrences before raising a medium issue
+ERROR_MIN_COUNT = 3
+
+
+# ── Data classes (same as before so callers are unchanged) ────────────────────
+
+IssueType = str
+IssueSeverity = str
+
+_SEVERITY_RANK: dict[str, int] = {"critical": 0, "high": 1, "medium": 2}
+
+
+def severity_rank(s: IssueSeverity) -> int:
+    return _SEVERITY_RANK.get(s, 99)
 
 
 @dataclass
 class ConsolidatedIssue:
     component: str
-    severity: IssueSeverity         # highest severity across all reporters
-    reporters: list[str]            # agent IDs that reported this component
+    severity: IssueSeverity
+    reporters: list[str]
     issue_type: IssueType
-    description: str                # merged description (first reporter's + count suffix)
-    suggested_action: str           # action string for RemediationEngine
+    description: str
+    suggested_action: str
 
 
-class IssueCollector:
-    def __init__(
-        self,
-        shared_issues_path: Path = Path("/app/workspace/shared/issues"),
-    ) -> None:
-        self._shared_path = shared_issues_path
+# ── Collector ─────────────────────────────────────────────────────────────────
 
-    def collect(self, date_str: str | None = None) -> tuple[list[ConsolidatedIssue], list[str]]:
-        """Collect, deduplicate, and sort issues for date_str (default: today).
+class LokiIssueCollector:
+    def __init__(self) -> None:
+        self._loki = LokiClient()
+        self._prom = PrometheusClient()
+
+    async def collect(
+        self, date_str: str | None = None
+    ) -> tuple[list[ConsolidatedIssue], list[str]]:
+        """Collect, deduplicate, and sort issues for *date_str* (default: today).
 
         Returns:
-            (consolidated_issues, medium_descriptions)
-            consolidated_issues — critical/high issues sorted by severity
-            medium_descriptions — plain strings for medium issues (log-only)
+            (hitl_issues, medium_descriptions)
+            hitl_issues           — critical/high ConsolidatedIssues sorted by severity
+            medium_descriptions   — plain strings for medium issues (log-only)
         """
         if date_str is None:
             date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        date_dir = self._shared_path / date_str
-        reports: list[IssueReport] = []
-        found_agents: set[str] = set()
+        raw: list[ConsolidatedIssue] = []
+        raw += await self._check_node_exporter()
+        raw += await self._check_cadvisor()
+        raw += await self._check_silent_agents()
+        raw += await self._check_agent_errors()
 
-        if date_dir.exists():
-            for json_path in date_dir.glob("*.json"):
-                agent_id = json_path.stem
-                try:
-                    data = json.loads(json_path.read_text(encoding="utf-8"))
-                    report = IssueReport.from_dict(data)
-                    reports.append(report)
-                    found_agents.add(agent_id)
-                except Exception as exc:
-                    logger.warning("issue_collector: failed to read %s — %s", json_path, exc)
-
-        # Silent agents: did not write a report file
-        for agent_id in EXPECTED_REPORTERS:
-            if agent_id not in found_agents:
-                logger.warning("issue_collector: no report from agent '%s' — flagging as silent", agent_id)
-                from agent_runner.issues.schema import Issue
-                silent_report = IssueReport(
-                    agent_id=agent_id,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    issues=[
-                        Issue(
-                            type="connection_error",
-                            severity="high",
-                            component=f"{agent_id}-agent",
-                            description=f"No issue report received from {agent_id} — agent may be down",
-                        )
-                    ],
-                )
-                reports.append(silent_report)
-
-        # Deduplicate by (component, issue_type)
+        # Deduplicate by (component, issue_type) — keep highest severity
         dedup: dict[tuple[str, str], ConsolidatedIssue] = {}
-
-        for report in reports:
-            for issue in report.issues:
-                key = (issue.component, issue.type)
-                if key not in dedup:
-                    dedup[key] = ConsolidatedIssue(
-                        component=issue.component,
-                        severity=issue.severity,
-                        reporters=[report.agent_id],
-                        issue_type=issue.type,
-                        description=issue.description,
-                        suggested_action=self._suggest_action(issue.component, issue.type),
-                    )
-                else:
-                    ci = dedup[key]
-                    if report.agent_id not in ci.reporters:
-                        ci.reporters.append(report.agent_id)
-                    # Escalate severity if higher
-                    if severity_rank(issue.severity) < severity_rank(ci.severity):
-                        ci.severity = issue.severity
-                    # Merge description if different
-                    if issue.description and issue.description not in ci.description:
-                        ci.description = ci.description + "; " + issue.description
+        for ci in raw:
+            key = (ci.component, ci.issue_type)
+            if key not in dedup:
+                dedup[key] = ci
+            else:
+                existing = dedup[key]
+                if severity_rank(ci.severity) < severity_rank(existing.severity):
+                    existing.severity = ci.severity
+                for r in ci.reporters:
+                    if r not in existing.reporters:
+                        existing.reporters.append(r)
 
         all_issues = list(dedup.values())
-
-        # Split medium from critical/high
-        hitl_issues = [i for i in all_issues if i.severity in ("critical", "high")]
-        medium_issues = [i for i in all_issues if i.severity == "medium"]
-
-        # Sort hitl by severity (critical first)
-        hitl_issues.sort(key=lambda i: severity_rank(i.severity))
-
-        medium_descriptions = [
-            f"• {i.component}: {i.description[:100]} [reported by: {', '.join(i.reporters)}]"
-            for i in medium_issues
+        hitl = sorted(
+            [i for i in all_issues if i.severity in ("critical", "high")],
+            key=lambda i: severity_rank(i.severity),
+        )
+        medium = [
+            f"• {i.component}: {i.description[:100]} [{i.issue_type}]"
+            for i in all_issues
+            if i.severity == "medium"
         ]
+        return hitl, medium
 
-        return hitl_issues, medium_descriptions
+    # ── Private helpers ───────────────────────────────────────────────────────
 
-    def _suggest_action(self, component: str, issue_type: IssueType) -> str:
-        """Produce a default suggested_action string based on component name and issue type.
+    async def _check_node_exporter(self) -> list[ConsolidatedIssue]:
+        """Flag hosts where node_exporter is down (Prometheus up=0)."""
+        results = await self._prom.query('up{job="node_exporter"}')
+        down = []
+        seen = {r["metric"].get("instance") for r in results if float(r["value"][1]) == 1.0}
+        for expected in EXPECTED_NODE_EXPORTER:
+            if expected not in seen:
+                ip = expected.split(":")[0]
+                down.append(ConsolidatedIssue(
+                    component=ip,
+                    severity="high",
+                    reporters=["cio"],
+                    issue_type="connection_error",
+                    description=f"node_exporter unreachable on {ip} — host may be down",
+                    suggested_action=f"tcp_check:{ip}:9100",
+                ))
+        return down
 
-        Action strings are interpreted by RemediationEngine:
-          docker_action:restart:{name}     — restart a Docker container
-          supervisorctl:restart:{process}  — restart a supervisord process
-          infra_verify:{url}               — HTTP health check (diagnostic only)
-          tcp_check:{host}:{port}          — TCP connectivity check
-          pg_check:{db}                    — PostgreSQL SELECT 1 check
-          manual:{description}             — no automation; prompt user
-        """
-        c = component.lower()
+    async def _check_cadvisor(self) -> list[ConsolidatedIssue]:
+        """Flag hosts where cadvisor is down (Prometheus up=0)."""
+        results = await self._prom.query('up{job="cadvisor"}')
+        issues = []
+        seen = {r["metric"].get("instance") for r in results if float(r["value"][1]) == 1.0}
+        for expected in EXPECTED_NODE_EXPORTER:
+            cadvisor_instance = expected.replace(":9100", ":9080")
+            if cadvisor_instance not in seen:
+                ip = expected.split(":")[0]
+                issues.append(ConsolidatedIssue(
+                    component=f"{ip}-cadvisor",
+                    severity="medium",
+                    reporters=["cio"],
+                    issue_type="mcp_unreachable",
+                    description=f"cadvisor unreachable on {ip}",
+                    suggested_action=f"tcp_check:{ip}:9080",
+                ))
+        return issues
 
-        # Well-known Docker containers
-        docker_containers = {
-            "redis": "jarvios-redis",
-            "postgres": "jarvios-postgres",
-            "postgres-shared": "postgres-shared",
-            "protonmail-mcp": "protonmail-mcp",
-        }
-        for keyword, container_name in docker_containers.items():
-            if keyword in c:
-                if issue_type in ("connection_error", "mcp_unreachable", "restart_detected"):
-                    return f"docker_action:restart:{container_name}"
+    async def _check_silent_agents(self) -> list[ConsolidatedIssue]:
+        """Flag agents that have no Loki entries in the last AGENT_SILENCE_LOOKBACK_S."""
+        issues = []
+        for agent_id in EXPECTED_AGENTS:
+            query = f'{{job="jarvios-agent-memory", agent="{agent_id}"}}'
+            count = await self._loki.count_entries(query, AGENT_SILENCE_LOOKBACK_S)
+            if count == 0:
+                issues.append(ConsolidatedIssue(
+                    component=f"{agent_id}-agent",
+                    severity="high",
+                    reporters=["cio"],
+                    issue_type="connection_error",
+                    description=f"No log activity from {agent_id} in the last 8h — agent may be silent or down",
+                    suggested_action=f"supervisorctl:restart:{agent_id}",
+                ))
+        return issues
 
-        # Agent processes in supervisord (agent-<id>)
-        if c.endswith("-agent") or (issue_type == "connection_error" and "agent" in c):
-            process = c.replace("-agent", "")
-            return f"supervisorctl:restart:{process}"
+    async def _check_agent_errors(self) -> list[ConsolidatedIssue]:
+        """Scan aipal-runner logs for ERROR patterns; raise medium issue if recurring."""
+        query = '{container="aipal-runner"} |~ "(?i)(ERROR|Traceback|Exception|CRITICAL)"'
+        now = int(time.time())
+        streams = await self._loki.query_range(
+            query,
+            now - ERROR_SCAN_LOOKBACK_S,
+            now,
+            limit=500,
+        )
 
-        # DB errors → connectivity check
-        if issue_type == "db_error":
-            if "nutrition" in c or "drhouse" in c:
-                return "pg_check:nutrition"
-            if "sport" in c:
-                return "pg_check:sport"
-            return "pg_check:ceo"
+        # Count error occurrences per component (extract from log lines)
+        component_errors: dict[str, int] = {}
+        for stream in streams:
+            for _ts, line in stream.get("values", []):
+                component = self._extract_component(line)
+                component_errors[component] = component_errors.get(component, 0) + 1
 
-        # Default: manual intervention
-        return f"manual:investigate {component} ({issue_type})"
+        issues = []
+        for component, count in component_errors.items():
+            if count >= ERROR_MIN_COUNT:
+                issues.append(ConsolidatedIssue(
+                    component=component,
+                    severity="medium",
+                    reporters=["cio"],
+                    issue_type="high_error_rate",
+                    description=f"{count} ERROR entries in last 6h",
+                    suggested_action=f"manual:investigate {component} errors in Loki",
+                ))
+        return issues
+
+    @staticmethod
+    def _extract_component(log_line: str) -> str:
+        """Best-effort extraction of a component name from a log line."""
+        # Try to match "agent_id=<id>" or "[<id>]" patterns
+        m = re.search(r"agent_id[=:]\s*['\"]?(\w+)", log_line)
+        if m:
+            return f"{m.group(1)}-agent"
+        m = re.search(r"\[(\w+)\]", log_line)
+        if m and m.group(1) not in {"ERROR", "WARNING", "INFO", "DEBUG", "CRITICAL"}:
+            return m.group(1).lower()
+        return "aipal-runner"
+
+
+# Keep backward-compatible alias so existing imports don't break during transition
+IssueCollector = LokiIssueCollector

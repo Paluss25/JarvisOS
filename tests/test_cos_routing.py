@@ -94,46 +94,46 @@ def test_decision_has_required_keys():
 
 
 def test_finance_routes_to_cfo():
-    """Finance domain email should include CFOAgent in final_targets."""
+    """Finance domain email should include cfo in final_targets."""
     agent = _make_agent()
     payload = _make_payload(domain="finance", sensitivity="sensitive", risk="high", priority="high")
     decision = agent.route(payload)
     targets = _agent_names(decision)
-    assert any("CFO" in t for t in targets), (
-        f"Expected CFOAgent in final_targets, got: {targets}"
+    assert "cfo" in targets, (
+        f"Expected cfo in final_targets, got: {targets}"
     )
 
 
 def test_security_domain_routes_to_ciso():
-    """Security domain email should include CISOAgent in final_targets."""
+    """Security domain email should include cio in final_targets."""
     agent = _make_agent()
     payload = _make_payload(domain="security", sensitivity="sensitive", risk="high", priority="high")
     decision = agent.route(payload)
     targets = _agent_names(decision)
-    assert any("CISO" in t for t in targets), (
-        f"Expected CISOAgent in final_targets, got: {targets}"
+    assert "cio" in targets, (
+        f"Expected cio in final_targets, got: {targets}"
     )
 
 
 def test_injection_high_escalates_to_ciso():
-    """High prompt-injection risk must route to CISOAgent regardless of domain."""
+    """High prompt-injection risk must route to cio regardless of domain."""
     agent = _make_agent()
     payload = _make_payload(domain="general", prompt_injection_risk="high")
     decision = agent.route(payload)
     targets = _agent_names(decision)
-    assert any("CISO" in t for t in targets), (
-        f"Expected CISOAgent for high injection risk, got: {targets}"
+    assert "cio" in targets, (
+        f"Expected cio for high injection risk, got: {targets}"
     )
 
 
 def test_injection_critical_escalates_to_ciso():
-    """Critical prompt-injection risk must also route to CISOAgent."""
+    """Critical prompt-injection risk must also route to cio."""
     agent = _make_agent()
     payload = _make_payload(domain="general", prompt_injection_risk="critical")
     decision = agent.route(payload)
     targets = _agent_names(decision)
-    assert any("CISO" in t for t in targets), (
-        f"Expected CISOAgent for critical injection risk, got: {targets}"
+    assert "cio" in targets, (
+        f"Expected cio for critical injection risk, got: {targets}"
     )
 
 
@@ -149,7 +149,7 @@ def test_low_priority_general_is_ignore_or_known_type():
 
 
 def test_general_normal_priority_routes_to_cos():
-    """Normal-priority general email is routed to ChiefOfStaffAgent (triage)."""
+    """Normal-priority general email is routed to cos (triage)."""
     agent = _make_agent()
     payload = _make_payload(domain="general", sensitivity="public", risk="none", priority="normal")
     decision = agent.route(payload)
@@ -157,19 +157,19 @@ def test_general_normal_priority_routes_to_cos():
     dt = decision.get("decision_type", "")
     # Should be routed (not ignored) and target CoS
     if dt != "ignore":
-        assert any("ChiefOfStaff" in t or "CoS" in t or "cos" in t.lower() for t in targets), (
-            f"Expected ChiefOfStaffAgent for normal general email, got: {targets}"
+        assert any(t == "cos" for t in targets), (
+            f"Expected cos for normal general email, got: {targets}"
         )
 
 
 def test_infrastructure_domain_routes_to_cio():
-    """Infrastructure domain email should target CIOAgent."""
+    """Infrastructure domain email should target cio."""
     agent = _make_agent()
     payload = _make_payload(domain="infrastructure", sensitivity="internal", priority="normal")
     decision = agent.route(payload)
     targets = _agent_names(decision)
-    assert any("CIO" in t for t in targets), (
-        f"Expected CIOAgent for infrastructure domain, got: {targets}"
+    assert "cio" in targets, (
+        f"Expected cio for infrastructure domain, got: {targets}"
     )
 
 

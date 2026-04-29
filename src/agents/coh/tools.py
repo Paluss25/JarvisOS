@@ -1,13 +1,17 @@
 """DrHouse (Chief of Health) MCP server — custom tools exposed to the Claude agent.
 
 Tools:
-  daily_log            — Append entry to today's memory log
-  memory_search        — Text search across MEMORY.md + memory/*.md
-  memory_get           — Read a specific memory file from workspace
-  health_query         — Arbitrary SELECT queries against nutrition_data OR sport_metrics
-  get_meals            — Typed: meals by date range + optional meal_type filter
-  get_body_measurements— Typed: body measurements by date range
-  get_daily_nutrition  — Typed: daily_summaries by date range
+  daily_log              — Append entry to today's memory log
+  memory_search          — Text search across MEMORY.md + memory/*.md
+  memory_get             — Read a specific memory file from workspace
+  health_query           — Arbitrary SELECT queries against nutrition_data OR sport_metrics
+  get_meals              — Typed: meals by date range + optional meal_type filter
+  get_body_measurements  — Typed: body measurements by date range
+  get_daily_nutrition    — Typed: daily_summaries by date range
+  get_nutrition_goals    — Typed: active nutrition goals (calories + macros targets)
+  get_recent_activities  — Typed: recent sport activities by date range
+  get_training_plan      — Typed: training plan for a given ISO week number
+  get_waist_measurements — Typed: waist circumference measurements by date range
 """
 
 import json
@@ -29,6 +33,26 @@ def _parse_args(args) -> dict:
         except (json.JSONDecodeError, ValueError):
             return {}
     return args if isinstance(args, dict) else {}
+
+
+def _to_float(v) -> float | None:
+    """Coerce a value (including numeric strings like '2.0') to float."""
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_int(v) -> int | None:
+    """Coerce a value (including '350' or '350.0') to int."""
+    if v is None:
+        return None
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
 
 
 def _text(s: str) -> dict:
@@ -104,8 +128,8 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "daily_log",
-        "Append a timestamped entry to today's DrHouse health memory log. Use this to record significant health events, decisions, flags, or information worth remembering.",
-        {"message": str},
+        "Append a timestamped entry to today's DrHouse health memory log. Use this to record significant health events, decisions, flags, or information worth remembering. message is required.",
+        {"message": {"type": "string", "default": ""}},
     )
     async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
@@ -125,7 +149,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "Search across long-term health memory (MEMORY.md) and all daily logs (memory/*.md) using text matching. "
         "Use this to recall past health events, medical notes, decisions, or tracked conditions. "
         "Results include the matching lines with surrounding context, most recent files first.",
-        {"query": str, "top_k": int},
+        {"query": str, "top_k": {"type": "integer", "default": 5}},
     )
     async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
@@ -170,7 +194,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a specific memory file from the DrHouse workspace. "
         "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
         "Optionally specify start_line and num_lines to read a slice.",
-        {"path": str, "start_line": int, "num_lines": int},
+        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
     )
     async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
@@ -179,7 +203,9 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
-        if not str(target).startswith(str(workspace_path.resolve())):
+        try:
+            target.relative_to(workspace_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
@@ -202,6 +228,26 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         return _text(content)
 
     # --- Health domain tools ------------------------------------------------
+
+    # Known column name aliases — maps common LLM hallucinations to correct names.
+    # Checked pre-flight in health_query before any DB round-trip.
+    _COLUMN_ALIASES: dict[str, tuple[str, str]] = {
+        # sport DB — activities
+        "hr_avg": ("avg_hr", "activities"),
+        "heart_rate_avg": ("avg_hr", "activities"),
+        "average_hr": ("avg_hr", "activities"),
+        # sport DB — training_plan
+        "intensity": ("planned_intensity", "training_plan"),
+        "intensity_level": ("planned_intensity", "training_plan"),
+        # nutrition DB — nutrition_goals (no _g suffix on goal targets)
+        "target_protein_g": ("target_protein", "nutrition_goals"),
+        "target_carbs_g": ("target_carbs", "nutrition_goals"),
+        "target_fat_g": ("target_fat", "nutrition_goals"),
+        "start_date": ("active_from", "nutrition_goals"),
+        "end_date": ("active_to", "nutrition_goals"),
+        "valid_from": ("active_from", "nutrition_goals"),
+        "valid_to": ("active_to", "nutrition_goals"),
+    }
 
     @sdk_tool(
         "health_query",
@@ -227,9 +273,17 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "  activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT session/lap/record/field data linked by activity_id and fit_file_id. "
         "Only SELECT statements are permitted — DrHouse has read-only access to both databases.",
         {
-            "database": str,
-            "query": str,
-            "params": {"type": "array", "items": {}, "default": []},
+            "type": "object",
+            "properties": {
+                "database": {"type": "string"},
+                "query": {"type": "string"},
+                # params: accept both array and string form (LLM sometimes passes '[]' as a string)
+                "params": {
+                    "anyOf": [{"type": "array", "items": {}}, {"type": "string"}],
+                    "default": [],
+                },
+            },
+            "required": ["database", "query"],
         },
     )
     async def health_query(args: dict) -> dict:
@@ -255,6 +309,38 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
                 "health_query only accepts SELECT statements. "
                 "DrHouse has read-only access — use Roger or the appropriate agent for write operations."
             )
+
+        # Pre-flight: detect known column name hallucinations before hitting DB.
+        sql_lower = sql.lower()
+        corrections = []
+        for wrong, (correct, table_hint) in _COLUMN_ALIASES.items():
+            if re.search(r"\b" + re.escape(wrong) + r"\b", sql_lower):
+                corrections.append(f"  '{wrong}' → '{correct}' (table: {table_hint})")
+        # Context-aware: meal_id is a real column on meal_items but NOT on meals.
+        # Two wrong patterns we want to catch:
+        #   (a) explicit qualification to wrong table: `meals.meal_id` / `m.meal_id` when alias `m` → meals
+        #   (b) unqualified `meal_id` with `FROM meals` and no `meal_items` joined in
+        wrong_meal_id = False
+        if re.search(r"\bmeals\.meal_id\b", sql_lower):
+            wrong_meal_id = True
+        elif (
+            re.search(r"(?<![.\w])meal_id\b", sql_lower)
+            and re.search(r"from\s+meals\b(?!_items)", sql_lower)
+            and not re.search(r"\bmeal_items\b", sql_lower)
+        ):
+            wrong_meal_id = True
+        if wrong_meal_id:
+            corrections.append(
+                "  'meal_id' on table 'meals' → use 'meals.id' "
+                "(meal_id exists only on meal_items as FK to meals.id)"
+            )
+        if corrections:
+            return {"content": [{"type": "text", "text": (
+                "Column name error — use the correct names:\n" +
+                "\n".join(corrections) +
+                "\n\nFor fixed query patterns prefer the typed tools "
+                "(get_nutrition_goals, get_recent_activities, get_training_plan, get_waist_measurements)."
+            )}], "is_error": True}
 
         url_env = "DRHOUSE_POSTGRES_URL" if database == "nutrition" else "DRHOUSE_SPORT_POSTGRES_URL"
 
@@ -336,6 +422,102 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             logger.error("get_daily_nutrition: error — %s", exc)
             return {"content": [{"type": "text", "text": f"Query error: {exc}"}], "is_error": True}
 
+    @sdk_tool(
+        "get_nutrition_goals",
+        "Get the active nutrition targets (calories + macros). "
+        "Returns the current goal row from nutrition_goals: target_calories, target_protein, target_carbs, target_fat, goal_type, active_from, active_to. "
+        "Use this instead of health_query for the morning briefing and EOD consolidation.",
+        {},
+    )
+    async def get_nutrition_goals(args: dict) -> dict:
+        try:
+            rows = await _pg_query(
+                "DRHOUSE_POSTGRES_URL", "nutrition",
+                "SELECT goal_id, goal_type, target_calories, target_protein, target_carbs, target_fat, "
+                "active_from, active_to "
+                "FROM nutrition_goals "
+                "WHERE active_from <= CURRENT_DATE AND (active_to IS NULL OR active_to >= CURRENT_DATE) "
+                "ORDER BY active_from DESC LIMIT 1",
+            )
+            return {"content": [{"type": "text", "text": json.dumps(rows, default=str, indent=2)}]}
+        except Exception as exc:
+            logger.error("get_nutrition_goals: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"Query error: {exc}"}], "is_error": True}
+
+    @sdk_tool(
+        "get_recent_activities",
+        "Get recent sport activities from the activities table. "
+        "days: how many days to look back (default 7). "
+        "Returns id, source, type, date, duration_min, distance_km, avg_hr, max_hr, calories, load_score, elevation_gain_m. "
+        "Use this instead of health_query for the morning briefing and EOD consolidation.",
+        {"days": {"type": "integer", "default": 7}},
+    )
+    async def get_recent_activities(args: dict) -> dict:
+        args = _parse_args(args)
+        days = int(args.get("days") or 7)
+        try:
+            rows = await _pg_query(
+                "DRHOUSE_SPORT_POSTGRES_URL", "sport",
+                "SELECT id, source, type, date, duration_min, distance_km, avg_hr, max_hr, "
+                "calories, load_score, elevation_gain_m, avg_cadence, suffer_score "
+                "FROM activities "
+                f"WHERE date >= CURRENT_DATE - INTERVAL '{days} days' "
+                "ORDER BY date DESC",
+            )
+            return {"content": [{"type": "text", "text": json.dumps(rows, default=str, indent=2)}]}
+        except Exception as exc:
+            logger.error("get_recent_activities: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"Query error: {exc}"}], "is_error": True}
+
+    @sdk_tool(
+        "get_training_plan",
+        "Get the training plan for a given ISO week number. "
+        "week_number: ISO week (1–53). Omit to use current week. "
+        "Returns id, week_number, day_of_week, session_type, planned_duration, planned_intensity, status, actual_activity_id. "
+        "Use this instead of health_query for training plan lookups.",
+        {"week_number": {"type": "integer", "default": 0}},
+    )
+    async def get_training_plan(args: dict) -> dict:
+        args = _parse_args(args)
+        week = int(args.get("week_number") or 0)
+        try:
+            rows = await _pg_query(
+                "DRHOUSE_SPORT_POSTGRES_URL", "sport",
+                "SELECT id, week_number, day_of_week, session_type, planned_duration, planned_intensity, "
+                "status, actual_activity_id, notes "
+                "FROM training_plan "
+                "WHERE week_number = COALESCE($1::int, EXTRACT(WEEK FROM CURRENT_DATE)::int) "
+                "ORDER BY day_of_week",
+                [week if week > 0 else None],
+            )
+            return {"content": [{"type": "text", "text": json.dumps(rows, default=str, indent=2)}]}
+        except Exception as exc:
+            logger.error("get_training_plan: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"Query error: {exc}"}], "is_error": True}
+
+    @sdk_tool(
+        "get_waist_measurements",
+        "Get waist circumference measurements from the waist_measurements table. "
+        "days: how many days to look back (default 30). "
+        "NOTE: waist_cm lives in waist_measurements, NOT in body_measurements — use this tool, not health_query.",
+        {"days": {"type": "integer", "default": 30}},
+    )
+    async def get_waist_measurements(args: dict) -> dict:
+        args = _parse_args(args)
+        days = int(args.get("days") or 30)
+        try:
+            rows = await _pg_query(
+                "DRHOUSE_SPORT_POSTGRES_URL", "sport",
+                "SELECT id, date, waist_cm, notes "
+                "FROM waist_measurements "
+                f"WHERE date >= CURRENT_DATE - INTERVAL '{days} days' "
+                "ORDER BY date DESC",
+            )
+            return {"content": [{"type": "text", "text": json.dumps(rows, default=str, indent=2)}]}
+        except Exception as exc:
+            logger.error("get_waist_measurements: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"Query error: {exc}"}], "is_error": True}
+
     # --- A2A send_message + log_meal (Redis pub/sub) ------------------------
 
     if redis_a2a is not None:
@@ -366,16 +548,25 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             "confidence_score: 0.0–1.0, your certainty (0.7 for typical estimates, 0.9 if quantities are explicit). "
             "notes: optional free-text note.",
             {
-                "description": str,
-                "meal_type": str,
-                "date": str,
-                "components": {"type": "array", "items": {}, "default": []},
-                "calories_est": int,
-                "protein_g": float,
-                "carbs_g": float,
-                "fat_g": float,
-                "confidence_score": float,
-                "notes": str,
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "meal_type": {"type": "string"},
+                    # date and notes are optional — LLM may omit them
+                    "date": {"type": "string", "default": ""},
+                    "components": {"type": "array", "items": {}, "default": []},
+                    # numeric fields: accept both number and string (LLM sometimes passes '2.0' as a string)
+                    "calories_est": {"anyOf": [{"type": "number"}, {"type": "string"}]},
+                    "protein_g": {"anyOf": [{"type": "number"}, {"type": "string"}]},
+                    "carbs_g": {"anyOf": [{"type": "number"}, {"type": "string"}]},
+                    "fat_g": {"anyOf": [{"type": "number"}, {"type": "string"}]},
+                    "confidence_score": {
+                        "anyOf": [{"type": "number"}, {"type": "string"}],
+                        "default": 0.75,
+                    },
+                    "notes": {"type": "string", "default": ""},
+                },
+                "required": ["description", "meal_type", "calories_est", "protein_g", "carbs_g", "fat_g"],
             },
         )
         async def log_meal(args: dict) -> dict:
@@ -384,17 +575,30 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             meal_type = (args.get("meal_type") or "snack").strip()
             meal_date = (args.get("date") or date.today().isoformat()).strip()
             components = args.get("components") or []
-            calories_est = args.get("calories_est")
-            protein_g = args.get("protein_g")
-            carbs_g = args.get("carbs_g")
-            fat_g = args.get("fat_g")
-            confidence_score = args.get("confidence_score") if args.get("confidence_score") is not None else 0.75
-            notes = args.get("notes")
+            # Coerce numeric fields — LLM may pass them as strings like '2.0' or '350'
+            calories_est = _to_int(args.get("calories_est"))
+            protein_g = _to_float(args.get("protein_g"))
+            carbs_g = _to_float(args.get("carbs_g"))
+            fat_g = _to_float(args.get("fat_g"))
+            confidence_score = _to_float(args.get("confidence_score")) if args.get("confidence_score") is not None else 0.75
+            notes = args.get("notes") or None
 
             if not description:
                 return _text("description is required.")
             if calories_est is None:
                 return _text("calories_est is required — estimate it before calling log_meal.")
+            missing_macros = [
+                name for name, value in (
+                    ("protein_g", protein_g),
+                    ("carbs_g", carbs_g),
+                    ("fat_g", fat_g),
+                ) if value is None
+            ]
+            if missing_macros:
+                return _text(
+                    f"Missing required macros: {missing_macros}. "
+                    f"Estimate protein_g, carbs_g, and fat_g before calling log_meal."
+                )
 
             # Send structured payload to DON fast path (direct asyncpg INSERT, no LLM)
             payload = json.dumps({
@@ -466,14 +670,22 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         log_meal = None
         delete_meal = None
 
-    from agent_runner.tools.report_issue import create_report_issue_tool, REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA
+    from agent_runner.tools.report_issue import (
+        create_report_issue_tool,
+        REPORT_ISSUE_DESCRIPTION,
+        REPORT_ISSUE_SCHEMA,
+    )
+
+    _report_issue_fn = create_report_issue_tool("coh")
 
     @sdk_tool("report_issue", REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA)
     async def report_issue(args: dict) -> dict:
-        return await create_report_issue_tool("coh")(args)
+        return await _report_issue_fn(args)
 
     all_tools = [daily_log, memory_search, memory_get, health_query,
-                 get_meals, get_body_measurements, get_daily_nutrition, report_issue]
+                 get_meals, get_body_measurements, get_daily_nutrition,
+                 get_nutrition_goals, get_recent_activities, get_training_plan, get_waist_measurements,
+                 report_issue]
     if send_message is not None:
         all_tools.append(send_message)
     if log_meal is not None:

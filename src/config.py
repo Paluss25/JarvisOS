@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # --- Memory API ---
     MEMORY_API_URL: str = "https://memory-api.prova9x.com"
-    MEMORY_API_USER_ID: str = "jarvis"
+    MEMORY_API_USER_ID: str = "ceo"
 
     # --- Codex OAuth ---
     # Token read from file at runtime (bind-mounted from host ~/.codex/auth.json)

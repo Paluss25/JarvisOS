@@ -65,8 +65,8 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
         "daily_log",
         "Append a timestamped entry to today's Warren memory log. "
         "Use this to record portfolio snapshots, budget findings, cost anomalies, "
-        "fiscal actions, and any financial decision worth preserving.",
-        {"message": str},
+        "fiscal actions, and any financial decision worth preserving. message is required.",
+        {"message": {"type": "string", "default": ""}},
     )
     async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
@@ -87,7 +87,7 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
         "Use this to recall past financial analyses, portfolio snapshots, budget deviations, "
         "cost baselines, and fiscal compliance history. "
         "Results include the matching lines with surrounding context, most recent files first.",
-        {"query": str, "top_k": int},
+        {"query": str, "top_k": {"type": "integer", "default": 5}},
     )
     async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
@@ -132,7 +132,7 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a specific memory file from the workspace. "
         "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
         "Optionally specify start_line and num_lines to read a slice.",
-        {"path": str, "start_line": int, "num_lines": int},
+        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
     )
     async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
@@ -141,7 +141,9 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
-        if not str(target).startswith(str(workspace_path.resolve())):
+        try:
+            target.relative_to(workspace_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
@@ -168,14 +170,17 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "dispatch_worker",
         "Call a CFO worker runtime to execute a specialized sub-agent task. "
-        "runtime: 'finance' | 'cost' | 'market'. "
+        "runtime: 'finance' | 'cost' | 'market' | 'strategy'. "
         "sub_agent: specific sub-agent name (optional — omit to use the runtime default). "
         "task: JSON object with 'goal' (required) and optional 'scope' (period, filters). "
         "Finance sub-agents: ynab-finance, ynab-categorization, btc-fiscal-analysis, "
         "fiscal-730-agent, email-transaction-extraction, finance-reconciliation, merchant-resolution. "
-        "Cost sub-agents: ai-cost, power-cost, budget-control, forecast, roi-procurement. "
-        "Market sub-agents: polymarket-market-data, polymarket-risk, polymarket-position-sizing, "
-        "polymarket-strategy, polymarket-trade-journal. "
+        "Cost sub-agents: ai-cost, power-cost, budget-control, forecast, subscription-tracker, "
+        "cashflow-forecast, tax-withholding, roi-procurement. "
+        "Market sub-agents: market-quotes, market-news, macro-indicators, polymarket-market-data, polymarket-risk, "
+        "polymarket-position-sizing, polymarket-strategy, polymarket-trade-journal. "
+        "Strategy sub-agents: investment-research, macro-scenario, correlation-engine, "
+        "rebalancing-advisor, opportunity-scanner. "
         "Returns JSON response from the worker. Workers have a 30s timeout.",
         {"runtime": str, "sub_agent": str, "task": dict},
     )
@@ -185,16 +190,17 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
         sub_agent = (args.get("sub_agent") or "").strip()
         task = args.get("task") or {}
 
-        if runtime not in ("finance", "cost", "market"):
-            return _text("runtime must be one of: finance, cost, market")
+        if runtime not in ("finance", "cost", "market", "strategy"):
+            return _text("runtime must be one of: finance, cost, market, strategy")
 
         if not task:
             return _text("task is required — provide at minimum {'goal': '...'}.")
 
         runtime_urls = {
-            "finance": os.environ.get("CFO_FINANCE_WORKERS_URL", "").rstrip("/"),
-            "cost":    os.environ.get("CFO_COST_WORKERS_URL", "").rstrip("/"),
-            "market":  os.environ.get("CFO_MARKET_WORKERS_URL", "").rstrip("/"),
+            "finance":  os.environ.get("CFO_FINANCE_WORKERS_URL", "").rstrip("/"),
+            "cost":     os.environ.get("CFO_COST_WORKERS_URL", "").rstrip("/"),
+            "market":   os.environ.get("CFO_MARKET_WORKERS_URL", "").rstrip("/"),
+            "strategy": os.environ.get("CFO_STRATEGY_WORKERS_URL", "").rstrip("/"),
         }
 
         base_url = runtime_urls[runtime]
@@ -204,13 +210,27 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
                 f"Set CFO_{runtime.upper()}_WORKERS_URL in the environment to enable it."
             )
 
-        # Default sub-agent names when not specified
+        # Default + allowlisted sub-agent names per runtime — strict slug allowlist
+        # to prevent path/query injection via the sub_agent argument.
+        sub_agent_allowlist = {
+            "finance":  {"finance-analyzer"},
+            "cost":     {"cost-analyzer"},
+            "market":   {"market-analyzer"},
+            "strategy": {"investment-research", "macro-scenario", "correlation-engine",
+                         "rebalancing-advisor", "opportunity-scanner"},
+        }
         default_sub_agents = {
-            "finance": "finance-analyzer",
-            "cost":    "cost-analyzer",
-            "market":  "market-analyzer",
+            "finance":  "finance-analyzer",
+            "cost":     "cost-analyzer",
+            "market":   "market-analyzer",
+            "strategy": "investment-research",
         }
         target = sub_agent if sub_agent else default_sub_agents[runtime]
+        if target not in sub_agent_allowlist[runtime]:
+            return _text(
+                f"sub_agent '{target}' is not allowed for runtime '{runtime}'. "
+                f"Allowed: {sorted(sub_agent_allowlist[runtime])}"
+            )
         url = f"{base_url}/{target}/analyze"
 
         try:
@@ -465,11 +485,18 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text(f"Error: {exc}")
 
     # --- Build server -------------------------------------------------------
-    from agent_runner.tools.report_issue import create_report_issue_tool, REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA
+
+    from agent_runner.tools.report_issue import (
+        create_report_issue_tool,
+        REPORT_ISSUE_DESCRIPTION,
+        REPORT_ISSUE_SCHEMA,
+    )
+
+    _report_issue_fn = create_report_issue_tool("cfo")
 
     @sdk_tool("report_issue", REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA)
     async def report_issue(args: dict) -> dict:
-        return await create_report_issue_tool("cfo")(args)
+        return await _report_issue_fn(args)
 
     all_tools = [
         daily_log, memory_search, memory_get,

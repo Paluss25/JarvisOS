@@ -16,6 +16,7 @@ Domain-specific tools:
   route_case           — Legacy: produce a routing decision for a case derived from external data
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -81,8 +82,8 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "daily_log",
         "Append a timestamped entry to today's memory log. "
-        "Use this to record significant events, decisions, or facts worth remembering.",
-        {"message": str},
+        "Use this to record significant events, decisions, or facts worth remembering. message is required.",
+        {"message": {"type": "string", "default": ""}},
     )
     async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
@@ -102,7 +103,7 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
         "Search across long-term memory (MEMORY.md) and all daily logs (memory/*.md) "
         "using text matching. Use this to recall past events, decisions, or facts. "
         "Results include matching lines with surrounding context, most recent files first.",
-        {"query": str, "top_k": int},
+        {"query": str, "top_k": {"type": "integer", "default": 5}},
     )
     async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
@@ -146,7 +147,7 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a specific memory file from the workspace. "
         "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
         "Optionally specify start_line and num_lines to read a slice.",
-        {"path": str, "start_line": int, "num_lines": int},
+        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
     )
     async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
@@ -155,8 +156,9 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
-        # Security: path traversal guard — must stay inside workspace
-        if not str(target).startswith(str(workspace_path.resolve())):
+        try:
+            target.relative_to(workspace_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
@@ -193,8 +195,50 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
             return _text(await _send_message_fn(args))
+
+        @sdk_tool(
+            "dispatch_email",
+            "Dispatch a single email to the EmailIntelligenceAgent security pipeline. "
+            "Faster than send_message — bypasses the LLM and calls the 9-layer pipeline directly. "
+            "Use this instead of send_message(to='email_intelligence_agent') for email routing.",
+            {
+                "email_id": str,
+                "account": str,
+                "subject": str,
+                "body": str,
+                "sender": str,
+                "received_at": str,
+            },
+        )
+        async def dispatch_email(args: dict) -> dict:
+            import json as _json
+            args = _parse_args(args)
+            payload = _json.dumps({
+                "action": "process_email",
+                "email_id": args.get("email_id", ""),
+                "account": args.get("account", ""),
+                "subject": args.get("subject", ""),
+                "body": args.get("body", ""),
+                "sender": args.get("sender", ""),
+                "received_at": args.get("received_at", ""),
+            })
+            result = await _send_message_fn({"to": "email_intelligence_agent", "message": payload})
+            try:
+                parsed = _json.loads(result)
+                domain = parsed.get("classification", {}).get("primary_domain", "unknown")
+                sensitivity = parsed.get("classification", {}).get("sensitivity", "unknown")
+                route_to = parsed.get("routing", {}).get("route_to", "unknown")
+                policy = parsed.get("policy", {}).get("decision", "unknown")
+                return _text(
+                    f"email_id={parsed.get('email_id')} | domain={domain} | "
+                    f"sensitivity={sensitivity} | route_to={route_to} | policy={policy}"
+                )
+            except Exception:
+                return _text(result)
+
     else:
         send_message = None  # Redis not configured
+        dispatch_email = None
 
     # --- Cron tools ---------------------------------------------------------
 
@@ -352,15 +396,24 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
                 },
             ))
 
-            # Sort email into IMAP folder after routing (deterministic, non-blocking)
+            # Sort email into IMAP folder after routing. Run the blocking client
+            # in a threadpool so the async loop is not stalled, and surface
+            # failure in the tool result so the LLM does not see a fake success.
             _uid = payload_dict.get("email_id", "")
+            sort_status: dict | None = None
             if _uid:
                 try:
-                    sort_email_after_routing(_uid, payload_dict)
+                    sort_status = await asyncio.to_thread(
+                        sort_email_after_routing, _uid, payload_dict
+                    )
                 except Exception as _sort_exc:
                     logger.warning("route_email_payload: sort step failed — %s", _sort_exc)
+                    sort_status = {"sort_ok": False, "error": str(_sort_exc)}
 
-            return _text(json.dumps(routing_decision, ensure_ascii=False))
+            response = dict(routing_decision)
+            if sort_status is not None:
+                response["sort_status"] = sort_status
+            return _text(json.dumps(response, ensure_ascii=False))
         except Exception as exc:
             logger.error("route_email_payload: failed — %s", exc)
             return _text(f"Error routing payload: {exc}")
@@ -439,19 +492,70 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
             if detected:
                 security_flags.append(flag)
 
-        # Build the decision skeleton — the agent fills action/owners/rationale via reasoning
+        # Heuristic routing — map detected_domains to known owners and infer
+        # urgency/HITL from security_flags. The agent may still override the
+        # decision via reasoning, but this returns a real (non-empty) baseline.
+        domains = [d.strip().lower() for d in args.get("detected_domains", "").split(",") if d.strip()]
+        entities = [e.strip() for e in args.get("detected_entities", "").split(",") if e.strip()]
+
+        domain_owner_map = {
+            "finance": "cfo",
+            "fiscal": "cfo",
+            "crypto": "cfo",
+            "investments": "cfo",
+            "budget": "cfo",
+            "health": "coh",
+            "nutrition": "don",
+            "medical": "coh",
+            "fitness": "dos",
+            "sport": "dos",
+            "training": "dos",
+            "infrastructure": "cio",
+            "operations": "cio",
+            "monitoring": "cio",
+            "email": "mt",
+            "calendar": "mt",
+            "inbox": "mt",
+        }
+        owners = sorted({owner for d in domains if (owner := domain_owner_map.get(d))})
+
+        # Urgency: any pressure flag bumps to high; legal/financial pressure
+        # forces HITL. Otherwise default low.
+        if any(security_flags):
+            urgency = "high"
+        else:
+            urgency = "low"
+
+        human_approval_required = bool(
+            flag_map.get("legal_threat") or flag_map.get("financial_pressure")
+        )
+
+        if not owners:
+            action = "request_clarification"
+            routing_target = None
+            rationale = "No domain matched the routing table; need human review."
+        elif len(owners) == 1:
+            action = "route"
+            routing_target = owners[0]
+            rationale = f"Domain {domains} mapped to single owner '{owners[0]}'."
+        else:
+            action = "fanout"
+            routing_target = owners
+            rationale = f"Multiple domains {domains} mapped to {owners}; fanning out."
+
         decision = {
             "case_id": case_id,
-            "action": "route",          # agent will override via reasoning
-            "owners": [],
-            "urgency": "low",
-            "rationale": "",
-            "routing_target": None,
-            "human_approval_required": False,
+            "action": action,
+            "owners": owners,
+            "urgency": urgency,
+            "rationale": rationale,
+            "routing_target": routing_target,
+            "human_approval_required": human_approval_required,
             "security_flags": security_flags,
             "metadata": {
-                "detected_domains": [d.strip() for d in args.get("detected_domains", "").split(",") if d.strip()],
-                "detected_entities": [e.strip() for e in args.get("detected_entities", "").split(",") if e.strip()],
+                "detected_domains": domains,
+                "detected_entities": entities,
+                "summary": summary,
             },
         }
 
@@ -459,11 +563,18 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
         return _text(result)
 
     # --- Assemble server ----------------------------------------------------
-    from agent_runner.tools.report_issue import create_report_issue_tool, REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA
+
+    from agent_runner.tools.report_issue import (
+        create_report_issue_tool,
+        REPORT_ISSUE_DESCRIPTION,
+        REPORT_ISSUE_SCHEMA,
+    )
+
+    _report_issue_fn = create_report_issue_tool("cos")
 
     @sdk_tool("report_issue", REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA)
     async def report_issue(args: dict) -> dict:
-        return await create_report_issue_tool("cos")(args)
+        return await _report_issue_fn(args)
 
     all_tools = [
         daily_log, memory_search, memory_get,
@@ -472,6 +583,8 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
     ]
     if send_message is not None:
         all_tools.append(send_message)
+    if dispatch_email is not None:
+        all_tools.append(dispatch_email)
 
     try:
         server = create_sdk_mcp_server(name="cos-tools", tools=all_tools)

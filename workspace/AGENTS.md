@@ -15,6 +15,7 @@ Read on startup: SOUL.md, USER.md, MEMORY.md, memory/today.md, HEARTBEAT.md.
 - Destructive/write commands — ALWAYS ask permission.
 - Read-only commands — execute freely.
 - Log every significant action and every error to daily memory.
+- Use `[INCIDENT]` tag in `daily_log` for any unrecoverable error, service failure, or anomaly requiring attention. Example: `daily_log("[INCIDENT] Postgres unreachable after 3 retries")`.
 
 ## Model Fallback Protocol
 - You may be running on different LLMs across sessions.

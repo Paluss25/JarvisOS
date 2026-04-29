@@ -56,8 +56,8 @@ class DeterministicChiefOfStaffReasoner(BaseChiefOfStaffReasoner):
                 thread_id=thread_id,
                 decision_type="multi_route",
                 final_targets=[
-                    {"agent": "CISOAgent", "reason": "Prompt-injection or manipulation risk detected"},
-                    {"agent": "ChiefOfStaffAgent", "reason": "Manual coordination required"},
+                    {"agent": "cio", "reason": "Prompt-injection or manipulation risk detected"},
+                    {"agent": "cos", "reason": "Manual coordination required"},
                 ],
                 actions=["store_email", "request_domain_analysis", "request_human_review"],
                 archive_policy=_archive_policy(primary, secondary, sensitivity),
@@ -79,8 +79,8 @@ class DeterministicChiefOfStaffReasoner(BaseChiefOfStaffReasoner):
                 thread_id=thread_id,
                 decision_type="multi_route",
                 final_targets=[
-                    {"agent": "CISOAgent", "reason": "Suspicious sender/domain"},
-                    {"agent": "CFOAgent", "reason": "Potential financial fraud vector"},
+                    {"agent": "cio", "reason": "Suspicious sender/domain"},
+                    {"agent": "cfo", "reason": "Potential financial fraud vector"},
                 ],
                 actions=["store_email", "request_domain_analysis", "priority_notify"],
                 archive_policy=_archive_policy(primary, secondary, sensitivity),
@@ -103,14 +103,14 @@ class DeterministicChiefOfStaffReasoner(BaseChiefOfStaffReasoner):
                 thread_id=thread_id,
                 decision_type="multi_route_and_escalate" if escalation_needed else "multi_route",
                 final_targets=[
-                    {"agent": "CFOAgent", "reason": "Financial review required"},
-                    {"agent": "CLOAgent", "reason": "Legal review required"},
+                    {"agent": "cfo", "reason": "Financial review required"},
+                    {"agent": "cos", "reason": "Legal review required"},
                 ],
                 actions=["store_email", "store_attachments", "request_domain_analysis"],
                 archive_policy=_archive_policy(primary, secondary, sensitivity),
                 escalation={
                     "needed": escalation_needed,
-                    "target": "CEOAgent" if escalation_needed else None,
+                    "target": "ceo" if escalation_needed else None,
                     "reason": "Material finance/legal impact" if escalation_needed else None,
                 },
                 executive_summary="Email affects both finance and legal domains.",
@@ -131,14 +131,14 @@ class DeterministicChiefOfStaffReasoner(BaseChiefOfStaffReasoner):
                 thread_id=thread_id,
                 decision_type="multi_route_and_escalate" if escalation_needed else "multi_route",
                 final_targets=[
-                    {"agent": "CLOAgent", "reason": "Legal review required"},
-                    {"agent": "CFOAgent", "reason": "Financial impact assessment required"},
+                    {"agent": "cos", "reason": "Legal review required"},
+                    {"agent": "cfo", "reason": "Financial impact assessment required"},
                 ],
                 actions=["store_email", "store_attachments", "request_domain_analysis"],
                 archive_policy=_archive_policy(primary, secondary, sensitivity),
                 escalation={
                     "needed": escalation_needed,
-                    "target": "CEOAgent" if escalation_needed else None,
+                    "target": "ceo" if escalation_needed else None,
                     "reason": "Material legal/financial impact" if escalation_needed else None,
                 },
                 executive_summary="Contract or legal notice with financial implications.",
@@ -158,7 +158,7 @@ class DeterministicChiefOfStaffReasoner(BaseChiefOfStaffReasoner):
                 thread_id=thread_id,
                 decision_type="internal_review",
                 final_targets=[
-                    {"agent": "ChiefOfStaffAgent", "reason": "Ambiguous classification or low confidence"},
+                    {"agent": "cos", "reason": "Ambiguous classification or low confidence"},
                 ],
                 actions=["hold_routing", "request_reasoning_pass"],
                 archive_policy=_archive_policy(primary, secondary, sensitivity),
@@ -174,26 +174,23 @@ class DeterministicChiefOfStaffReasoner(BaseChiefOfStaffReasoner):
             )
 
         target_map = {
-            "finance": "CFOAgent",
-            "security": "CISOAgent",
-            "infrastructure": "CIOAgent",
-            "legal": "CLOAgent",
-            "operations": "COOAgent",
-            "general": "ChiefOfStaffAgent",
+            "finance": "cfo",
+            "security": "cio",
+            "infrastructure": "cio",
+            "legal": "cos",
+            "operations": "cos",
+            "general": "cos",
         }
-        target = target_map.get(primary, "ChiefOfStaffAgent")
+        target = target_map.get(primary, "cos")
         reason = {
-            "CFOAgent": "Finance domain ownership",
-            "CISOAgent": "Security domain ownership",
-            "CIOAgent": "Infrastructure domain ownership",
-            "CLOAgent": "Legal domain ownership",
-            "COOAgent": "Operations follow-up",
-            "ChiefOfStaffAgent": "General triage or coordination",
+            "cfo": "Finance domain ownership",
+            "cio": "Infrastructure or security domain ownership",
+            "cos": "General triage, legal, or operations coordination",
         }[target]
 
         decision_type = "ignore" if primary == "general" and priority == "low" else "route_and_review"
         actions = ["store_email"] if decision_type == "ignore" else ["store_email", "request_domain_analysis"]
-        if target == "COOAgent":
+        if target == "cos" and primary == "operations":
             actions.append("request_execution_plan")
 
         return RoutingDecision(
@@ -260,7 +257,7 @@ class HybridChiefOfStaffAgent:
         policy = self.policy_engine.evaluate(
             payload=payload,
             request=AgentRequest(
-                agent_id="ChiefOfStaffAgent",
+                agent_id="cos",
                 requested_action="route_and_review",
                 requested_model_class=runtime_state.get("requested_model_class", "local"),
             ),
@@ -364,7 +361,7 @@ class HybridChiefOfStaffAgent:
                 email_id=email_id,
                 thread_id=payload.get("thread_id"),
                 decision_type="internal_review",
-                final_targets=[{"agent": "ChiefOfStaffAgent", "reason": "Policy blocked automatic routing"}],
+                final_targets=[{"agent": "cos", "reason": "Policy blocked automatic routing"}],
                 actions=["hold_routing", "request_human_review"],
                 archive_policy=_archive_policy(
                     payload.get("classification", {}).get("primary_domain", "general"),

@@ -1,10 +1,10 @@
 # workspace/config/agent-models.yaml — Per-Agent Model Assignment
-# Day 1: only jarvis active. Others stubbed for future phases.
+# Canonical IDs: use ceo/cio/cfo/cos/coh/dos/don/email_intelligence_agent.
 
 agents:
 
-  jarvis:
-    role: "CEO / Executive Assistant"
+  ceo:
+    role: "ChiefExecutiveOfficer"
     primary:
       provider: openai-codex
       model: "gpt-5.4"

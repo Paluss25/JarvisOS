@@ -1,6 +1,7 @@
 """Generic FastAPI app factory — creates a fully configured agent API."""
 
 import asyncio
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -19,6 +20,7 @@ from agent_runner.memory.daily_logger import DailyLogger
 from agent_runner.memory.session_manager import SessionManager
 from agent_runner.memory.pipeline import run_pipeline
 from agent_runner.memory.pipeline.queue import PipelineItem, PipelineQueue
+from agent_runner.telemetry import configure_logging, setup_telemetry
 
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -42,6 +44,7 @@ class A2ARequest(BaseModel):
 
 def create_app(config: AgentConfig) -> FastAPI:
     """Build a fully configured FastAPI app for this agent."""
+    setup_telemetry(f"jarvios-{config.id}")
 
     state: dict = {
         "agent": None,
@@ -51,11 +54,15 @@ def create_app(config: AgentConfig) -> FastAPI:
         "pipeline_task": None,
         "redis_a2a_task": None,
         "redis_a2a": None,
+        "slack_task": None,
+        "discord_task": None,
+        "mattermost_task": None,
         "start_time": time.time(),
     }
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator:
+        configure_logging(config.log_level)
         logger.info("%s: starting up…", config.name)
 
         import os
@@ -97,6 +104,45 @@ def create_app(config: AgentConfig) -> FastAPI:
                         )
                     except Exception:
                         pass
+                    # Fast path: structured JSON actions bypass the LLM entirely
+                    if config.a2a_fast_path is not None:
+                        try:
+                            action_payload = json.loads(msg.payload)
+                            result = await config.a2a_fast_path(action_payload)
+                            if result is not None:
+                                response = A2AMessage(
+                                    from_agent=config.id,
+                                    to_agent=msg.from_agent,
+                                    type="response",
+                                    payload=json.dumps(result),
+                                    correlation_id=msg.correlation_id,
+                                )
+                                await redis_a2a.publish(response)
+                                return
+                        except json.JSONDecodeError:
+                            pass  # Not JSON — fall through to LLM
+                        except Exception as exc:
+                            logger.warning("%s: a2a fast path error — %s", config.name, exc)
+                    # Fail fast if the agent is mid-turn — prevents the sender from
+                    # burning their full 120s send_message timeout waiting for a lock
+                    # that won't be released until the current turn completes.
+                    if agent.is_busy:
+                        logger.info(
+                            "%s: busy — sending immediate busy signal to %s (cid=%.8s)",
+                            config.name, msg.from_agent, msg.correlation_id,
+                        )
+                        busy_resp = A2AMessage(
+                            from_agent=config.id,
+                            to_agent=msg.from_agent,
+                            type="response",
+                            payload=(
+                                f"[{config.name} is currently processing another request. "
+                                "Proceed without this data or retry in a moment.]"
+                            ),
+                            correlation_id=msg.correlation_id,
+                        )
+                        await redis_a2a.publish(busy_resp)
+                        return
                     try:
                         response_text = await agent.query(
                             f"[Message from {msg.from_agent}]\n\n{msg.payload}",
@@ -122,15 +168,54 @@ def create_app(config: AgentConfig) -> FastAPI:
                 logger.warning("%s: Redis A2A subscriber failed — %s", config.name, exc)
 
         # Telegram polling
-        if os.environ.get(config.telegram_token_env):
+        if getattr(config, "telegram_polling_enabled", True) and os.environ.get(config.telegram_token_env):
             try:
                 from agent_runner.interfaces.telegram_bot import start_polling
                 state["telegram_task"] = asyncio.create_task(
-                    start_polling(state["agent"], state["session_manager"], config)
+                    start_polling(state["agent"], state["session_manager"], config, redis_a2a=redis_a2a)
                 )
                 logger.info("%s: Telegram polling started", config.name)
             except Exception as exc:
                 logger.warning("%s: Telegram polling failed — %s", config.name, exc)
+
+        # Slack (only if slack_token_env is set and the env var has a value)
+        if (state["agent"]
+                and getattr(config, "slack_token_env", "")
+                and os.environ.get(config.slack_token_env, "")):
+            try:
+                from agent_runner.interfaces.slack_bot import start_slack
+                state["slack_task"] = asyncio.create_task(
+                    start_slack(state["agent"], state["session_manager"], config)
+                )
+                logger.info("%s: Slack Socket Mode started", config.name)
+            except Exception as exc:
+                logger.warning("%s: Slack start failed — %s", config.name, exc)
+
+        # Discord (only if discord_token_env is set and the env var has a value)
+        if (state["agent"]
+                and getattr(config, "discord_token_env", "")
+                and os.environ.get(config.discord_token_env, "")):
+            try:
+                from agent_runner.interfaces.discord_bot import start_discord
+                state["discord_task"] = asyncio.create_task(
+                    start_discord(state["agent"], state["session_manager"], config)
+                )
+                logger.info("%s: Discord bot started", config.name)
+            except Exception as exc:
+                logger.warning("%s: Discord start failed — %s", config.name, exc)
+
+        # Mattermost (only if mattermost_token_env is set and the env var has a value)
+        if (state["agent"]
+                and getattr(config, "mattermost_token_env", "")
+                and os.environ.get(config.mattermost_token_env, "")):
+            try:
+                from agent_runner.interfaces.mattermost_bot import start_mattermost
+                state["mattermost_task"] = asyncio.create_task(
+                    start_mattermost(state["agent"], state["session_manager"], config)
+                )
+                logger.info("%s: Mattermost WebSocket started", config.name)
+            except Exception as exc:
+                logger.warning("%s: Mattermost start failed — %s", config.name, exc)
 
         # Heartbeat scheduler
         if state["agent"]:
@@ -146,7 +231,8 @@ def create_app(config: AgentConfig) -> FastAPI:
 
         # Shutdown
         logger.info("%s: shutting down…", config.name)
-        for key in ("telegram_task", "scheduler_task", "pipeline_task", "redis_a2a_task"):
+        for key in ("telegram_task", "scheduler_task", "pipeline_task", "redis_a2a_task",
+                    "slack_task", "discord_task", "mattermost_task"):
             task = state.get(key)
             if task and not task.done():
                 task.cancel()
@@ -175,6 +261,18 @@ def create_app(config: AgentConfig) -> FastAPI:
         version="0.2.0",
         lifespan=lifespan,
     )
+
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        FastAPIInstrumentor.instrument_app(app)
+    except Exception:
+        pass
+
+    try:
+        from prometheus_client import make_asgi_app
+        app.mount("/metrics", make_asgi_app())
+    except Exception:
+        pass
 
     app.add_middleware(
         CORSMiddleware,
@@ -209,6 +307,9 @@ def create_app(config: AgentConfig) -> FastAPI:
             "session_id": sm.session_id if sm else None,
             "telegram": "running" if (state["telegram_task"] and not state["telegram_task"].done()) else "stopped",
             "scheduler": "running" if (state["scheduler_task"] and not state["scheduler_task"].done()) else "stopped",
+            "slack": "running" if (state.get("slack_task") and not state["slack_task"].done()) else "stopped",
+            "discord": "running" if (state.get("discord_task") and not state["discord_task"].done()) else "stopped",
+            "mattermost": "running" if (state.get("mattermost_task") and not state["mattermost_task"].done()) else "stopped",
         }
 
     @app.post("/chat", response_model=ChatResponse)
@@ -216,6 +317,8 @@ def create_app(config: AgentConfig) -> FastAPI:
         agent = state["agent"]
         if not agent:
             raise HTTPException(status_code=503, detail="Agent not initialized")
+        if agent.is_busy:
+            raise HTTPException(status_code=503, detail="Agent busy — retry shortly")
         sm = state["session_manager"]
         session_id = req.session_id or (sm.start() if sm else None)
         try:
@@ -230,6 +333,8 @@ def create_app(config: AgentConfig) -> FastAPI:
         agent = state["agent"]
         if not agent:
             raise HTTPException(status_code=503, detail="Agent not initialized")
+        if agent.is_busy:
+            raise HTTPException(status_code=503, detail="Agent busy — retry shortly")
         sm = state["session_manager"]
         session_id = req.session_id or (sm.start() if sm else None)
 
@@ -249,6 +354,16 @@ def create_app(config: AgentConfig) -> FastAPI:
         agent = state["agent"]
         if not agent:
             raise HTTPException(status_code=503, detail="Agent not initialized")
+        if agent.is_busy:
+            # Mirror the Redis A2A busy fast-path so HTTP fallback callers get
+            # an immediate signal instead of stalling on a wedged stream.
+            return ChatResponse(
+                response=(
+                    f"[{config.name} is currently processing another request. "
+                    "Proceed without this data or retry in a moment.]"
+                ),
+                session_id=req.session_id or f"a2a-{req.from_agent}",
+            )
         session_id = req.session_id or f"a2a-{req.from_agent}"
         prefixed = f"[Message from {req.from_agent}]\n\n{req.message}"
         try:

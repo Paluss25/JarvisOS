@@ -11,6 +11,11 @@ claude-agent-sdk>=0.1.0
 # Telegram
 python-telegram-bot>=21.0
 
+# Multi-channel support (optional — adapters only activate when their env vars are set)
+slack-bolt[async]>=1.18.0
+discord.py>=2.3.0
+mattermostdriver>=7.3.0
+
 # Redis
 redis>=5.0.0
 
@@ -50,3 +55,20 @@ fitdecode>=0.10.0
 # Utilities
 python-dotenv
 tzdata
+
+# CHRO document processing
+pdfplumber>=0.11.0
+pytesseract>=0.3.13
+pillow>=10.0.0
+
+# Voice / STT / TTS
+faster-whisper>=1.1.0
+edge-tts>=7.0.0
+
+# Observability
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+opentelemetry-exporter-otlp-proto-grpc>=1.20.0
+opentelemetry-instrumentation-fastapi>=0.41b0
+opentelemetry-instrumentation-httpx>=0.41b0
+prometheus-client>=0.20.0

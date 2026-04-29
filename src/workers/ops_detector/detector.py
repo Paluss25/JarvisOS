@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def _loki_url() -> str:
-    return os.environ.get("LOKI_URL", "http://10.10.200.202:3100")
+    return os.environ.get("LOKI_URL", "http://10.10.200.71:3100")
 
 
 async def query_loki(logql: str, lookback_minutes: int, limit: int = 100) -> list[str]:

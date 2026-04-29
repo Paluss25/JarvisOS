@@ -5,6 +5,7 @@ Tools:
   daily_log         — Append to today's memory log
   memory_search     — Text search across MEMORY.md + memory/*.md
   memory_get        — Read a specific memory file from workspace
+  platform_health   — Docker container state + healthcheck + all supervisord process states
   send_message      — Send a message to another agent via Redis pub/sub
   cron_create       — Create a scheduled task
   cron_list         — List scheduled tasks
@@ -123,8 +124,8 @@ def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "daily_log",
-        "Append a timestamped entry to today's Jarvis memory log. Use this to record significant events, decisions, or information worth remembering.",
-        {"message": str},
+        "Append a timestamped entry to today's Jarvis memory log. Use this to record significant events, decisions, or information worth remembering. message is required.",
+        {"message": {"type": "string", "default": ""}},
     )
     async def daily_log(args: dict) -> dict:
         """Append a timestamped entry to today's memory/YYYY-MM-DD.md."""
@@ -145,7 +146,7 @@ def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
         "Search across long-term memory (MEMORY.md) and all daily logs (memory/*.md) using text matching. "
         "Use this to recall past events, decisions, preferences, or facts. "
         "Results include the matching lines with surrounding context, most recent files first.",
-        {"query": str, "top_k": int},
+        {"query": str, "top_k": {"type": "integer", "default": 5}},
     )
     async def memory_search(args: dict) -> dict:
         """Text search across MEMORY.md + memory/*.md, most recent first."""
@@ -193,7 +194,7 @@ def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a specific memory file from the workspace. "
         "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
         "Optionally specify start_line and num_lines to read a slice.",
-        {"path": str, "start_line": int, "num_lines": int},
+        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
     )
     async def memory_get(args: dict) -> dict:
         """Read a workspace memory file, optionally sliced by line range."""
@@ -203,8 +204,9 @@ def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
-        # Security: must stay inside workspace
-        if not str(target).startswith(str(workspace_path.resolve())):
+        try:
+            target.relative_to(workspace_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
@@ -235,7 +237,7 @@ def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
         @sdk_tool(
             "send_message",
             "Send a message to another agent and wait for their response. "
-            "Use 'to' to specify the target agent ID (e.g. 'roger'). "
+            "Use 'to' to specify the target agent ID (e.g. 'dos'). "
             "'message' is the natural language request to send.",
             {"to": str, "message": str},
         )
@@ -402,10 +404,13 @@ def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
         # Build the remote command string, shell-quoting each part so spaces/specials are safe
         remote_cmd = " ".join(shlex.quote(p) for p in cmd_parts)
 
+        # Strict host-key check against ~/.ssh/known_hosts — operator must have
+        # pre-seeded the entry. This prevents MITM/DNS-poisoning during scaffold.
         ssh_cmd = [
             "ssh",
-            "-o", "StrictHostKeyChecking=no",
+            "-o", "StrictHostKeyChecking=yes",
             "-o", "BatchMode=yes",       # fail immediately if no key auth
+            "-o", "UserKnownHostsFile=/root/.ssh/known_hosts",
             "-i", "/root/.ssh/id_ed25519",
             host_ssh,
             remote_cmd,
@@ -442,22 +447,92 @@ def create_jarvis_mcp_server(workspace_path: Path, redis_a2a=None):
             logger.error("scaffold_agent: unexpected error — %s", exc)
             return _text(f"scaffold_agent error: {exc}")
 
+    # --- Platform health ------------------------------------------------
+
+    @sdk_tool(
+        "platform_health",
+        "Get a unified health snapshot of the jarvios-platform container: "
+        "Docker container state + healthcheck result + all supervisord process states. "
+        "Use this to check which agents are alive, diagnose a crashed process, or verify "
+        "platform health before delegating tasks. No arguments required.",
+        {},
+    )
+    async def platform_health(args: dict) -> dict:
+        proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")
+        container = "jarvios-platform"
+        lines: list[str] = []
+
+        # Docker layer: container state + healthcheck
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"{proxy}/containers/{container}/json")
+                if resp.status_code == 200:
+                    d = resp.json()
+                    state = d.get("State", {})
+                    lines.append(
+                        f"Container: {state.get('Status', '?')} "
+                        f"(exit {state.get('ExitCode', '?')})"
+                    )
+                    hc = state.get("Health", {})
+                    if hc:
+                        lines.append(f"Healthcheck: {hc.get('Status', 'n/a')}")
+                        log = hc.get("Log") or []
+                        if log:
+                            last = log[-1]
+                            out = (last.get("Output") or "").strip()[:120]
+                            lines.append(
+                                f"  Last check: exit {last.get('ExitCode', '?')}"
+                                + (f" — {out}" if out else "")
+                            )
+                elif resp.status_code == 404:
+                    lines.append(f"Container '{container}' not found via socket proxy.")
+                else:
+                    lines.append(f"Docker API error: {resp.status_code}")
+        except Exception as exc:
+            lines.append(f"Cannot reach socket proxy ({proxy}): {exc}")
+
+        # Supervisord layer: per-process states via Unix socket
+        try:
+            from platform_api.supervisord_rpc import SupervisorClient
+            procs = SupervisorClient().get_all_process_info()
+            lines.append("")
+            lines.append("Processes:")
+            for p in procs:
+                name = p.get("name", "?")
+                statename = p.get("statename", "?")
+                desc = p.get("description", "")
+                exitstatus = p.get("exitstatus", "")
+                suffix = f" (exit {exitstatus})" if exitstatus and statename not in ("RUNNING",) else ""
+                lines.append(f"  {name:<38} {statename:<10} {desc}{suffix}")
+        except Exception as exc:
+            lines.append(f"Supervisord unavailable: {exc}")
+
+        return _text("\n".join(lines))
+
     # --- Build server ---------------------------------------------------
-    from agent_runner.tools.report_issue import create_report_issue_tool, REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA
+
+    from agent_runner.tools.report_issue import (
+        create_report_issue_tool,
+        REPORT_ISSUE_DESCRIPTION,
+        REPORT_ISSUE_SCHEMA,
+    )
+
+    _report_issue_fn = create_report_issue_tool("ceo")
 
     @sdk_tool("report_issue", REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA)
     async def report_issue(args: dict) -> dict:
-        return await create_report_issue_tool("ceo")(args)
+        return await _report_issue_fn(args)
 
     all_tools = [
         perplexity_search, daily_log, memory_search, memory_get,
+        platform_health,
         cron_create, cron_list, cron_update, cron_delete,
         scaffold_agent, report_issue,
     ]
     if send_message is not None:
         all_tools.append(send_message)
     try:
-        server = create_sdk_mcp_server(name="jarvis-tools", tools=all_tools)
+        server = create_sdk_mcp_server(name="ceo-tools", tools=all_tools)
         logger.info("mcp_server: in-process MCP server created with %d tools", len(all_tools))
         return server
     except Exception as exc:

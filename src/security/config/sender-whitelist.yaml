@@ -1,0 +1,30 @@
+# Sender Whitelist — classification overrides for known trusted senders
+#
+# Hot-reloaded on every classify() call (no container restart required).
+# Edit this file to add/remove senders at runtime.
+#
+# Two override types:
+#   email_overrides:  exact match on the full sender address
+#   domain_overrides: suffix match on the sender domain (@company.com)
+#
+# Each entry fields:
+#   domain:     primary_domain to force (finance | legal | security | hr | ops | marketing)
+#   confidence: injected confidence score, 0.0–1.0 (default: 1.0)
+#   note:       human-readable reason (optional, ignored by code)
+
+email_overrides:
+  # "noreply@bancaintesa.it":
+  #   domain: finance
+  #   confidence: 1.0
+  #   note: "Intesa Sanpaolo account statements"
+
+domain_overrides:
+  # "@unicredit.it":
+  #   domain: finance
+  #   confidence: 1.0
+  #   note: "UniCredit bank notifications"
+  #
+  # "@commercialista.it":
+  #   domain: finance
+  #   confidence: 1.0
+  #   note: "Accountant firm"

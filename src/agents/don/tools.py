@@ -130,8 +130,8 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "daily_log",
-        "Append a timestamped entry to today's NutritionDirector memory log. Use this to record significant nutrition events, meal decisions, dietary flags, or information worth remembering.",
-        {"message": str},
+        "Append a timestamped entry to today's NutritionDirector memory log. Use this to record significant nutrition events, meal decisions, dietary flags, or information worth remembering. message is required.",
+        {"message": {"type": "string", "default": ""}},
     )
     async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
@@ -151,7 +151,7 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
         "Search across long-term nutrition memory (MEMORY.md) and all daily logs (memory/*.md) using text matching. "
         "Use this to recall past meal logs, dietary decisions, food preferences, or nutrition flags. "
         "Results include the matching lines with surrounding context, most recent files first.",
-        {"query": str, "top_k": int},
+        {"query": str, "top_k": {"type": "integer", "default": 5}},
     )
     async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
@@ -196,7 +196,7 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a specific memory file from the NutritionDirector workspace. "
         "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
         "Optionally specify start_line and num_lines to read a slice.",
-        {"path": str, "start_line": int, "num_lines": int},
+        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
     )
     async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
@@ -205,7 +205,9 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
-        if not str(target).startswith(str(workspace_path.resolve())):
+        try:
+            target.relative_to(workspace_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
@@ -280,16 +282,24 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
         params = raw_params if isinstance(raw_params, list) else []
         if not sql:
             return _text("No SQL provided.")
-        if sql.upper().startswith("SELECT"):
-            return _text("nutrition_execute is for writes. Use nutrition_query for SELECT statements.")
-        _DDL_KEYWORDS = {"ALTER", "CREATE", "DROP", "TRUNCATE", "GRANT", "REVOKE"}
+        # Strict allowlist of leading verbs — rejects WITH (CTE), SELECT, DDL,
+        # multi-statement payloads, and any other unexpected verb.
         first_word = sql.split()[0].upper() if sql.split() else ""
-        if first_word in _DDL_KEYWORDS:
+        _ALLOWED_VERBS = {"INSERT", "UPDATE", "DELETE"}
+        if first_word not in _ALLOWED_VERBS:
             return {
                 "content": [{"type": "text", "text": (
-                    f"DDL not allowed via nutrition_execute (blocked: {first_word}). "
-                    "Only INSERT, UPDATE, and DELETE are permitted. "
-                    "Use nutrition_ddl for schema changes."
+                    f"nutrition_execute rejects leading verb '{first_word}'. "
+                    f"Only {sorted(_ALLOWED_VERBS)} are accepted. "
+                    "CTEs (WITH ... DELETE/UPDATE/INSERT), SELECT, and DDL are all blocked."
+                )}],
+                "is_error": True,
+            }
+        # Reject multi-statement payloads (defence-in-depth).
+        if ";" in sql.rstrip().rstrip(";"):
+            return {
+                "content": [{"type": "text", "text": (
+                    "nutrition_execute rejects multi-statement SQL. Submit one statement at a time."
                 )}],
                 "is_error": True,
             }
@@ -302,42 +312,17 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "nutrition_ddl",
-        "Execute a DDL statement on the nutrition_data database: CREATE TABLE, "
-        "CREATE INDEX, ALTER TABLE (ADD/ALTER/RENAME COLUMN). "
-        "DROP, TRUNCATE, GRANT, and REVOKE are blocked. "
-        "Use this to create new nutrition tracking tables or extend existing ones (bootstrap only).",
+        "DISABLED — schema changes must go through reviewed migrations, not the "
+        "agent runtime. Calling this tool returns a rejection.",
         {"sql": str},
     )
     async def nutrition_ddl(args: dict) -> dict:
-        args = _parse_args(args)
-        sql = (args.get("sql") or "").strip()
-        if not sql:
-            return _text("No SQL provided.")
-        first_word = sql.split()[0].upper() if sql.split() else ""
-        _ALLOWED = {"CREATE", "ALTER"}
-        _BLOCKED = {"DROP", "TRUNCATE", "GRANT", "REVOKE"}
-        if first_word in _BLOCKED:
-            return {
-                "content": [{"type": "text", "text": (
-                    f"DDL blocked: {first_word} is not allowed via nutrition_ddl. "
-                    "Only CREATE and ALTER statements are permitted."
-                )}],
-                "is_error": True,
-            }
-        if first_word not in _ALLOWED:
-            return {
-                "content": [{"type": "text", "text": (
-                    f"Unexpected DDL verb '{first_word}'. "
-                    "nutrition_ddl only accepts CREATE or ALTER statements."
-                )}],
-                "is_error": True,
-            }
-        try:
-            result = await _pg_run(sql)
-            return _text(f"OK: {result}")
-        except Exception as exc:
-            logger.error("nutrition_ddl: error — %s", exc)
-            return {"content": [{"type": "text", "text": f"DDL error: {exc}"}], "is_error": True}
+        return _text(
+            "nutrition_ddl is disabled. Schema changes require a database "
+            "migration reviewed by the operator. Add the change to "
+            "projects/cfo-upgrade/cfo-data-service/migrations/ or the "
+            "appropriate migration directory and apply it manually."
+        )
 
     # --- API placeholder tools ----------------------------------------------
 
@@ -453,11 +438,17 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
     else:
         send_message = None  # Redis not configured
 
-    from agent_runner.tools.report_issue import create_report_issue_tool, REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA
+    from agent_runner.tools.report_issue import (
+        create_report_issue_tool,
+        REPORT_ISSUE_DESCRIPTION,
+        REPORT_ISSUE_SCHEMA,
+    )
+
+    _report_issue_fn = create_report_issue_tool("don")
 
     @sdk_tool("report_issue", REPORT_ISSUE_DESCRIPTION, REPORT_ISSUE_SCHEMA)
     async def report_issue(args: dict) -> dict:
-        return await create_report_issue_tool("don")(args)
+        return await _report_issue_fn(args)
 
     all_tools = [
         daily_log,

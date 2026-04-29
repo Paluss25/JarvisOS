@@ -9,17 +9,25 @@ from pathlib import Path
 
 import yaml
 
-from models.fallback_model import FallbackModel
+from .fallback_model import FallbackModel
 
 logger = logging.getLogger(__name__)
+
+
+def _get_settings():
+    try:
+        from src.config import settings
+    except ImportError:
+        from config import settings
+    return settings
 
 
 def _build_single_model(provider: str, model_id: str):
     """Instantiate one Agno model from provider name + model ID."""
 
     if provider == "openai-codex":
-        from models.codex_model import create_codex_model
-        from config import settings
+        from .codex_model import create_codex_model
+        settings = _get_settings()
         return create_codex_model(
             model_id=model_id,
             auth_path=settings.codex_auth_path,
@@ -27,13 +35,13 @@ def _build_single_model(provider: str, model_id: str):
 
     elif provider == "xai":
         from agno.models.xai import xAI
-        from config import settings
+        settings = _get_settings()
         return xAI(id=model_id, api_key=settings.GROK_API_KEY)
 
     elif provider == "litellm":
         # Use LiteLLM self-hosted gateway via OpenAI-compatible API
         from agno.models.openai import OpenAILike
-        from config import settings
+        settings = _get_settings()
         return OpenAILike(
             id=model_id,
             name=f"LiteLLM/{model_id}",
@@ -44,17 +52,17 @@ def _build_single_model(provider: str, model_id: str):
 
     elif provider == "groq":
         from agno.models.groq import Groq
-        from config import settings
+        settings = _get_settings()
         return Groq(id=model_id, api_key=settings.groq_key)
 
     elif provider == "anthropic":
         from agno.models.anthropic import Claude
-        from config import settings
+        settings = _get_settings()
         return Claude(id=model_id, api_key=settings.ANTHROPIC_API_KEY)
 
     elif provider == "google":
         from agno.models.google import Gemini
-        from config import settings
+        settings = _get_settings()
         return Gemini(id=model_id, api_key=settings.GOOGLE_API_KEY)
 
     elif provider == "ollama":
@@ -72,7 +80,7 @@ def build_agent_model(agent_name: str) -> FallbackModel:
     wrapping [primary, fallback_1, fallback_2, ...].
 
     Args:
-        agent_name: Key in agent-models.yaml (e.g. "jarvis")
+        agent_name: Key in agent-models.yaml (e.g. "ceo")
 
     Returns:
         FallbackModel instance ready to pass to agno.Agent(model=...)
@@ -81,7 +89,7 @@ def build_agent_model(agent_name: str) -> FallbackModel:
         ValueError: If agent_name not found in config
         FileNotFoundError: If agent-models.yaml not found
     """
-    from config import settings
+    settings = _get_settings()
 
     config_path = settings.workspace_path / "config" / "agent-models.yaml"
 

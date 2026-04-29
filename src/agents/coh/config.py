@@ -14,10 +14,7 @@ DRHOUSE_BUILTIN_CRONS = [
             "1. NutritionDirector (DON) is reachable — send_message(to='don', message='ping') and check response. "
             "2. COH database connections (run a health_query to confirm nutrition_data is accessible). "
             "3. Yesterday's COH activity log — any errors or anomalies? "
-            "Produce a concise status (under 100 words). Then you MUST call report_issue. "
-            "Extract all technical issues found: unreachable services, DB errors, unexpected errors. "
-            "Call report_issue(issues=[...]) with all issues. "
-            "If no technical issues: call report_issue(issues=[]). Never skip this call."
+            "Produce a concise status (under 100 words)."
         ),
         "session_id": "heartbeat-morning",
         "telegram_notify": True,
@@ -35,22 +32,14 @@ DRHOUSE_BUILTIN_CRONS = [
             "Highlight conflicts between training load and nutrition (e.g. deficit on high-intensity day). "
             "Be directive and concise. "
             "After producing the briefing, forward a copy to Timothy (CIO) via: "
-            "send_message(to='cio', message=<your briefing>). "
-            "After producing and sending this briefing, you MUST call report_issue. "
-            "Extract all technical issues detected during this session: failed connections, "
-            "unreachable databases, MCP servers not responding, unexpected restarts, "
-            "elevated error rates, authentication failures. "
-            "Call report_issue(issues=[...]) with all issues found. "
-            "If no technical issues were detected: call report_issue(issues=[]). "
-            "Never skip this call."
-        ),
+            "send_message(to='cio', message=<your briefing>). "        ),
         "session_id": "heartbeat-morning",
         "telegram_notify": True,
         "builtin": True,
     },
     {
         "name": "eod_health_consolidation",
-        "schedule": "daily@23:00",
+        "schedule": "daily@23:30",
         "prompt": (
             "End-of-day health consolidation. Review today's data across all domains:\n"
             "1. Meals logged (query nutrition_data meals for today)\n"
@@ -60,7 +49,7 @@ DRHOUSE_BUILTIN_CRONS = [
             "Summarise in 3-4 bullet points. Log key findings to daily_log."
         ),
         "session_id": "heartbeat-eod",
-        "telegram_notify": False,
+        "telegram_notify": True,
         "builtin": True,
     },
     {
@@ -95,6 +84,21 @@ DRHOUSE_BUILTIN_CRONS = [
         "telegram_notify": False,
         "builtin": True,
     },
+    {
+        "name": "nightly_dreaming",
+        "schedule": "daily@02:00",
+        "prompt": (
+            "Nightly dreaming. Review your recent activity logs and long-term memory. "
+            "Produce a DREAMS.md that captures: unresolved threads (things started but "
+            "not finished), emerging patterns (recurring themes across days), free "
+            "associations (unexpected connections between topics), and seeds (ideas worth "
+            "developing later). Be interpretive, not just descriptive — surface what the "
+            "logs don't explicitly say. Return ONLY the raw markdown for DREAMS.md."
+        ),
+        "session_id": "heartbeat-dreaming",
+        "telegram_notify": False,
+        "builtin": True,
+    },
 ]
 
 
@@ -125,4 +129,7 @@ def build_drhouse_config(workspace_root: Path = Path("/app/workspace/coh")) -> A
             "WebSearch", "WebFetch", "Glob", "Grep",
             "Agent",
         ],
+        voice_enabled=True,
+        voice_language="it",
+        voice_tts_voice="it-IT-ElsaNeural",
     )

@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Payslip extracted fields",
+  "type": "object",
+  "required": ["period_from", "period_to", "net_pay"],
+  "properties": {
+    "period_from": {"type": "string", "format": "date"},
+    "period_to": {"type": "string", "format": "date"},
+    "employer": {"type": ["string", "null"]},
+    "gross_pay": {"type": ["number", "null"]},
+    "net_pay": {"type": "number"},
+    "inps_employee": {"type": ["number", "null"]},
+    "irpef_withheld": {"type": ["number", "null"]},
+    "tfr_accrued": {"type": ["number", "null"]},
+    "leave_residual_days": {"type": ["number", "null"]},
+    "rol_residual_hours": {"type": ["number", "null"]}
+  }
+}

@@ -297,8 +297,21 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
             return _text(await _send_message_fn(args))
+
+        @sdk_tool("forward_to_cos", "Forward a payload to ChiefOfStaff (COS) via A2A Redis bus.", {"payload_json": str, "reason": str})
+        async def forward_to_cos(args: dict) -> dict:
+            args = _parse_args(args)
+            payload_raw = args.get("payload_json", "").strip()
+            reason = args.get("reason", "escalation from MT").strip()
+            if not payload_raw:
+                return _text("payload_json is required.")
+            message = f"MT escalation: {reason}\n\nPayload:\n{payload_raw}"
+            result = await _send_message_fn({"to": "cos", "message": message})
+            return _text(f"Forwarded to COS. Response: {result}")
+
     else:
         send_message = None
+        forward_to_cos = None
 
     @sdk_tool(
         "cron_create",
@@ -786,18 +799,6 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         except Exception as exc:
             return _text(f"Contact delete failed: {exc}")
 
-    @sdk_tool("forward_to_cos", "Forward a payload to ChiefOfStaff (COS) via A2A.", {"payload_json": str, "reason": str})
-    async def forward_to_cos(args: dict) -> dict:
-        args = _parse_args(args)
-        payload_raw = args.get("payload_json", "").strip()
-        reason = args.get("reason", "escalation from MT").strip()
-        if not payload_raw:
-            return _text("payload_json is required.")
-        if send_message is None:
-            return _text("A2A bus not available — Redis not configured.")
-        message = f"MT escalation: {reason}\n\nPayload:\n{payload_raw}"
-        return await send_message({"to": "cos", "message": message})
-
     from agent_runner.tools.report_issue import (
         create_report_issue_tool,
         REPORT_ISSUE_DESCRIPTION,
@@ -826,7 +827,7 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         year = int(args.get("year", 0))
         db_url = os.environ.get("SPORT_POSTGRES_URL")
         if not db_url:
-            return {"error": "SPORT_POSTGRES_URL not configured"}
+            return _text("SPORT_POSTGRES_URL not configured")
         calendar_name = os.environ.get("RADICALE_TRAINING_CALENDAR", "TrainingPlan")
 
         try:
@@ -842,10 +843,10 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
             finally:
                 await conn.close()
         except Exception as exc:
-            return {"error": f"DB unavailable: {exc}"}
+            return _text(f"DB unavailable: {exc}")
 
         if not rows:
-            return {"synced": 0, "skipped": 0, "week": week_number, "year": year or datetime.date.today().isocalendar()[0], "calendar": calendar_name}
+            return _text(json.dumps({"synced": 0, "skipped": 0, "week": week_number, "year": year or datetime.date.today().isocalendar()[0], "calendar": calendar_name}))
 
         # Resolve year
         if year <= 0:
@@ -853,11 +854,11 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
 
         client = _get_calendar_client()
         if client is None:
-            return {"error": "CalDAV unavailable: RADICALE_URL not set"}
+            return _text("CalDAV unavailable: RADICALE_URL not set")
         try:
             cal_url = await asyncio.to_thread(client._ensure_calendar, calendar_name)
         except Exception as exc:
-            return {"error": f"CalDAV unavailable: {exc}"}
+            return _text(f"CalDAV unavailable: {exc}")
 
         rome = zoneinfo.ZoneInfo("Europe/Rome")
         synced = 0
@@ -894,7 +895,7 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
             await asyncio.to_thread(client.upsert_event, cal_url, uid, ical)
             synced += 1
 
-        return {"synced": synced, "skipped": skipped, "week": week_number, "year": year, "calendar": calendar_name}
+        return _text(json.dumps({"synced": synced, "skipped": skipped, "week": week_number, "year": year, "calendar": calendar_name}))
 
     all_tools = [
         daily_log,
@@ -919,11 +920,13 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         contacts_get,
         contacts_update,
         contacts_delete,
-        forward_to_cos,
         report_issue,
         sync_training_week,
     ]
     if send_message is not None:
         all_tools.append(send_message)
+    if forward_to_cos is not None:
+        all_tools.append(forward_to_cos)
 
-    return create_sdk_mcp_server("mt-tools", all_tools)
+    logger.info("mcp_server: MT tools registered (%d tools)", len(all_tools))
+    return create_sdk_mcp_server(name="mt-tools", tools=all_tools)
