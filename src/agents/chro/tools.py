@@ -838,7 +838,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                            (case_id, agent_id, action, output_schema_version, confidence)
                            VALUES ($1, $2, $3, $4, $5)""",
                         _to_uuid(case_id or record_id), "chro", f"save_to_db:{doc_type}", "1.0",
-                        float(fields.get("confidence", 0.0)) if fields.get("confidence") else None,
+                        float(fields["confidence"]) if fields.get("confidence") is not None else None,
                     )
 
                 return _text(f"Saved {doc_type} record id={record_id}")
@@ -959,9 +959,6 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
     # ---- A2A send_message ---------------------------------------------------
 
     if redis_a2a is not None:
-        from agent_runner.tools.send_message import create_send_message_tool
-        _send_message_fn = create_send_message_tool("chro", redis_a2a)
-
         @sdk_tool(
             "send_message",
             "Send a message to another agent and wait for their response. "
