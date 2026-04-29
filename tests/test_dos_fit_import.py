@@ -422,7 +422,12 @@ def test_dos_sport_query_documents_fit_tables_and_enriched_view():
 
 
 def test_coh_tools_document_enriched_fit_view():
-    text = Path("src/agents/coh/tools.py").read_text(encoding="utf-8")
+    from agents.coh.tools import create_drhouse_mcp_server
 
-    assert "activity_metrics_enriched" in text
-    assert "activity_fit_records" in text
+    server = create_drhouse_mcp_server(Path("/tmp"), redis_a2a=None)
+    health_query = next(tool for tool in server._tools if tool.name == "health_query")
+
+    assert "activity_metrics_enriched" in health_query.description
+    assert "activity_fit_records" in health_query.description
+    assert "canonical_avg_hr" in health_query.description
+    assert "file_sha256" in health_query.description

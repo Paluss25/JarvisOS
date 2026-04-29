@@ -222,8 +222,9 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "  weekly_summaries: id, week_start (DATE), week_end (DATE), total_sessions, completed_sessions, adherence_pct, avg_weight_kg, avg_body_fat_pct, waist_cm, total_calories_consumed, avg_protein_g. "
         "  goals: id, goal_type, metric, current_value, target_value, unit, status, target_date. "
         "  athlete_profile: id, name, date_of_birth, height_cm, sex. "
-        "  activity_metrics_enriched: enriched sport view with Strava values, FIT values, and canonical_* metrics for analysis. "
-        "  activity_fit_files, activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT data linked by activity_id. "
+        "  activity_metrics_enriched: activity_id, user_id, source, type, date, strava_activity_id, fit_file_id, fit_imported_at, strava_* values, fit_* values, canonical_duration_min, canonical_distance_km, canonical_avg_hr, canonical_max_hr, canonical_calories, canonical_avg_cadence, canonical_elevation_gain_m, canonical_avg_power, canonical_max_power, canonical_training_effect, canonical_anaerobic_training_effect. "
+        "  activity_fit_files: id, activity_id, user_id, file_path, file_sha256, manufacturer, product, serial_number, time_created, imported_at, raw_summary. "
+        "  activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT session/lap/record/field data linked by activity_id and fit_file_id. "
         "Only SELECT statements are permitted — DrHouse has read-only access to both databases.",
         {
             "database": str,
