@@ -100,6 +100,16 @@ async def fetch_research_fundamentals(
         return response.json()
 
 
+async def fetch_portfolio_snapshot(*, timeout: float = 30.0) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(
+            f"{sidecar_url()}/portfolio/snapshot",
+            headers=auth_headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+
 async def create_signal(
     *,
     signal_type: str,
