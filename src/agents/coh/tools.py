@@ -552,7 +552,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
                     "meal_type": {"type": "string"},
                     # date and notes are optional — LLM may omit them
                     "date": {"type": "string", "default": ""},
-                    "components": {"type": "array", "items": {}, "default": []},
+                    "components": {"anyOf": [{"type": "array", "items": {}}, {"type": "string"}], "default": []},
                     # numeric fields: accept both number and string (LLM sometimes passes '2.0' as a string)
                     "calories_est": {"anyOf": [{"type": "number"}, {"type": "string"}]},
                     "protein_g": {"anyOf": [{"type": "number"}, {"type": "string"}]},
@@ -573,6 +573,11 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             meal_type = (args.get("meal_type") or "snack").strip()
             meal_date = (args.get("date") or date.today().isoformat()).strip()
             components = args.get("components") or []
+            if isinstance(components, str):
+                try:
+                    components = json.loads(components)
+                except Exception:
+                    components = []
             # Coerce numeric fields — LLM may pass them as strings like '2.0' or '350'
             calories_est = _to_int(args.get("calories_est"))
             protein_g = _to_float(args.get("protein_g"))
