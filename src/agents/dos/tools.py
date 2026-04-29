@@ -750,7 +750,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
             "Push the training plan for a given ISO week to the TrainingPlan calendar via MT. "
             "Call this after writing or updating training_plan rows for a week. "
             "week_number is the ISO week number (1-53).",
-            {"week_number": int},
+            {"week_number": {"anyOf": [{"type": "integer"}, {"type": "string"}]}},
         )
         async def push_training_to_calendar(args: dict) -> dict:
             args = _parse_args(args)

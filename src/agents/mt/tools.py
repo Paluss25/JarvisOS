@@ -400,7 +400,9 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         except Exception as exc:
             return _text(f"Error: {exc}")
 
-    @sdk_tool("read_email_digest", "Read unprocessed entries from the MT email digest.", {"max_items": int})
+    @sdk_tool("read_email_digest", "Read unprocessed entries from the MT email digest.", {
+        "max_items": {"anyOf": [{"type": "integer"}, {"type": "string"}]},
+    })
     async def read_email_digest(args: dict) -> dict:
         args = _parse_args(args)
         max_items = int(args.get("max_items") or 10)
@@ -816,7 +818,10 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         "Sync a week's training plan from sport_metrics DB to the TrainingPlan Radicale calendar. "
         "Reads rows from training_plan table, computes real dates, and upserts CalDAV events. "
         "week_number is the ISO week number (1-53). year defaults to current year if omitted.",
-        {"week_number": int, "year": int},
+        {
+            "week_number": {"anyOf": [{"type": "integer"}, {"type": "string"}]},
+            "year": {"anyOf": [{"type": "integer"}, {"type": "string"}]},
+        },
     )
     async def sync_training_week(args: dict) -> dict:
         import asyncpg

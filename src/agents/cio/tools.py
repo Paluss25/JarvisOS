@@ -518,7 +518,11 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "start_minutes_ago: how many minutes back to search (default 15, max 1440). "
         "limit: max log lines to return (default 100, max 500). "
         "Returns matched lines with ISO timestamps.",
-        {"logql": str, "start_minutes_ago": int, "limit": int},
+        {
+            "logql": str,
+            "start_minutes_ago": {"anyOf": [{"type": "integer"}, {"type": "string"}]},
+            "limit": {"anyOf": [{"type": "integer"}, {"type": "string"}]},
+        },
     )
     async def loki_query(args: dict) -> dict:
         args = _parse_args(args)

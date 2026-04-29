@@ -640,7 +640,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             "Delete a logged meal from the nutrition database by its id. "
             "Use this to remove test entries, duplicates, or incorrectly logged meals. "
             "meal_id: the integer id returned by log_meal or from a health_query.",
-            {"meal_id": int},
+            {"meal_id": {"anyOf": [{"type": "integer"}, {"type": "string"}]}},
         )
         async def delete_meal(args: dict) -> dict:
             args = _parse_args(args)
