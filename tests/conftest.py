@@ -101,6 +101,29 @@ if "telegram" not in sys.modules:
     sys.modules["telegram.ext"] = _tg_ext
 
 # ---------------------------------------------------------------------------
+# Mock opentelemetry — not installed in test venv
+# ---------------------------------------------------------------------------
+if "opentelemetry" not in sys.modules:
+    _otel = MagicMock()
+    _otel_trace = MagicMock()
+    _otel_trace.StatusCode = type("StatusCode", (), {"OK": "OK", "ERROR": "ERROR"})
+    _otel.trace = _otel_trace
+    sys.modules["opentelemetry"] = _otel
+    sys.modules["opentelemetry.trace"] = _otel_trace
+    sys.modules["opentelemetry.sdk"] = MagicMock()
+    sys.modules["opentelemetry.sdk.resources"] = MagicMock()
+    sys.modules["opentelemetry.sdk.trace"] = MagicMock()
+    sys.modules["opentelemetry.sdk.trace.export"] = MagicMock()
+    sys.modules["opentelemetry.exporter"] = MagicMock()
+    sys.modules["opentelemetry.exporter.otlp"] = MagicMock()
+    sys.modules["opentelemetry.exporter.otlp.proto"] = MagicMock()
+    sys.modules["opentelemetry.exporter.otlp.proto.grpc"] = MagicMock()
+    sys.modules["opentelemetry.exporter.otlp.proto.grpc.trace_exporter"] = MagicMock()
+    sys.modules["opentelemetry.instrumentation"] = MagicMock()
+    sys.modules["opentelemetry.instrumentation.httpx"] = MagicMock()
+    sys.modules["opentelemetry.instrumentation.fastapi"] = MagicMock()
+
+# ---------------------------------------------------------------------------
 # caldav.error compatibility shim
 # caldav >= 2.x moved errors to caldav.lib.error; re-export at caldav.error
 # so that test imports (import caldav.error) work regardless of version.

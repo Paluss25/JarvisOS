@@ -58,6 +58,8 @@ services:
       - /home/paluss/docker/compose/jarvisOS/memory/schemas:/app/memory/schemas:ro
       - /home/paluss/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
       - /mnt/Brains/HR:/app/hr-docs:rw
+      - /mnt/Brains/Sport:/app/sport-docs:rw
+      - /mnt/Brains/Medical:/app/medical-docs:rw
     depends_on:
       redis:
         condition: service_healthy
