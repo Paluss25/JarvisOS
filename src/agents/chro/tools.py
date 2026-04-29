@@ -360,7 +360,6 @@ async def _run_pension_specialist(case) -> dict:
 
 async def _run_director(case) -> dict:
     """Director of Workforce Administration — parallel multi-domain dispatch."""
-    import asyncio
     payroll_task = asyncio.create_task(_run_payroll_specialist(case))
     leave_task = asyncio.create_task(_run_leave_specialist(case))
     pension_task = asyncio.create_task(_run_pension_specialist(case))
@@ -906,7 +905,6 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
         from chro_cpo.core.types import CaseEnvelope
         from chro_cpo.core.routing import Router
-        import uuid
 
         case = CaseEnvelope(
             case_id=str(uuid.uuid4()),
