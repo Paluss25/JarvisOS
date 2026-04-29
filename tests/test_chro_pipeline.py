@@ -150,6 +150,55 @@ def test_route_multi_domain_goes_to_director():
 import hashlib
 
 
+def test_full_pipeline_payslip_text():
+    """End-to-end: sanitize → classify → extract keywords → validate → verify structure."""
+    from agents.chro.tools import sanitize_pii, classify_document_from_text, validate_extracted_fields
+
+    # Simulate a payslip excerpt
+    raw_text = (
+        "Dipendente: RSSMRA85M01H703N Mario Rossi\n"
+        "Datore di lavoro: Acme SRL\n"
+        "Periodo: 01/03/2026 - 31/03/2026\n"
+        "Retribuzione lorda: 3.000,00\n"
+        "Retribuzione netta: 2.200,00\n"
+        "IRPEF: 450,00\n"
+        "Contributi INPS a carico dipendente: 275,70\n"
+        "TFR competenza: 207,30\n"
+        "Ferie residue: 12\n"
+        "IBAN: IT60X0542811101000000123456\n"
+    )
+
+    # Step 1: sanitize PII
+    sanitized = sanitize_pii(raw_text, extra_names=["Mario Rossi"])
+    assert "RSSMRA85M01H703N" not in sanitized
+    assert "IT60X0542811101000000123456" not in sanitized
+    assert "Mario Rossi" not in sanitized
+    assert "Acme SRL" in sanitized  # employer name is not PII
+    assert "3.000,00" in sanitized  # monetary values preserved
+
+    # Step 2: classify
+    doc_type = classify_document_from_text(sanitized)
+    assert doc_type == "payslip"
+
+    # Step 3: manual extraction (simulating LLM output)
+    fields = {
+        "period_from": "2026-03-01",
+        "period_to": "2026-03-31",
+        "employer": "Acme SRL",
+        "gross_pay": 3000.0,
+        "net_pay": 2200.0,
+        "inps_employee": 275.70,
+        "irpef_withheld": 450.0,
+        "tfr_accrued": 207.30,
+        "leave_residual_days": 12.0,
+        "rol_residual_hours": None,
+    }
+
+    # Step 4: validate — should not raise
+    validate_extracted_fields("payslip", fields)
+    assert fields["net_pay"] == 2200.0
+
+
 def test_audit_log_entry_hash():
     """_make_audit_entry should produce a deterministic hash for the same input."""
     from agents.chro.tools import _make_audit_entry
