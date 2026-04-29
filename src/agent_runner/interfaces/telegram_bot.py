@@ -950,42 +950,32 @@ async def _do_stream_image(
     if placeholder is not None:
         tasks.append(asyncio.create_task(_run_status_task(context.bot, chat_id, placeholder, state)))
 
-    try:
-        async for chunk in agent.stream_image(image_bytes, caption, session_id=session_id):
-            state["text"] += chunk
-
-        content = _strip_outer_code_fence(state["text"] or "(no response)")
-        content = _reformat_tables(content)
-
-        state["done"] = True
-        for t in tasks:
-            t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-        if placeholder is None:
-            await update.message.reply_text(content[:4096])
-        elif len(content) <= 4096:
+    async def _image_send_with_retry(coro_fn, *args, max_wait: float = 120.0, **kwargs):
+        for attempt in range(3):
             try:
-                await placeholder.edit_text(content, parse_mode=ParseMode.MARKDOWN)
-            except BadRequest:
-                try:
-                    await placeholder.edit_text(content)
-                except Exception as edit_exc:
-                    logger.warning("telegram: could not edit message — %s", edit_exc)
-        else:
-            await placeholder.delete()
-            for i in range(0, len(content), 4000):
-                piece = content[i : i + 4000]
-                try:
-                    await update.message.reply_text(piece, parse_mode=ParseMode.MARKDOWN)
-                except BadRequest:
-                    await update.message.reply_text(piece)
+                return await coro_fn(*args, **kwargs)
+            except RetryAfter as exc:
+                wait = float(exc.retry_after)
+                if wait > max_wait or attempt == 2:
+                    raise
+                logger.warning(
+                    "telegram: flood control on image (attempt %d) — waiting %.0fs",
+                    attempt + 1, wait,
+                )
+                await asyncio.sleep(wait)
 
-    except Exception as exc:
+    def _stop_image_tasks() -> None:
         state["done"] = True
         for t in tasks:
             if not t.done():
                 t.cancel()
+
+    # --- Phase 1: agent processing ---
+    try:
+        async for chunk in agent.stream_image(image_bytes, caption, session_id=session_id):
+            state["text"] += chunk
+    except Exception as exc:
+        _stop_image_tasks()
         await asyncio.gather(*tasks, return_exceptions=True)
         logger.error("telegram: error processing image — %s", exc, exc_info=True)
         msg = "Sorry, something went wrong processing the image. Check the logs."
@@ -996,12 +986,53 @@ async def _do_stream_image(
                 await update.message.reply_text(msg)
         except Exception as notify_exc:
             logger.error("telegram: failed to notify user of image error — %s", notify_exc)
-    finally:
-        state["done"] = True
-        for t in tasks:
-            if not t.done():
-                t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        return
+
+    # --- Phase 2: delivery (processing succeeded) ---
+    content = _strip_outer_code_fence(state["text"] or "(no response)")
+    content = _reformat_tables(content)
+    _stop_image_tasks()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        if placeholder is None:
+            await _image_send_with_retry(update.message.reply_text, content[:4096])
+        elif len(content) <= 4096:
+            try:
+                await _image_send_with_retry(
+                    placeholder.edit_text, content, parse_mode=ParseMode.MARKDOWN
+                )
+            except BadRequest:
+                try:
+                    await _image_send_with_retry(placeholder.edit_text, content)
+                except Exception as edit_exc:
+                    logger.warning("telegram: image edit failed, trying reply — %s", edit_exc)
+                    try:
+                        await _image_send_with_retry(update.message.reply_text, content[:4096])
+                    except Exception:
+                        pass
+        else:
+            try:
+                await placeholder.delete()
+            except Exception:
+                pass
+            for i in range(0, len(content), 4000):
+                piece = content[i : i + 4000]
+                try:
+                    await _image_send_with_retry(
+                        update.message.reply_text, piece, parse_mode=ParseMode.MARKDOWN
+                    )
+                except BadRequest:
+                    await _image_send_with_retry(update.message.reply_text, piece)
+    except Exception as delivery_exc:
+        logger.error(
+            "telegram: delivery failed after successful image processing — %s",
+            delivery_exc, exc_info=True,
+        )
+        try:
+            await update.message.reply_text(content[:4000])
+        except Exception:
+            pass
 
 
 async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1189,28 +1220,50 @@ async def _stream_to_agent(
     async def _drain_tasks() -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    async def _telegram_send_with_retry(coro_fn, *args, max_wait: float = 120.0, **kwargs):
+        """Call a Telegram coroutine, honouring RetryAfter up to max_wait seconds."""
+        for attempt in range(3):
+            try:
+                return await coro_fn(*args, **kwargs)
+            except RetryAfter as exc:
+                wait = float(exc.retry_after)
+                if wait > max_wait or attempt == 2:
+                    raise
+                logger.warning(
+                    "telegram: flood control (attempt %d) — waiting %.0fs before retry",
+                    attempt + 1, wait,
+                )
+                await asyncio.sleep(wait)
+
     async def _deliver(content: str) -> None:
         """Send final content: edit placeholder if present, reply_text otherwise.
         Falls back to a new reply_text if edit fails with a permanent error.
+        Respects Telegram flood control (RetryAfter) with up to 2 retries.
         """
         if placeholder is None:
             # off mode or placeholder failed — split and reply
             for i in range(0, len(content), 4000):
                 piece = content[i : i + 4000]
                 try:
-                    await update.message.reply_text(piece, parse_mode=ParseMode.MARKDOWN)
+                    await _telegram_send_with_retry(
+                        update.message.reply_text, piece, parse_mode=ParseMode.MARKDOWN
+                    )
                 except BadRequest:
-                    await update.message.reply_text(piece)
+                    await _telegram_send_with_retry(update.message.reply_text, piece)
         elif len(content) <= 4096:
             try:
-                await placeholder.edit_text(content, parse_mode=ParseMode.MARKDOWN)
+                await _telegram_send_with_retry(
+                    placeholder.edit_text, content, parse_mode=ParseMode.MARKDOWN
+                )
             except BadRequest:
                 try:
-                    await placeholder.edit_text(content)
+                    await _telegram_send_with_retry(placeholder.edit_text, content)
                 except Exception as edit_exc:
                     logger.warning("telegram: edit failed, falling back to reply — %s", edit_exc)
                     try:
-                        await update.message.reply_text(content[:4096])
+                        await _telegram_send_with_retry(
+                            update.message.reply_text, content[:4096]
+                        )
                     except Exception:
                         pass
         else:
@@ -1221,20 +1274,22 @@ async def _stream_to_agent(
             for i in range(0, len(content), 4000):
                 piece = content[i : i + 4000]
                 try:
-                    await update.message.reply_text(piece, parse_mode=ParseMode.MARKDOWN)
+                    await _telegram_send_with_retry(
+                        update.message.reply_text, piece, parse_mode=ParseMode.MARKDOWN
+                    )
                 except BadRequest:
-                    await update.message.reply_text(piece)
+                    await _telegram_send_with_retry(update.message.reply_text, piece)
 
     async def _notify_error(msg: str) -> None:
         """Best-effort error notification: try edit, fall back to reply."""
         try:
             if placeholder:
-                await placeholder.edit_text(msg)
+                await _telegram_send_with_retry(placeholder.edit_text, msg)
             else:
-                await update.message.reply_text(msg)
+                await _telegram_send_with_retry(update.message.reply_text, msg)
         except Exception:
             try:
-                await update.message.reply_text(msg)
+                await _telegram_send_with_retry(update.message.reply_text, msg)
             except Exception as final_exc:
                 logger.error("telegram: all error notification fallbacks failed — %s", final_exc)
 

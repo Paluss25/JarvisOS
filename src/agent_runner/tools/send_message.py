@@ -13,7 +13,12 @@ from agent_runner.registry import get_agent_entry
 
 logger = logging.getLogger(__name__)
 
-_RESPONSE_TIMEOUT = 120  # seconds
+_RESPONSE_TIMEOUT = 120  # seconds (default)
+# Agents that use thinking-mode LLMs + multi-step DB writes need more time.
+_AGENT_TIMEOUTS: dict[str, float] = {
+    "don": 300.0,   # NutritionDirector: thinking mode + multiple nutrition_execute calls
+    "dos": 240.0,   # DirectorOfSport: training plan generation + DB writes
+}
 
 
 def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
@@ -118,8 +123,9 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
             if not entry:
                 return f"Error: agent '{to}' not found in registry."
             port = entry["port"]
+            _timeout = _AGENT_TIMEOUTS.get(to, _RESPONSE_TIMEOUT)
             try:
-                async with httpx.AsyncClient(timeout=_RESPONSE_TIMEOUT) as client:
+                async with httpx.AsyncClient(timeout=_timeout) as client:
                     resp = await client.post(
                         f"http://localhost:{port}/a2a",
                         json={"from_agent": agent_id, "message": message},
@@ -129,8 +135,9 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
             except Exception as http_exc:
                 return f"Error: could not reach agent '{to}' via HTTP: {http_exc}"
 
+        _timeout = _AGENT_TIMEOUTS.get(to, _RESPONSE_TIMEOUT)
         try:
-            result = await asyncio.wait_for(future, timeout=_RESPONSE_TIMEOUT)
+            result = await asyncio.wait_for(future, timeout=_timeout)
             # Reset failure streak on success.
             _timeout_count.pop(to, None)
             _timeout_ts.pop(to, None)
@@ -138,7 +145,7 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
         except asyncio.TimeoutError:
             _timeout_ts[to] = time.monotonic()
             _timeout_count[to] = _timeout_count.get(to, 0) + 1
-            return f"Error: agent '{to}' did not respond within {_RESPONSE_TIMEOUT}s."
+            return f"Error: agent '{to}' did not respond within {_timeout:.0f}s."
         finally:
             _pending.pop(correlation_id, None)
 
