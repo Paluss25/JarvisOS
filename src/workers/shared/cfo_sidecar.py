@@ -100,6 +100,51 @@ async def fetch_research_fundamentals(
         return response.json()
 
 
+async def fetch_rebalance_advice(
+    *,
+    target_allocation: dict[str, float] | None = None,
+    band_pct: float = 2.0,
+    lookback_days: int = 365,
+    timeout: float = 60.0,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"band_pct": band_pct, "lookback_days": lookback_days}
+    if target_allocation is not None:
+        body["target_allocation"] = target_allocation
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{sidecar_url()}/analytics/rebalance",
+            json=body,
+            headers=auth_headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def create_approval(
+    *,
+    request_type: str,
+    requested_by: str,
+    summary: str,
+    payload: dict[str, Any] | None = None,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "request_type": request_type,
+        "requested_by": requested_by,
+        "summary": summary,
+    }
+    if payload is not None:
+        body["payload"] = payload
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{sidecar_url()}/approvals",
+            json=body,
+            headers=auth_headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+
 async def fetch_correlation_matrix(*, recompute: bool = False, window_days: int = 90, timeout: float = 60.0) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=timeout) as client:
         if recompute:
