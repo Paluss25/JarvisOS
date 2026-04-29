@@ -430,4 +430,6 @@ def test_coh_tools_document_enriched_fit_view():
     assert "activity_metrics_enriched" in health_query.description
     assert "activity_fit_records" in health_query.description
     assert "canonical_avg_hr" in health_query.description
+    assert "source_path" in health_query.description
     assert "file_sha256" in health_query.description
+    assert "raw_summary_json" in health_query.description
