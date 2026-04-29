@@ -89,6 +89,50 @@ async def _pg_query(sql: str, params: list | None = None) -> list[dict]:
         await conn.close()
 
 
+def _make_audit_entry(
+    case_id: str,
+    agent_id: str,
+    action: str,
+    input_text: str = "",
+    confidence: float | None = None,
+    escalation: bool = False,
+) -> dict:
+    import hashlib
+    input_hash = hashlib.sha256(input_text.encode("utf-8")).hexdigest() if input_text else ""
+    return {
+        "case_id": case_id,
+        "agent_id": agent_id,
+        "action": action,
+        "input_hash": input_hash,
+        "output_schema_version": "1.0",
+        "confidence": confidence,
+        "escalation": escalation,
+    }
+
+
+async def _write_audit(entry: dict) -> None:
+    """Write one audit log entry to chro.hr_audit_log."""
+    import asyncpg
+    url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
+    if not url:
+        return
+    try:
+        conn = await asyncpg.connect(url)
+        try:
+            await conn.execute(
+                """INSERT INTO chro.hr_audit_log
+                   (case_id, agent_id, action, input_hash, output_schema_version, confidence, escalation)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7)""",
+                entry["case_id"], entry["agent_id"], entry["action"],
+                entry.get("input_hash"), entry.get("output_schema_version", "1.0"),
+                entry.get("confidence"), bool(entry.get("escalation", False)),
+            )
+        finally:
+            await conn.close()
+    except Exception as exc:
+        logger.warning("_write_audit: failed — %s", exc)
+
+
 # PII redaction patterns — ordered most-specific first
 _PII_PATTERNS: list[tuple[re.Pattern, str]] = [
     # Italian codice fiscale: 16 alphanumeric chars (both upper and lower case)
@@ -527,6 +571,14 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
         doc_type = classify_document_from_text(text)
         if doc_type != "unknown":
+            # Audit: record classification step
+            import asyncio, uuid
+            asyncio.ensure_future(_write_audit(_make_audit_entry(
+                case_id=str(uuid.uuid4()),
+                agent_id="chro",
+                action=f"classify_document:{doc_type}",
+                input_text=text[:200],
+            )))
             return _text(doc_type)
 
         # Slow path: LLM classification (Haiku)
@@ -548,7 +600,15 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             )
             result = response.content[0].text.strip().lower()
             valid = {"payslip", "leave_statement", "inps_extract", "expense_report", "unknown"}
-            return _text(result if result in valid else "unknown")
+            doc_type = result if result in valid else "unknown"
+            import asyncio, uuid
+            asyncio.ensure_future(_write_audit(_make_audit_entry(
+                case_id=str(uuid.uuid4()),
+                agent_id="chro",
+                action=f"classify_document:{doc_type}",
+                input_text=text[:200],
+            )))
+            return _text(doc_type)
         except Exception as exc:
             logger.error("classify_document LLM fallback failed: %s", exc)
             return _text("unknown")
@@ -609,6 +669,14 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                 raw = re.sub(r"^```[a-z]*\n?", "", raw)
                 raw = re.sub(r"\n?```$", "", raw)
             extracted = json.loads(raw)
+            import asyncio, uuid
+            asyncio.ensure_future(_write_audit(_make_audit_entry(
+                case_id=str(uuid.uuid4()),
+                agent_id="chro",
+                action=f"extract_fields:{doc_type}",
+                input_text=text[:200],
+                confidence=float(extracted.get("confidence", 0.0)) if isinstance(extracted.get("confidence"), (int, float)) else None,
+            )))
             return {"content": [{"type": "text", "text": json.dumps(extracted, ensure_ascii=False)}]}
         except json.JSONDecodeError as exc:
             return _text(f"LLM returned non-JSON response: {exc}")
@@ -654,6 +722,12 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("doc_type is required.")
         try:
             validate_extracted_fields(doc_type, fields)
+            import asyncio, uuid
+            asyncio.ensure_future(_write_audit(_make_audit_entry(
+                case_id=str(uuid.uuid4()),
+                agent_id="chro",
+                action=f"validate_schema:{doc_type}",
+            )))
             return _text("valid")
         except ValidationError as exc:
             return {"content": [{"type": "text", "text": str(exc)}], "is_error": True}
@@ -796,6 +870,12 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("src_path and doc_type are required.")
         try:
             dest = archive_document(src_path, doc_type, period_year=period_year)
+            import asyncio, uuid
+            asyncio.ensure_future(_write_audit(_make_audit_entry(
+                case_id=str(uuid.uuid4()),
+                agent_id="chro",
+                action=f"archive_doc:{doc_type}",
+            )))
             return _text(f"Archived to {dest}")
         except FileNotFoundError as exc:
             return _text(str(exc))

@@ -145,3 +145,22 @@ def test_route_multi_domain_goes_to_director():
     )
     route = Router().route(case)
     assert route == "director_workforce_admin"
+
+
+import hashlib
+
+
+def test_audit_log_entry_hash():
+    """_make_audit_entry should produce a deterministic hash for the same input."""
+    from agents.chro.tools import _make_audit_entry
+    entry = _make_audit_entry(
+        case_id="case-001",
+        agent_id="payroll_intelligence",
+        action="extract_fields",
+        input_text="Retribuzione netta: 2.200,00",
+        confidence=0.88,
+    )
+    assert entry["input_hash"]
+    assert len(entry["input_hash"]) == 64  # SHA-256 hex
+    assert entry["agent_id"] == "payroll_intelligence"
+    assert entry["confidence"] == 0.88
