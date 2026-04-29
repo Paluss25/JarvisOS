@@ -59,7 +59,7 @@ services:
       - /home/paluss/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
       - /mnt/Brains/Sport:/mnt/Brains/Sport:ro
       - /mnt/Brains/HR:/app/hr-docs:rw
-      - /mnt/Brains/Sport:/app/sport-docs:rw
+      - /mnt/Brains/Sport:/app/sport-docs:ro
       - /mnt/Brains/Medical:/app/medical-docs:rw
     depends_on:
       redis:
