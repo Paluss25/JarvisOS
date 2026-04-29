@@ -40,6 +40,36 @@ CHRO_BUILTIN_CRONS = [
         "builtin": True,
     },
     {
+        "name": "net_pay_anomaly_alert",
+        "schedule": "weekly@wed@09:00",
+        "prompt": (
+            "Net pay anomaly check.\n"
+            "Query: SELECT period_from, period_to, net_pay FROM chro.payslips ORDER BY period_to DESC LIMIT 2\n"
+            "If the latest net_pay differs from the previous by more than 5%, "
+            "send a Telegram alert to Paluss: 'ANOMALIA CEDOLINO: netto variato di X% — verifica.'\n"
+            "If no anomaly, do nothing (no message).\n"
+            "If fewer than 2 payslips exist, do nothing."
+        ),
+        "session_id": "heartbeat-anomaly-check",
+        "telegram_notify": True,
+        "builtin": True,
+    },
+    {
+        "name": "leave_low_warning",
+        "schedule": "weekly@mon@09:30",
+        "prompt": (
+            "Annual leave low-balance warning check.\n"
+            "Only act if today is the first Monday of the month (day <= 7).\n"
+            "Query: SELECT ferie_remaining, snapshot_date FROM chro.leave_snapshots ORDER BY snapshot_date DESC LIMIT 1\n"
+            "If ferie_remaining < 5 days AND we are within 90 days of Dec 31, "
+            "alert Paluss via Telegram: 'ATTENZIONE: Ferie residue critiche (X giorni). Pianifica prima della fine anno.'\n"
+            "If balance is sufficient, we are not in Q4, or today is NOT the first Monday of the month (day > 7), do nothing."
+        ),
+        "session_id": "heartbeat-leave-warning",
+        "telegram_notify": True,
+        "builtin": True,
+    },
+    {
         "name": "weekly_memory_consolidation",
         "schedule": "weekly@sun@20:30",
         "prompt": (
