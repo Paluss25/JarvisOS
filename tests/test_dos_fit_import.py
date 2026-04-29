@@ -292,7 +292,7 @@ async def test_import_fit_data_inserts_sessions_laps_records_and_fields():
     parsed = FitActivityData(
         source_path=Path("/tmp/activity.fit"),
         file_sha256="abc",
-        file_id={"manufacturer": "garmin", "time_created": timestamp},
+        file_id={"manufacturer": "garmin", "serial_number": 3447005442, "time_created": timestamp},
         raw_summary={"file_id": {"time_created": timestamp}},
         sessions=[{
             "sport": "running",
@@ -328,6 +328,7 @@ async def test_import_fit_data_inserts_sessions_laps_records_and_fields():
     assert conn.executemany.await_count == 2
     conn.transaction.assert_called_once()
     file_insert_args = conn.fetchrow.await_args_list[1].args
+    assert file_insert_args[7] == "3447005442"
     assert '"2026-04-27T10:31:00+00:00"' in file_insert_args[-1]
 
 

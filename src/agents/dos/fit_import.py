@@ -242,6 +242,12 @@ def _jsonb(value: Any) -> str:
     return json.dumps(_json_safe(value), default=_json_default)
 
 
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
 async def import_fit_data(
     conn: Any,
     parsed: FitActivityData,
@@ -269,9 +275,9 @@ async def import_fit_data(
             user_id,
             str(parsed.source_path),
             parsed.file_sha256,
-            parsed.file_id.get("manufacturer"),
-            parsed.file_id.get("product"),
-            parsed.file_id.get("serial_number"),
+            _optional_text(parsed.file_id.get("manufacturer")),
+            _optional_text(parsed.file_id.get("product")),
+            _optional_text(parsed.file_id.get("serial_number")),
             parsed.file_id.get("time_created"),
             _jsonb(parsed.raw_summary),
         )
