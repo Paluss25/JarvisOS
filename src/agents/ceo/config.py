@@ -8,7 +8,7 @@ from agent_runner.config import AgentConfig
 JARVIS_BUILTIN_CRONS = [
     {
         "name": "morning_briefing",
-        "schedule": "daily@08:00",
+        "schedule": "daily@08:15",
         "prompt": (
             "Good morning! Prepare a concise morning briefing (under 200 words). "
             "Include: key items from yesterday's activity log, any tasks or appointments "

@@ -8,7 +8,7 @@ from agent_runner.config import AgentConfig
 MARK_BUILTIN_CRONS = [
     {
         "name": "morning_briefing",
-        "schedule": "daily@08:00",
+        "schedule": "daily@08:25",
         "prompt": (
             "Good morning. Review yesterday's routing log. Concise briefing (under 200 words): "
             "cases routed, any pending escalations, items awaiting human approval, "

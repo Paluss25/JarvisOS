@@ -12,6 +12,7 @@ Tools:
   get_recent_activities  — Typed: recent sport activities by date range
   get_training_plan      — Typed: training plan for a given ISO week number
   get_waist_measurements — Typed: waist circumference measurements by date range
+  medical_query          — Semantic search across ingested medical PDFs (referti, analysis reports)
 """
 
 import json
@@ -679,10 +680,60 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
     async def report_issue(args: dict) -> dict:
         return await _report_issue_fn(args)
 
+    _MEMORY_BOX_URL = os.getenv("MEMORY_BOX_URL", "http://10.10.200.139:8000")
+
+    @sdk_tool(
+        "medical_query",
+        "Semantic search across ingested medical PDF reports (referti, blood tests, diagnostics). "
+        "Returns the most relevant excerpts from documents previously ingested via 'memory-box ingest --collection medical'. "
+        "Use this when the user references a medical report, lab result, or diagnostic document. "
+        "Do NOT infer or fabricate values — only report what is found in the results.",
+        {"query": str, "top_k": {"type": "integer", "default": 5}},
+    )
+    async def medical_query(args: dict) -> dict:
+        import httpx
+        args = _parse_args(args)
+        query = args.get("query", "").strip()
+        if not query:
+            return _text("No query provided.")
+        top_k = _to_int(args.get("top_k")) or 5
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{_MEMORY_BOX_URL}/query",
+                    json={"query": query, "collection": "medical", "top_k": top_k},
+                )
+        except httpx.RequestError as exc:
+            return _text(f"medical_query: connection error — {exc}")
+
+        if resp.status_code == 500:
+            return _text(
+                "No medical documents found. "
+                "Ingest a PDF first with: memory-box ingest --file <path> --collection medical"
+            )
+        if not resp.is_success:
+            return _text(f"medical_query: unexpected error {resp.status_code}")
+
+        data = resp.json()
+        results = data.get("results", [])
+        if not results:
+            return _text(f"No results found for '{query}' in medical documents.")
+
+        parts = []
+        for i, r in enumerate(results, 1):
+            text = r.get("text", "").strip()
+            score = r.get("score", 0)
+            source = r.get("source", "") or r.get("metadata", {}).get("source", "")
+            header = f"[{i}] score={score:.2f}" + (f" — {source}" if source else "")
+            parts.append(f"{header}\n{text}")
+
+        return _text("\n\n---\n\n".join(parts))
+
     all_tools = [daily_log, memory_search, memory_get, health_query,
                  get_meals, get_body_measurements, get_daily_nutrition,
                  get_nutrition_goals, get_recent_activities, get_training_plan, get_waist_measurements,
-                 report_issue]
+                 medical_query, report_issue]
     if send_message is not None:
         all_tools.append(send_message)
     if log_meal is not None:

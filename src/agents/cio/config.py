@@ -8,7 +8,7 @@ from agent_runner.config import AgentConfig
 TIMOTHY_BUILTIN_CRONS = [
     {
         "name": "morning_briefing",
-        "schedule": "daily@08:00",
+        "schedule": "daily@08:45",
         "prompt": (
             "IT morning briefing. Review yesterday's daily log and produce a concise status "
             "summary (under 200 words, 3-5 bullet points):\n"
@@ -24,7 +24,7 @@ TIMOTHY_BUILTIN_CRONS = [
     },
     {
         "name": "issue_collector",
-        "schedule": "daily@08:15",
+        "schedule": "daily@08:50",
         "prompt": (
             "Issue collection time. You MUST immediately call the collect_and_remediate tool. "
             "Do not produce any text, analysis, or briefing before calling it. "

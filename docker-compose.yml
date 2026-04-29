@@ -33,6 +33,7 @@ services:
       DETECTOR_PORT: "8013"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://10.10.200.139:4317"
       OTEL_SERVICE_NAME: "jarvios-platform"
+      MEMORY_BOX_URL: "http://10.10.200.139:8000"
     labels:
       # Jarvis API — jarvis.prova9x.com
       - "traefik.enable=true"

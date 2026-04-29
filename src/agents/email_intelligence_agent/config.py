@@ -75,7 +75,7 @@ EMAIL_INTELLIGENCE_BUILTIN_CRONS = [
     },
     {
         "name": "morning_briefing",
-        "schedule": "daily@08:00",
+        "schedule": "daily@08:05",
         "prompt": (
             "Morning email briefing. Poll for unread emails on all accounts (process up to 20). "
             "After processing, send a summary to cos via send_message: "

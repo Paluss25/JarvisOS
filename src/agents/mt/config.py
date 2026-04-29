@@ -26,7 +26,7 @@ MT_BUILTIN_CRONS = [
     },
     {
         "name": "morning_briefing",
-        "schedule": "daily@08:10",
+        "schedule": "daily@08:40",
         "prompt": (
             "Prepare a short operational morning briefing using today's tasks, calendar, "
             "and any pending digest items. Keep it concise and actionable."

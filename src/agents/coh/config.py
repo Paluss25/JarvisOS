@@ -8,7 +8,7 @@ from agent_runner.config import AgentConfig
 DRHOUSE_BUILTIN_CRONS = [
     {
         "name": "morning_briefing",
-        "schedule": "daily@08:00",
+        "schedule": "daily@08:20",
         "prompt": (
             "Morning infrastructure check for COH. Verify: "
             "1. NutritionDirector (DON) is reachable — send_message(to='don', message='ping') and check response. "
@@ -22,7 +22,7 @@ DRHOUSE_BUILTIN_CRONS = [
     },
     {
         "name": "morning_health_briefing",
-        "schedule": "daily@08:05",
+        "schedule": "daily@08:35",
         "prompt": (
             "Morning health briefing. Aggregate and synthesize a concise integrated health brief (under 200 words):\n"
             "1. Today's training plan from Roger (use send_message to ask Roger for today's session)\n"
