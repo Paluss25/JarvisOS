@@ -16,11 +16,13 @@ Tools (added in P2):
   archive_doc       — move from inbox/ to archive/YYYY/tipo/
 """
 
+import asyncio
 import json
 import logging
 import os
 import re
 import shutil
+import uuid
 from datetime import date, datetime
 from pathlib import Path
 
@@ -98,7 +100,7 @@ def _make_audit_entry(
     escalation: bool = False,
 ) -> dict:
     import hashlib
-    input_hash = hashlib.sha256(input_text.encode("utf-8")).hexdigest() if input_text else ""
+    input_hash = hashlib.sha256(input_text.encode("utf-8")).hexdigest() if input_text else None
     return {
         "case_id": case_id,
         "agent_id": agent_id,
@@ -572,8 +574,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         doc_type = classify_document_from_text(text)
         if doc_type != "unknown":
             # Audit: record classification step
-            import asyncio, uuid
-            asyncio.ensure_future(_write_audit(_make_audit_entry(
+            asyncio.create_task(_write_audit(_make_audit_entry(
                 case_id=str(uuid.uuid4()),
                 agent_id="chro",
                 action=f"classify_document:{doc_type}",
@@ -601,8 +602,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             result = response.content[0].text.strip().lower()
             valid = {"payslip", "leave_statement", "inps_extract", "expense_report", "unknown"}
             doc_type = result if result in valid else "unknown"
-            import asyncio, uuid
-            asyncio.ensure_future(_write_audit(_make_audit_entry(
+            asyncio.create_task(_write_audit(_make_audit_entry(
                 case_id=str(uuid.uuid4()),
                 agent_id="chro",
                 action=f"classify_document:{doc_type}",
@@ -669,8 +669,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                 raw = re.sub(r"^```[a-z]*\n?", "", raw)
                 raw = re.sub(r"\n?```$", "", raw)
             extracted = json.loads(raw)
-            import asyncio, uuid
-            asyncio.ensure_future(_write_audit(_make_audit_entry(
+            asyncio.create_task(_write_audit(_make_audit_entry(
                 case_id=str(uuid.uuid4()),
                 agent_id="chro",
                 action=f"extract_fields:{doc_type}",
@@ -722,8 +721,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("doc_type is required.")
         try:
             validate_extracted_fields(doc_type, fields)
-            import asyncio, uuid
-            asyncio.ensure_future(_write_audit(_make_audit_entry(
+            asyncio.create_task(_write_audit(_make_audit_entry(
                 case_id=str(uuid.uuid4()),
                 agent_id="chro",
                 action=f"validate_schema:{doc_type}",
@@ -870,8 +868,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("src_path and doc_type are required.")
         try:
             dest = archive_document(src_path, doc_type, period_year=period_year)
-            import asyncio, uuid
-            asyncio.ensure_future(_write_audit(_make_audit_entry(
+            asyncio.create_task(_write_audit(_make_audit_entry(
                 case_id=str(uuid.uuid4()),
                 agent_id="chro",
                 action=f"archive_doc:{doc_type}",
