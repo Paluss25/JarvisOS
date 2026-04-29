@@ -419,3 +419,10 @@ def test_dos_sport_query_documents_fit_tables_and_enriched_view():
 
     assert "activity_fit_records" in text
     assert "activity_metrics_enriched" in text
+
+
+def test_coh_tools_document_enriched_fit_view():
+    text = Path("src/agents/coh/tools.py").read_text(encoding="utf-8")
+
+    assert "activity_metrics_enriched" in text
+    assert "activity_fit_records" in text
