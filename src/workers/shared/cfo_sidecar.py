@@ -145,6 +145,36 @@ async def create_approval(
         return response.json()
 
 
+async def fetch_holdings(*, timeout: float = 30.0) -> list[dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(
+            f"{sidecar_url()}/portfolio/holdings",
+            headers=auth_headers(),
+        )
+        response.raise_for_status()
+        data = response.json()
+    if isinstance(data, list):
+        return data
+    return data.get("holdings") or data.get("positions") or []
+
+
+async def fetch_technical_analysis(
+    symbol: str,
+    *,
+    indicators: str = "rsi",
+    limit: int = 100,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(
+            f"{sidecar_url()}/analytics/ta/{symbol.upper()}",
+            params={"indicators": indicators, "limit": limit},
+            headers=auth_headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+
 async def fetch_correlation_matrix(*, recompute: bool = False, window_days: int = 90, timeout: float = 60.0) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=timeout) as client:
         if recompute:
