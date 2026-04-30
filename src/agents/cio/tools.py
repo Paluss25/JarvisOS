@@ -15,12 +15,10 @@ Tools:
 """
 
 import asyncio
-import io
 import json
 import logging
 import os
 import socket as _socket
-import tarfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -77,7 +75,11 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "daily_log",
         "Append a timestamped entry to today's Timothy memory log. "
         "Use this to record infrastructure changes, incidents, decisions, findings, and resolved issues. message is required.",
-        {"message": {"type": "string", "default": ""}},
+        {
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+        },
     )
     async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
@@ -97,7 +99,14 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Search across long-term memory (MEMORY.md) and all daily logs (memory/*.md) using text matching. "
         "Use this to recall past incidents, infrastructure changes, decisions, or known issues. "
         "Results include the matching lines with surrounding context, most recent files first.",
-        {"query": str, "top_k": {"type": "integer", "default": 5}},
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "top_k": {"type": "integer", "default": 5},
+            },
+            "required": ["query"],
+        },
     )
     async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
@@ -142,7 +151,15 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a specific memory file from the workspace. "
         "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
         "Optionally specify start_line and num_lines to read a slice.",
-        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "start_line": {"type": "integer", "default": 1},
+                "num_lines": {"type": "integer", "default": 50},
+            },
+            "required": ["path"],
+        },
     )
     async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
@@ -151,7 +168,9 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
-        if not str(target).startswith(str(workspace_path.resolve())):
+        try:
+            target.relative_to(workspace_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
@@ -182,7 +201,14 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Use this before writing any health report to verify actual service state. "
         "urls: comma-separated list of URLs (e.g. 'http://10.10.200.50/ping,http://10.10.200.62:80'). "
         "timeout: per-request timeout in seconds (default 5).",
-        {"urls": str, "timeout": int},
+        {
+            "type": "object",
+            "properties": {
+                "urls": {"type": "string"},
+                "timeout": {"type": "integer", "default": 5},
+            },
+            "required": ["urls"],
+        },
     )
     async def infra_check(args: dict) -> dict:
         args = _parse_args(args)
@@ -220,7 +246,20 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "name: container name or id (required for logs/inspect). "
         "lines: number of log lines to tail (default 30, max 200). "
         "filter: optional substring to filter container names.",
-        {"resource": str, "name": str, "lines": int, "filter": str},
+        {
+            "type": "object",
+            "properties": {
+                "resource": {
+                    "type": "string",
+                    "enum": ["containers", "networks", "logs", "inspect", "version"],
+                    "default": "containers",
+                },
+                "name": {"type": "string"},
+                "lines": {"type": "integer", "default": 30},
+                "filter": {"type": "string"},
+            },
+            "required": ["resource"],
+        },
     )
     async def docker_query(args: dict) -> dict:
         args = _parse_args(args)
@@ -331,7 +370,15 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Run docker_query first to confirm the exact container name. "
         "name: container name or id. "
         "timeout: graceful stop timeout in seconds before kill (default 10, only used for 'stop').",
-        {"action": str, "name": str, "timeout": int},
+        {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["restart", "start", "stop", "kill"]},
+                "name": {"type": "string"},
+                "timeout": {"type": "integer", "default": 10},
+            },
+            "required": ["action", "name"],
+        },
     )
     async def docker_action(args: dict) -> dict:
         args = _parse_args(args)
@@ -375,7 +422,14 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "No system tools needed — uses pure-Python asyncio. "
         "targets: comma-separated list of host:port (e.g. 'postgres-shared:5432,10.10.200.50:443'). "
         "timeout: per-target timeout in seconds (default 3).",
-        {"targets": str, "timeout": int},
+        {
+            "type": "object",
+            "properties": {
+                "targets": {"type": "string"},
+                "timeout": {"type": "integer", "default": 3},
+            },
+            "required": ["targets"],
+        },
     )
     async def tcp_check(args: dict) -> dict:
         args = _parse_args(args)
@@ -416,7 +470,11 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Resolve hostnames to IP addresses using the container's DNS resolver. "
         "No dig/nslookup needed — uses Python socket. "
         "hosts: comma-separated list of hostnames (e.g. 'postgres-shared,socket-proxy,traefik.prova9x.com').",
-        {"hosts": str},
+        {
+            "type": "object",
+            "properties": {"hosts": {"type": "string"}},
+            "required": ["hosts"],
+        },
     )
     async def dns_lookup(args: dict) -> dict:
         args = _parse_args(args)
@@ -519,9 +577,13 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "limit: max log lines to return (default 100, max 500). "
         "Returns matched lines with ISO timestamps.",
         {
-            "logql": str,
-            "start_minutes_ago": {"anyOf": [{"type": "integer"}, {"type": "string"}]},
-            "limit": {"anyOf": [{"type": "integer"}, {"type": "string"}]},
+            "type": "object",
+            "properties": {
+                "logql": {"type": "string"},
+                "start_minutes_ago": {"type": "integer", "default": 15},
+                "limit": {"type": "integer", "default": 100},
+            },
+            "required": ["logql"],
         },
     )
     async def loki_query(args: dict) -> dict:
@@ -590,7 +652,11 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a runbook file from the runbooks directory. "
         "filename: the filename (e.g. 'runbook-telegram-crash.md' or 'index.yaml'). "
         "Returns the full file content.",
-        {"filename": str},
+        {
+            "type": "object",
+            "properties": {"filename": {"type": "string"}},
+            "required": ["filename"],
+        },
     )
     async def runbook_read(args: dict) -> dict:
         args = _parse_args(args)
@@ -624,7 +690,14 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "or when an existing runbook needs correction. "
         "filename: target filename (e.g. 'runbook-new-issue.md'). "
         "content: full file content (markdown or yaml).",
-        {"filename": str, "content": str},
+        {
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["filename", "content"],
+        },
     )
     async def runbook_write(args: dict) -> dict:
         args = _parse_args(args)
@@ -673,7 +746,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "supervisorctl restart don",
         "supervisorctl restart dos",
         "supervisorctl restart mt",
-        "supervisorctl restart email-intelligence-agent",
+        "supervisorctl restart email_intelligence_agent",
         "supervisorctl restart ceo",
     }
 
@@ -691,7 +764,14 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "'supervisorctl status', 'supervisorctl tail coh', 'supervisorctl restart worker-market'). "
         "Use 'supervisorctl tail <agent>' to read recent stdout of a specific process. "
         "Returns combined stdout+stderr output.",
-        {"container": str, "command": str},
+        {
+            "type": "object",
+            "properties": {
+                "container": {"type": "string"},
+                "command": {"type": "string"},
+            },
+            "required": ["container", "command"],
+        },
     )
     async def container_exec(args: dict) -> dict:
         args = _parse_args(args)
@@ -787,7 +867,15 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "the agent runtime. To patch a file in a running container, the operator "
         "must perform `docker cp` manually after review. "
         "Calling this tool returns a clear rejection.",
-        {"container": str, "path": str, "content": str},
+        {
+            "type": "object",
+            "properties": {
+                "container": {"type": "string"},
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["container", "path", "content"],
+        },
     )
     async def container_file_patch(args: dict) -> dict:
         args = _parse_args(args)
@@ -800,45 +888,6 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             "If a recurring patch is required, add a wrapper in the agent "
             "image and an explicit allowlist before re-enabling this tool."
         )
-        # Unreachable code below kept for reference if the tool is ever
-        # re-enabled with a real HITL gate + path allowlist.
-        proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")  # noqa: E501
-
-        # Build a tar archive in memory with the single file
-        filename = os.path.basename(path)
-        dir_path = os.path.dirname(path) or "/"
-
-        tar_buffer = io.BytesIO()
-        content_bytes = content.encode("utf-8")
-        with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
-            info = tarfile.TarInfo(name=filename)
-            info.size = len(content_bytes)
-            tar.addfile(info, io.BytesIO(content_bytes))
-        tar_buffer.seek(0)
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.put(
-                    f"{proxy}/containers/{container}/archive",
-                    params={"path": dir_path},
-                    content=tar_buffer.getvalue(),
-                    headers={"Content-Type": "application/x-tar"},
-                )
-                if resp.status_code == 404:
-                    return _text(f"Container '{container}' not found.")
-                if resp.status_code not in (200, 204):
-                    return _text(
-                        f"Docker archive PUT failed: HTTP {resp.status_code} — {resp.text[:200]}"
-                    )
-                return _text(
-                    f"File patched: {path} in container '{container}' "
-                    f"({len(content_bytes)} bytes written)"
-                )
-        except httpx.ConnectError:
-            return _text(f"Cannot reach Docker socket proxy at {proxy}.")
-        except Exception as exc:
-            logger.error("container_file_patch[%s%s]: error — %s", container, path, exc)
-            return {"content": [{"type": "text", "text": f"Patch error: {exc}"}], "is_error": True}
 
     # --- A2A send_message (Redis pub/sub) -----------------------------------
 
@@ -853,7 +902,15 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             "'message' is the natural language request to send. "
             "Use this for cross-domain escalation, executive decisions, or business context. "
             "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
-            {"to": str, "message": str, "wait_response": bool},
+            {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string"},
+                    "message": {"type": "string"},
+                    "wait_response": {"type": "boolean", "default": True},
+                },
+                "required": ["to", "message"],
+            },
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
@@ -869,7 +926,17 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "schedule format: 'daily@HH:MM' | 'weekly@DOW@HH:MM' (mon/tue/.../sun) | 'once@YYYY-MM-DD@HH:MM'. "
         "All times are Europe/Rome (CET/CEST). "
         "telegram_notify: set to true to receive a Telegram message with the result.",
-        {"name": str, "schedule": str, "prompt": str, "session_id": str, "telegram_notify": bool},
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "schedule": {"type": "string"},
+                "prompt": {"type": "string"},
+                "session_id": {"type": "string", "default": ""},
+                "telegram_notify": {"type": "boolean", "default": False},
+            },
+            "required": ["name", "schedule", "prompt"],
+        },
     )
     async def cron_create(args: dict) -> dict:
         args = _parse_args(args)
@@ -922,8 +989,19 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "cron_update",
         "Update a scheduled task by its id. "
         "Updatable fields: name, schedule, prompt, session_id, telegram_notify, enabled.",
-        {"id": str, "name": str, "schedule": str, "prompt": str,
-         "session_id": str, "telegram_notify": bool, "enabled": bool},
+        {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "name": {"type": "string"},
+                "schedule": {"type": "string"},
+                "prompt": {"type": "string"},
+                "session_id": {"type": "string"},
+                "telegram_notify": {"type": "boolean"},
+                "enabled": {"type": "boolean"},
+            },
+            "required": ["id"],
+        },
     )
     async def cron_update(args: dict) -> dict:
         args = _parse_args(args)
@@ -945,7 +1023,11 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "cron_delete",
         "Delete a user-created scheduled task by its id. "
         "Built-in tasks cannot be deleted — use cron_update with enabled=false to disable them.",
-        {"id": str},
+        {
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "required": ["id"],
+        },
     )
     async def cron_delete(args: dict) -> dict:
         args = _parse_args(args)

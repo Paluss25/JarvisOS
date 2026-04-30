@@ -25,6 +25,8 @@ services:
       - "8013:8013"   # worker-ops-detector (Grafana webhook + health)
       - "8014:8014"   # cfo-strategy-workers (heavy on-demand strategy sub-agents)
     env_file: /home/paluss/docker/.env
+    dns:
+      - 10.10.200.62
     environment:
       LOKI_URL: "http://10.10.200.71:3100"
       RUNBOOKS_PATH: "/app/runbooks"

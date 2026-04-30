@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from agents.cio.loki_client import LokiClient, PrometheusClient
+from agents.cio.loki_client import LokiClient, PrometheusClient, TelemetryError
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +89,37 @@ class LokiIssueCollector:
             date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         raw: list[ConsolidatedIssue] = []
-        raw += await self._check_node_exporter()
-        raw += await self._check_cadvisor()
-        raw += await self._check_silent_agents()
-        raw += await self._check_agent_errors()
+
+        # Prometheus-backed checks — emit a single medium issue if Prometheus is unreachable
+        # rather than generating false-positive HIGH alerts for every expected target.
+        try:
+            raw += await self._check_node_exporter()
+            raw += await self._check_cadvisor()
+        except TelemetryError as exc:
+            logger.warning("issue_collector: prometheus unavailable — %s", exc)
+            raw.append(ConsolidatedIssue(
+                component="prometheus",
+                severity="medium",
+                reporters=["cio"],
+                issue_type="telemetry_unavailable",
+                description=f"Prometheus unreachable — node/cadvisor checks skipped: {exc}",
+                suggested_action="infra_verify:https://prometheus.prova9x.com/-/healthy",
+            ))
+
+        # Loki-backed checks — same pattern
+        try:
+            raw += await self._check_silent_agents()
+            raw += await self._check_agent_errors()
+        except TelemetryError as exc:
+            logger.warning("issue_collector: loki unavailable — %s", exc)
+            raw.append(ConsolidatedIssue(
+                component="loki",
+                severity="medium",
+                reporters=["cio"],
+                issue_type="telemetry_unavailable",
+                description=f"Loki unreachable — agent silence checks skipped: {exc}",
+                suggested_action="infra_verify:http://10.10.200.71:3100/ready",
+            ))
 
         # Deduplicate by (component, issue_type) — keep highest severity
         dedup: dict[tuple[str, str], ConsolidatedIssue] = {}

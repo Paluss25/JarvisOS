@@ -11,8 +11,16 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-LOKI_URL = os.environ.get("LOKI_URL", "https://loki.prova9x.com")
+LOKI_URL = os.environ.get("LOKI_URL", "http://10.10.200.71:3100")
 PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "https://prometheus.prova9x.com")
+
+
+class TelemetryError(Exception):
+    """Raised when a Loki or Prometheus query fails due to transport or HTTP error.
+
+    Callers should catch this to emit a single 'telemetry unavailable' issue
+    rather than generating false-positive alerts for each expected target.
+    """
 
 _HTTP_TIMEOUT = 10.0
 # Default to TLS verification; allow opt-out only via explicit env var for
@@ -50,7 +58,7 @@ class LokiClient:
                 return r.json().get("data", {}).get("result", [])
         except Exception as exc:
             logger.warning("loki_client.query_range: %s", exc)
-            return []
+            raise TelemetryError(str(exc)) from exc
 
     async def count_entries(self, query: str, lookback_seconds: int = 21600) -> int:
         """Count log entries matching *query* in the last *lookback_seconds*."""
@@ -77,4 +85,4 @@ class PrometheusClient:
                 return r.json().get("data", {}).get("result", [])
         except Exception as exc:
             logger.warning("prometheus_client.query: %s", exc)
-            return []
+            raise TelemetryError(str(exc)) from exc
