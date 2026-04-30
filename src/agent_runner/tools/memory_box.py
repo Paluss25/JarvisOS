@@ -42,6 +42,7 @@ def create_query_memory_tool(agent_id: str):
 
         agent_filter = (args.get("agent_filter") or "").strip() or None
         limit = int(args.get("limit") or 10)
+        limit = max(1, min(limit, 100))
         url = os.environ.get("MEMORY_BOX_URL", _DEFAULT_URL)
 
         payload: dict = {
@@ -57,6 +58,15 @@ def create_query_memory_tool(agent_id: str):
                 resp = await client.post(f"{url}/query", json=payload)
                 resp.raise_for_status()
                 data = resp.json()
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "query_agent_memory[%s]: HTTP %d from memory-box — %s",
+                agent_id, exc.response.status_code, exc,
+            )
+            return {
+                "error": f"memory-box returned HTTP {exc.response.status_code}",
+                "results": [],
+            }
         except Exception as exc:
             logger.warning("query_agent_memory[%s]: request failed — %s", agent_id, exc)
             return {"error": str(exc), "results": []}

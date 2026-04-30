@@ -20,8 +20,33 @@ def _run(coro):
 class TestCreateQueryMemoryTool:
 
     def test_returns_none_when_sdk_unavailable(self, monkeypatch):
-        """When claude_agent_sdk is unavailable, factory returns None gracefully."""
-        assert callable(__import__("agent_runner.tools.memory_box", fromlist=["create_query_memory_tool"]).create_query_memory_tool)
+        """Factory returns None when claude_agent_sdk cannot be imported."""
+        # Temporarily make claude_agent_sdk unimportable
+        monkeypatch.delitem(sys.modules, "agent_runner.tools.memory_box", raising=False)
+        monkeypatch.delitem(sys.modules, "agent_runner.tools", raising=False)
+        monkeypatch.delitem(sys.modules, "agent_runner", raising=False)
+
+        import builtins
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "claude_agent_sdk" or name.startswith("claude_agent_sdk."):
+                raise ImportError(f"No module named '{name}'")
+            return original_import(name, *args, **kwargs)
+
+        with monkeypatch.context() as mp:
+            mp.setattr(builtins, "__import__", mock_import)
+            # Import the tool directly (bypasses agent_runner imports)
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "memory_box",
+                Path(__file__).parent.parent / "src" / "agent_runner" / "tools" / "memory_box.py"
+            )
+            memory_box = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(memory_box)
+
+            result = memory_box.create_query_memory_tool("mt")
+            assert result is None
 
     def test_tool_returns_error_on_empty_query(self):
         from agent_runner.tools.memory_box import create_query_memory_tool
