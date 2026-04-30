@@ -5,6 +5,7 @@ They will fail with KeyError / StopIteration until the tool is registered.
 """
 import asyncio
 import datetime
+import json
 import os
 import sys
 from pathlib import Path
@@ -51,9 +52,10 @@ if "asyncpg" not in sys.modules:
 
 _UTC = datetime.timezone.utc
 
-# Week 21 / 2026:
-#   day_of_week=0 (Monday)  → May 18, 2026
-#   day_of_week=1 (Tuesday) → May 19, 2026
+# Week 21 / 2026, using Postgres EXTRACT(DOW):
+#   day_of_week=0 (Sunday) → May 24, 2026
+#   day_of_week=1 (Monday) → May 18, 2026
+#   day_of_week=2 (Tuesday) → May 19, 2026
 _W21_MON = datetime.date(2026, 5, 18)
 _W21_TUE = datetime.date(2026, 5, 19)
 
@@ -70,6 +72,16 @@ def _run(coro):
         loop.close()
 
 
+def _unwrap_mcp_result(result):
+    if isinstance(result, dict) and "content" in result:
+        text = result["content"][0]["text"]
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {"error": text}
+    return result
+
+
 def _find_tool(server, name: str):
     """Return the tool function registered under *name* in the MCP server."""
     for tool in server._tools:
@@ -80,7 +92,7 @@ def _find_tool(server, name: str):
 
 def _make_row(
     session_type="run",
-    day_of_week=0,
+    day_of_week=1,
     planned_duration=45,
     notes="",
     planned_intensity="Zone 3",
@@ -150,7 +162,7 @@ _BASE_ENV = {
 
 def test_run_session_creates_event():
     """A single 'run' session must produce one upsert_event call with correct iCal."""
-    rows = [_make_row(session_type="run", day_of_week=0, planned_duration=45)]
+    rows = [_make_row(session_type="run", day_of_week=1, planned_duration=45)]
     cal = _make_calendar_mock()
 
     import agents.mt.tools as tools_mod
@@ -162,14 +174,14 @@ def test_run_session_creates_event():
         patch("asyncio.to_thread", side_effect=_fake_to_thread),
     ):
         fn = _get_sync_fn()
-        result = _run(fn({"week_number": 21, "year": 2026}))
+        result = _unwrap_mcp_result(_run(fn({"week_number": 21, "year": 2026})))
 
     cal.upsert_event.assert_called_once()
     _call = cal.upsert_event.call_args
     uid_arg = _call.args[1]   # upsert_event(calendar_url, uid, ical_data)
     ical_arg = _call.args[2]
 
-    assert uid_arg == "training-2026w21d0", f"Unexpected UID: {uid_arg!r}"
+    assert uid_arg == "training-2026w21d1", f"Unexpected UID: {uid_arg!r}"
     assert "DTSTART;TZID=Europe/Rome:20260518T180000" in ical_arg, ical_arg
     assert "DTEND;TZID=Europe/Rome:20260518T184500" in ical_arg, ical_arg
     assert "SUMMARY:🏃 Run" in ical_arg or "SUMMARY:\U0001f3c3 Run" in ical_arg, ical_arg
@@ -184,7 +196,7 @@ def test_run_session_creates_event():
 
 def test_strength_metabolic_title():
     """session_type='strength_metabolic' must produce SUMMARY with strength label."""
-    rows = [_make_row(session_type="strength_metabolic", day_of_week=1, planned_duration=60)]
+    rows = [_make_row(session_type="strength_metabolic", day_of_week=2, planned_duration=60)]
     cal = _make_calendar_mock()
 
     import agents.mt.tools as tools_mod
@@ -223,7 +235,7 @@ def test_rest_session_skipped():
         patch("asyncio.to_thread", side_effect=_fake_to_thread),
     ):
         fn = _get_sync_fn()
-        result = _run(fn({"week_number": 21, "year": 2026}))
+        result = _unwrap_mcp_result(_run(fn({"week_number": 21, "year": 2026})))
 
     cal.upsert_event.assert_not_called()
     assert result["synced"] == 0
@@ -248,7 +260,7 @@ def test_zero_duration_skipped():
         patch("asyncio.to_thread", side_effect=_fake_to_thread),
     ):
         fn = _get_sync_fn()
-        result = _run(fn({"week_number": 21, "year": 2026}))
+        result = _unwrap_mcp_result(_run(fn({"week_number": 21, "year": 2026})))
 
     cal.upsert_event.assert_not_called()
     assert result["synced"] == 0
@@ -272,7 +284,7 @@ def test_no_sessions_returns_zero():
         patch("asyncio.to_thread", side_effect=_fake_to_thread),
     ):
         fn = _get_sync_fn()
-        result = _run(fn({"week_number": 21, "year": 2026}))
+        result = _unwrap_mcp_result(_run(fn({"week_number": 21, "year": 2026})))
 
     assert result.get("synced", 0) == 0
     assert result.get("skipped", 0) == 0
@@ -297,7 +309,7 @@ def test_db_error_returns_error_dict():
         patch("asyncio.to_thread", side_effect=_fake_to_thread),
     ):
         fn = _get_sync_fn()
-        result = _run(fn({"week_number": 21, "year": 2026}))
+        result = _unwrap_mcp_result(_run(fn({"week_number": 21, "year": 2026})))
 
     assert "error" in result, f"Expected 'error' key in result, got: {result!r}"
     cal.upsert_event.assert_not_called()
@@ -351,7 +363,7 @@ def test_year_from_created_at():
         patch("asyncio.to_thread", side_effect=_fake_to_thread),
     ):
         fn = _get_sync_fn()
-        result = _run(fn({"week_number": 1}))
+        result = _unwrap_mcp_result(_run(fn({"week_number": 1})))
 
     assert result.get("year") == 2025, (
         f"Expected year=2025 derived from created_at, got: {result.get('year')!r}"
