@@ -24,6 +24,35 @@ import time
 from urllib.parse import urlparse
 from typing import Any
 
+
+def _patch_mattermostdriver_ssl() -> None:
+    # mattermostdriver 7.3.2 bug: Websocket.connect uses ssl.Purpose.CLIENT_AUTH
+    # (a server-side context) when initiating a wss:// client connection, causing
+    # "Cannot create a client socket with a PROTOCOL_TLS_SERVER context" (_ssl.c:816).
+    # Fix: proxy the ssl module reference inside mattermostdriver.websocket so that
+    # create_default_context always uses Purpose.SERVER_AUTH regardless of what the
+    # library passes.
+    import ssl as _ssl
+    try:
+        import mattermostdriver.websocket as _mm_ws
+    except ImportError:
+        return
+
+    class _ClientSSL:
+        def __getattr__(self, name: str):
+            return getattr(_ssl, name)
+
+        def create_default_context(self, purpose=None, **kw):
+            return _ssl.create_default_context(purpose=_ssl.Purpose.SERVER_AUTH, **kw)
+
+        Purpose = _ssl.Purpose
+        CERT_NONE = _ssl.CERT_NONE
+
+    _mm_ws.ssl = _ClientSSL()
+
+
+_patch_mattermostdriver_ssl()
+
 logger = logging.getLogger(__name__)
 
 _UPDATE_INTERVAL = 2.0  # seconds between live post patches

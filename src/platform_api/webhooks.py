@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["webhooks"])
 
 AGENT_PORTS: dict[str, int] = {
     "ceo": 8000,
