@@ -258,8 +258,27 @@ def create_app(config: AgentConfig) -> FastAPI:
             except Exception as exc:
                 logger.warning("%s: Redis A2A subscriber failed — %s", config.name, exc)
 
-        # Telegram polling
-        if getattr(config, "telegram_polling_enabled", True) and os.environ.get(config.telegram_token_env):
+        # Telegram — webhook mode if telegram_webhook_url_env is set, else polling
+        _webhook_url = os.environ.get(getattr(config, "telegram_webhook_url_env", None) or "", "")
+        if _webhook_url:
+            try:
+                _webhook_secret = os.environ.get(
+                    getattr(config, "telegram_webhook_secret_env", None) or "", ""
+                )
+                from agent_runner.interfaces.telegram_bot import start_webhook
+                state["telegram_task"] = asyncio.create_task(
+                    start_webhook(
+                        state["agent"], state["session_manager"], config,
+                        redis_a2a=redis_a2a,
+                        fastapi_app=app,
+                        webhook_url=_webhook_url,
+                        webhook_secret=_webhook_secret,
+                    )
+                )
+                logger.info("%s: Telegram webhook mode started (%s)", config.name, _webhook_url)
+            except Exception as exc:
+                logger.warning("%s: Telegram webhook start failed — %s", config.name, exc)
+        elif getattr(config, "telegram_polling_enabled", True) and os.environ.get(config.telegram_token_env):
             try:
                 from agent_runner.interfaces.telegram_bot import start_polling
                 state["telegram_task"] = asyncio.create_task(

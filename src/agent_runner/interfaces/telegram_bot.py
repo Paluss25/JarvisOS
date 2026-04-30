@@ -35,7 +35,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, NetworkError, RetryAfter
 from telegram.ext import (
@@ -2105,7 +2105,6 @@ async def start_polling(agent: Any, session_manager: Any, config: Any, redis_a2a
             async with app:
                 await app.start()
                 try:
-                    from telegram import BotCommand
                     await app.bot.set_my_commands([BotCommand(cmd, desc) for cmd, desc in _COMMANDS])
                     logger.info("telegram: bot commands registered (%d commands)", len(_COMMANDS))
                 except Exception as exc:
@@ -2134,3 +2133,233 @@ async def start_polling(agent: Any, session_manager: Any, config: Any, redis_a2a
             retry_delay = min(retry_delay * 2, 60)
 
     logger.info("telegram: polling stopped for %s", config.name)
+
+
+# ---------------------------------------------------------------------------
+# Webhook entry point
+# ---------------------------------------------------------------------------
+
+def _make_webhook_handler(ptb_app: Any, webhook_secret: str):
+    """Return a FastAPI route handler that processes incoming Telegram webhook updates.
+
+    Extracted so it can be unit-tested independently of the full startup lifecycle.
+    Always returns 200 OK — exceptions from process_update are caught and logged
+    so Telegram does not retry the same update in a loop.
+    """
+    from fastapi import HTTPException, Request, Response
+
+    async def _handler(request: Request) -> Response:
+        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if webhook_secret and secret != webhook_secret:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        try:
+            data = await request.json()
+            update = Update.de_json(data, ptb_app.bot)
+            await ptb_app.process_update(update)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("telegram: webhook process_update failed — %s", exc)
+        return Response()
+
+    return _handler
+
+
+async def start_webhook(
+    agent: Any,
+    session_manager: Any,
+    config: Any,
+    redis_a2a: Any = None,
+    *,
+    fastapi_app: Any,
+    webhook_url: str,
+    webhook_secret: str = "",
+) -> None:
+    """Start Telegram in webhook mode.
+
+    Registers POST /telegram/webhook on the agent's FastAPI app,
+    calls setWebhook with Telegram, then blocks until cancelled.
+    No retry loop — webhook mode has no persistent connection to drop.
+    """
+    token = os.environ.get(config.telegram_token_env, "")
+    chat_id_str = os.environ.get(config.telegram_chat_id_env, "")
+
+    if not token:
+        raise ValueError(f"{config.telegram_token_env} not configured")
+    if not chat_id_str:
+        raise ValueError(f"{config.telegram_chat_id_env} not configured")
+
+    allowed_chat_id = int(chat_id_str)
+
+    from agent_runner.hooks import permission_hook as _hook
+
+    app = Application.builder().token(token).build()
+
+    # Inject shared state into bot_data
+    app.bot_data["agent"] = agent
+    app.bot_data["session_manager"] = session_manager
+    app.bot_data["config"] = config
+    app.bot_data["redis_a2a"] = redis_a2a
+
+    # Permission hook
+    async def _send_approval(text: str, request_id: str, _app=app) -> None:
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Approve", callback_data=f"perm:approve:{request_id}"),
+            InlineKeyboardButton("❌ Deny", callback_data=f"perm:deny:{request_id}"),
+        ]])
+        await _app.bot.send_message(
+            chat_id=allowed_chat_id,
+            text=text,
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
+
+    async def _send_notification(text: str, _app=app) -> None:
+        try:
+            await _app.bot.send_message(
+                chat_id=allowed_chat_id,
+                text=text,
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            logger.warning("telegram: notification send failed — %s", exc)
+
+    _hook.configure_hook(_send_approval, allowed_chat_id, notify_fn=_send_notification)
+
+    # HITL gate (CIO only — no-op for others)
+    try:
+        from agent_runner.issues import hitl_gate as _hg
+
+        async def _send_task_with_keyboard(text: str, task_id: str, _app=app) -> None:
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Accetta", callback_data=f"issue:approve:{task_id}"),
+                InlineKeyboardButton("❌ Rifiuta", callback_data=f"issue:reject:{task_id}"),
+            ]])
+            await _app.bot.send_message(
+                chat_id=allowed_chat_id,
+                text=text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.MARKDOWN,
+            )
+
+        async def _send_plain_notification(text: str, _app=app) -> None:
+            try:
+                await _app.bot.send_message(
+                    chat_id=allowed_chat_id,
+                    text=text,
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            except Exception as exc:
+                logger.warning("telegram: hitl plain notification failed — %s", exc)
+
+        _hg.configure(_send_task_with_keyboard, _send_plain_notification)
+    except ImportError:
+        pass
+
+    # Register all handlers (identical to start_polling)
+    app.add_handler(CommandHandler("start", _cmd_start))
+    app.add_handler(CommandHandler("status", _cmd_status))
+    app.add_handler(CommandHandler("session", _cmd_session))
+    app.add_handler(CommandHandler("sessions", _cmd_sessions))
+    app.add_handler(CommandHandler("rename", _cmd_rename))
+    app.add_handler(CommandHandler("tag", _cmd_tag))
+    app.add_handler(CommandHandler("fork", _cmd_fork))
+    app.add_handler(CommandHandler("interrupt", _cmd_interrupt))
+    app.add_handler(CommandHandler("tools", _cmd_tools))
+    app.add_handler(CommandHandler("model", _cmd_model))
+    app.add_handler(CommandHandler("thinking", _cmd_thinking))
+    app.add_handler(CommandHandler("deletesession", _cmd_delete_session))
+    app.add_handler(CommandHandler("cron",          _cmd_cron))
+    app.add_handler(CommandHandler("cost",          _cmd_cost))
+    app.add_handler(CommandHandler("log",           _cmd_log))
+    app.add_handler(CommandHandler("memory",        _cmd_memory))
+    app.add_handler(CommandHandler("note",          _cmd_note))
+    app.add_handler(CommandHandler("export",        _cmd_export))
+    app.add_handler(CommandHandler("remind",        _cmd_remind))
+
+    if getattr(config, "id", "").lower() == "dos":
+        app.add_handler(CommandHandler("pesi",        _cmd_pesi))
+        app.add_handler(CommandHandler("addome",      _cmd_addome))
+        app.add_handler(CommandHandler("profilo",     _cmd_profilo))
+        app.add_handler(CommandHandler("adduser",     _cmd_adduser))
+        app.add_handler(CommandHandler("listusers",   _cmd_listusers))
+        app.add_handler(CommandHandler("removeuser",  _cmd_removeuser))
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
+    app.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, _handle_voice))
+    app.add_handler(MessageHandler(filters.Document.ALL, _handle_document))
+    app.add_handler(CallbackQueryHandler(_handle_callback, pattern=r"^perm:"))
+    app.add_handler(CallbackQueryHandler(_handle_issue_callback, pattern=r"^issue:(approve|reject):\w+"))
+
+    # Register webhook route on the agent's FastAPI app
+    handler = _make_webhook_handler(app, webhook_secret)
+    fastapi_app.add_api_route("/telegram/webhook", handler, methods=["POST"])
+
+    logger.info(
+        "telegram: starting webhook mode for %s (url=%s, allowed_chat_id=%s)",
+        config.name, webhook_url, allowed_chat_id,
+    )
+
+    _COMMANDS = [
+        ("start",         "Welcome message"),
+        ("status",        "Agent status and session info"),
+        ("session",       "Current session details"),
+        ("sessions",      "List last 5 sessions"),
+        ("rename",        "Rename current session"),
+        ("tag",           "Tag current session"),
+        ("fork",          "Fork current session"),
+        ("interrupt",     "Interrupt current agent operation"),
+        ("tools",         "Show MCP server status"),
+        ("model",         "Show context usage or switch model"),
+        ("thinking",      "Toggle extended thinking: on|off|auto"),
+        ("deletesession", "Delete a session"),
+        ("cron",          "List or trigger scheduled tasks"),
+        ("cost",          "Show today's API spend"),
+        ("log",           "Show today's activity log (or /log YYYY-MM-DD)"),
+        ("memory",        "Show or search MEMORY.md"),
+        ("note",          "Save a quick note to today's log"),
+        ("export",        "Download daily log as a file"),
+        ("remind",        "Set a CalDAV reminder via MT — /remind 2h Walk the dog"),
+    ]
+
+    if getattr(config, "id", "").lower() == "dos":
+        _COMMANDS += [
+            ("pesi",        "Log body weight — /pesi 81.5"),
+            ("addome",      "Log waist circumference — /addome 84"),
+            ("profilo",     "View or update athlete profile (height, DOB, sex)"),
+            ("adduser",     "Admin: register a new user"),
+            ("listusers",   "Admin: list all users"),
+            ("removeuser",  "Admin: deactivate a user"),
+        ]
+
+    async with app:
+        await app.start()
+        try:
+            await app.bot.set_my_commands([
+                BotCommand(cmd, desc) for cmd, desc in _COMMANDS
+            ])
+            logger.info("telegram: bot commands registered (%d commands)", len(_COMMANDS))
+        except Exception as exc:
+            logger.warning("telegram: could not register bot commands — %s", exc)
+
+        await app.bot.set_webhook(
+            url=webhook_url,
+            secret_token=webhook_secret or None,
+            drop_pending_updates=False,
+        )
+        logger.info("telegram: webhook registered at %s", webhook_url)
+
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            try:
+                await app.bot.delete_webhook()
+                logger.info("telegram: webhook deleted on shutdown for %s", config.name)
+            except Exception as exc:
+                logger.warning("telegram: delete_webhook failed — %s", exc)
+            await app.stop()
+
+    logger.info("telegram: webhook mode stopped for %s", config.name)
