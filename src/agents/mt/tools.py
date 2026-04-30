@@ -352,7 +352,20 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
             args = _parse_args(args)
             return _text(await _send_message_fn(args))
 
-        @sdk_tool("forward_to_cos", "Forward a payload to ChiefOfStaff (COS) via A2A Redis bus. Marks the email as processed so it is not re-polled.", {"payload_json": str, "reason": str, "email_id": str})
+        @sdk_tool(
+            "forward_to_cos",
+            "Forward a payload to ChiefOfStaff (COS) via A2A Redis bus. "
+            "Marks the email as processed so it is not re-polled.",
+            {
+                "type": "object",
+                "properties": {
+                    "payload_json": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "email_id": {"type": "string"},
+                },
+                "required": ["payload_json", "reason"],
+            },
+        )
         async def forward_to_cos(args: dict) -> dict:
             args = _parse_args(args)
             payload_raw = args.get("payload_json", "").strip()
@@ -575,7 +588,19 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         )
         return _text(f"draft_pending saved to drafts/{email_id}.txt. Re: {subject} | To: {sender}")
 
-    @sdk_tool("create_task", "Create a new task entry in task_log.json.", {"title": str, "notes": str, "due_date": str})
+    @sdk_tool(
+        "create_task",
+        "Create a new task entry in task_log.json.",
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "notes": {"type": "string"},
+                "due_date": {"type": "string"},
+            },
+            "required": ["title"],
+        },
+    )
     async def create_task(args: dict) -> dict:
         args = _parse_args(args)
         title = args.get("title", "").strip()
@@ -589,7 +614,17 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         )
         return _text(json.dumps(task))
 
-    @sdk_tool("list_tasks", "List tasks from task_log.json, optionally filtered by status.", {"status": str})
+    @sdk_tool(
+        "list_tasks",
+        "List tasks from task_log.json, optionally filtered by status.",
+        {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+            },
+            "required": [],
+        },
+    )
     async def list_tasks(args: dict) -> dict:
         args = _parse_args(args)
         tasks = _task_list(workspace_path, status=args.get("status", "").strip())
