@@ -473,7 +473,7 @@ async def _cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         from agent_runner.memory.daily_logger import DailyLogger
-        log_text = DailyLogger(config.workspace_path).read_today()
+        log_text = DailyLogger(config.workspace_path, user_id=update.effective_chat.id).read_today()
         cost_re = re.compile(r"\[COST\] \$([0-9]+\.[0-9]+)")
         costs = [float(m) for m in cost_re.findall(log_text)]
         total = sum(costs)
@@ -521,7 +521,7 @@ async def _cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         from agent_runner.memory.daily_logger import DailyLogger
-        dl = DailyLogger(config.workspace_path)
+        dl = DailyLogger(config.workspace_path, user_id=update.effective_chat.id)
         if target_date:
             log_text = dl.read_date(target_date)
             date_label = target_date.isoformat()
@@ -592,7 +592,7 @@ async def _cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         from agent_runner.memory.daily_logger import DailyLogger
-        DailyLogger(config.workspace_path).log(f"[NOTE] {text}")
+        DailyLogger(config.workspace_path, user_id=update.effective_chat.id).log(f"[NOTE] {text}")
         await update.message.reply_text("📝 Note saved.", parse_mode=ParseMode.MARKDOWN)
     except Exception as exc:
         await update.message.reply_text(f"Could not save note: {exc}")
@@ -616,7 +616,7 @@ async def _cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     try:
         from agent_runner.memory.daily_logger import DailyLogger
-        dl = DailyLogger(config.workspace_path)
+        dl = DailyLogger(config.workspace_path, user_id=update.effective_chat.id)
         if target_date:
             log_text = dl.read_date(target_date)
             date_label = target_date.isoformat()
