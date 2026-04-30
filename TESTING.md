@@ -46,5 +46,6 @@ python -m pytest -m "e2e or slow"
 
 ## Notes
 
-The marker taxonomy is declared in `pytest.ini`. Existing tests are assigned to
-these markers in the follow-up classification step.
+The marker taxonomy is declared in `pytest.ini`. Existing test files are
+assigned to suite markers centrally in `tests/conftest.py`; collection fails if
+a new `test_*.py` file is added without a suite classification.

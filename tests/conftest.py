@@ -5,7 +5,95 @@ agno, etc.) before any test module is collected, so that imports in src.*
 never fail due to missing packages in the test venv.
 """
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
+
+_UNIT_TEST_FILES = {
+    "test_agent_runner_config.py",
+    "test_audit_writer.py",
+    "test_base_agent_client.py",
+    "test_classifier.py",
+    "test_config_loader.py",
+    "test_content_isolator.py",
+    "test_cos_routing.py",
+    "test_cron_interval.py",
+    "test_daily_fitness_migration.py",
+    "test_daily_logger_multiuser.py",
+    "test_dos_daily_fitness_import.py",
+    "test_drhouse_router.py",
+    "test_eia_digest.py",
+    "test_email_sorter.py",
+    "test_fallback_model.py",
+    "test_fatsecret.py",
+    "test_fusion.py",
+    "test_garmin_fit_migration.py",
+    "test_ingest_gate.py",
+    "test_medical_gate.py",
+    "test_model_factory.py",
+    "test_model_routing_guard.py",
+    "test_permission_layer.py",
+    "test_redaction_engine.py",
+}
+
+_INTEGRATION_TEST_FILES = {
+    "test_chro_pipeline.py",
+    "test_calendar_client.py",
+    "test_contacts_client.py",
+    "test_dos_fit_import.py",
+    "test_drhouse_integration.py",
+    "test_eia_mt_email_fixes.py",
+    "test_memory_box_tool.py",
+    "test_memory_p4.py",
+    "test_mt_calendar_tools.py",
+    "test_mt_contacts_tools.py",
+    "test_mt_remind_fast_path.py",
+    "test_mt_tools.py",
+    "test_pipeline_integration.py",
+}
+
+_E2E_TEST_FILES = {
+    "test_docker_compose_mounts.py",
+    "test_dos_push_training.py",
+    "test_sync_training_week.py",
+}
+
+_SLOW_TEST_FILES = {
+    "test_telegram_typing.py",
+}
+
+_CLASSIFIED_TEST_FILES = (
+    _UNIT_TEST_FILES
+    | _INTEGRATION_TEST_FILES
+    | _E2E_TEST_FILES
+    | _SLOW_TEST_FILES
+)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Assign suite markers by test module.
+
+    Keep this map explicit so every new test file must be intentionally placed
+    in a gate before it can run unnoticed in CI.
+    """
+    unclassified: set[str] = set()
+    for item in items:
+        filename = Path(str(item.fspath)).name
+        if filename in _UNIT_TEST_FILES:
+            item.add_marker(pytest.mark.unit)
+        if filename in _INTEGRATION_TEST_FILES:
+            item.add_marker(pytest.mark.integration)
+        if filename in _E2E_TEST_FILES:
+            item.add_marker(pytest.mark.e2e)
+        if filename in _SLOW_TEST_FILES:
+            item.add_marker(pytest.mark.slow)
+        if filename.startswith("test_") and filename not in _CLASSIFIED_TEST_FILES:
+            unclassified.add(filename)
+
+    if unclassified:
+        names = ", ".join(sorted(unclassified))
+        raise pytest.UsageError(f"Unclassified test files in pytest gate map: {names}")
 
 # ---------------------------------------------------------------------------
 # Mock claude_agent_sdk — not installed in test venv
