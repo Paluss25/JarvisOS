@@ -145,4 +145,6 @@ def build_chro_config(workspace_root: Path = Path("/app/workspace/chro")) -> Age
         voice_enabled=True,
         voice_language="it",
         voice_tts_voice="it-IT-ElsaNeural",
+        telegram_webhook_url_env="CHRO_TELEGRAM_WEBHOOK_URL",
+        telegram_webhook_secret_env="CHRO_TELEGRAM_WEBHOOK_SECRET",
     )

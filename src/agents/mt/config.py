@@ -105,4 +105,6 @@ def build_mt_config(workspace_root: Path = Path("/app/workspace/mt")) -> AgentCo
         voice_enabled=True,
         voice_language="it",
         voice_tts_voice="it-IT-ElsaNeural",
+        telegram_webhook_url_env="MT_TELEGRAM_WEBHOOK_URL",
+        telegram_webhook_secret_env="MT_TELEGRAM_WEBHOOK_SECRET",
     )

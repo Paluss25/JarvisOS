@@ -96,4 +96,6 @@ def build_chief_of_staff_config(workspace_root: Path = Path("/app/workspace/cos"
         voice_enabled=True,
         voice_language="it",
         voice_tts_voice="it-IT-ElsaNeural",
+        telegram_webhook_url_env="COS_TELEGRAM_WEBHOOK_URL",
+        telegram_webhook_secret_env="COS_TELEGRAM_WEBHOOK_SECRET",
     )

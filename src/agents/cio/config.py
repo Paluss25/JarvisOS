@@ -134,4 +134,6 @@ def build_timothy_config(workspace_root: Path = Path("/app/workspace/cio")) -> A
         voice_enabled=True,
         voice_language="it",
         voice_tts_voice="it-IT-ElsaNeural",
+        telegram_webhook_url_env="CIO_TELEGRAM_WEBHOOK_URL",
+        telegram_webhook_secret_env="CIO_TELEGRAM_WEBHOOK_SECRET",
     )

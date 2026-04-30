@@ -135,4 +135,6 @@ def build_drhouse_config(workspace_root: Path = Path("/app/workspace/coh")) -> A
         voice_enabled=True,
         voice_language="it",
         voice_tts_voice="it-IT-ElsaNeural",
+        telegram_webhook_url_env="COH_TELEGRAM_WEBHOOK_URL",
+        telegram_webhook_secret_env="COH_TELEGRAM_WEBHOOK_SECRET",
     )
