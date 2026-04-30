@@ -88,11 +88,13 @@ def _build_dos_server_with_mock_a2a(mock_send_message_fn):
     the exact args forwarded to the A2A transport.
     """
     from agents.dos.tools import create_chief_mcp_server
-    import agent_runner.tools.send_message as send_message_mod
 
     redis_a2a = _make_redis_a2a_mock()
 
-    with patch.object(send_message_mod, "create_send_message_tool", return_value=mock_send_message_fn):
+    with patch(
+        "agent_runner.tools.send_message.create_send_message_tool",
+        return_value=mock_send_message_fn,
+    ):
         server = create_chief_mcp_server(Path("/tmp"), redis_a2a=redis_a2a)
 
     return server

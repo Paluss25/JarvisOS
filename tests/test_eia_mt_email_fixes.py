@@ -26,14 +26,14 @@ def _setup_audit_dir(tmp_path, monkeypatch):
     (tmp_path / "var" / "audit").mkdir(parents=True)
 
 
-def test_send_message_tools_register_dict_schema(monkeypatch):
+def test_send_message_tools_register_dict_schema():
     """send_message schema must be the SDK input_schema, not annotations."""
     from agents.cos.tools import create_chief_of_staff_mcp_server
     from agents.email_intelligence_agent.tools import create_email_intelligence_mcp_server
     from agents.mt.tools import create_mt_mcp_server
 
     fake_send_message = types.SimpleNamespace(create_send_message_tool=lambda *_args, **_kw: AsyncMock())
-    monkeypatch.setitem(sys.modules, "agent_runner.tools.send_message", fake_send_message)
+    sys.modules["agent_runner.tools.send_message"] = fake_send_message
 
     servers = [
         create_mt_mcp_server(Path("/tmp/mt"), redis_a2a=_RedisStub()),
