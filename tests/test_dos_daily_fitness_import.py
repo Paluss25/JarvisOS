@@ -4,8 +4,6 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
@@ -54,7 +52,17 @@ def test_parse_daily_fitness_folder_promotes_wellness_sleep_hrv_and_skin_temp(tm
     frames_by_path = {
         str(wellness): [
             FakeFrame("file_id", [FakeField("manufacturer", "garmin"), FakeField("serial_number", 3447005442)]),
-            FakeFrame("monitoring", [FakeField("timestamp", start), FakeField("heart_rate", 57), FakeField("steps", 100)]),
+            FakeFrame(
+                "monitoring",
+                [
+                    FakeField("timestamp", start),
+                    FakeField("heart_rate", 57),
+                    FakeField("steps", 100),
+                    FakeField("distance", 1200),
+                    FakeField("active_calories", 85),
+                    FakeField("duration_min", 16.5),
+                ],
+            ),
             FakeFrame("stress_level", [FakeField("stress_level_time", start), FakeField("stress_level_value", 16)]),
             FakeFrame("respiration_rate", [FakeField("timestamp", start), FakeField("respiration_rate", 14.25)]),
         ],
@@ -112,10 +120,14 @@ def test_parse_daily_fitness_folder_promotes_wellness_sleep_hrv_and_skin_temp(tm
     assert parsed.recovery_summary["stress_avg"] == 16
     assert parsed.recovery_summary["sleep_light_min"] == 30
     assert parsed.recovery_summary["sleep_deep_min"] == 30
+    assert parsed.recovery_summary["steps"] == 100
+    assert parsed.recovery_summary["distance_km"] == 1.2
+    assert parsed.recovery_summary["active_kcal"] == 85
+    assert parsed.recovery_summary["active_min"] == 16.5
+    assert parsed.recovery_summary["data_quality"] == "ok"
 
 
-@pytest.mark.asyncio
-async def test_import_daily_fitness_data_inserts_files_raw_rows_and_recovery_summary():
+def test_import_daily_fitness_data_inserts_files_raw_rows_and_recovery_summary():
     from agents.dos.daily_fitness_import import DailyFitnessData, import_daily_fitness_data
 
     conn = MagicMock()
@@ -150,10 +162,18 @@ async def test_import_daily_fitness_data_inserts_files_raw_rows_and_recovery_sum
         ],
         wellness_records=[{"file_sha256": "sha1", "timestamp": timestamp, "heart_rate": 57, "steps": 100, "raw_json": {"timestamp": timestamp}}],
         hrv_values=[{"file_sha256": "sha2", "timestamp": timestamp, "value_ms": 51.0, "raw_json": {"timestamp": timestamp}}],
-        recovery_summary={"hrv_overnight_avg": 51, "rhr_overnight": 57},
+        recovery_summary={
+            "hrv_overnight_avg": 51,
+            "rhr_overnight": 57,
+            "steps": 100,
+            "distance_km": 1.2,
+            "active_kcal": 85,
+            "active_min": 16.5,
+            "data_quality": "ok",
+        },
     )
 
-    result = await import_daily_fitness_data(conn, parsed, user_id=1)
+    result = _run(import_daily_fitness_data(conn, parsed, user_id=1))
 
     assert result["status"] == "imported"
     assert result["files_imported"] == 2
@@ -161,12 +181,14 @@ async def test_import_daily_fitness_data_inserts_files_raw_rows_and_recovery_sum
     assert result["recovery_metrics_upserted"] is True
     assert conn.transaction.called
     assert conn.executemany.await_count >= 3
-    upsert_sql = conn.execute.await_args.args[0]
+    upsert_args = conn.execute.await_args.args
+    upsert_sql = upsert_args[0]
     assert "INSERT INTO recovery_metrics" in upsert_sql
+    assert "steps, distance_km, active_kcal, active_min" in upsert_sql
+    assert upsert_args[12:17] == (100, 1.2, 85, 16.5, "ok")
 
 
-@pytest.mark.asyncio
-async def test_import_daily_fitness_data_skips_existing_file_sha_but_upserts_recovery():
+def test_import_daily_fitness_data_skips_existing_file_sha_but_upserts_recovery():
     from agents.dos.daily_fitness_import import DailyFitnessData, import_daily_fitness_data
 
     conn = MagicMock()
@@ -187,7 +209,7 @@ async def test_import_daily_fitness_data_skips_existing_file_sha_but_upserts_rec
         recovery_summary={"stress_avg": 16},
     )
 
-    result = await import_daily_fitness_data(conn, parsed, user_id=1)
+    result = _run(import_daily_fitness_data(conn, parsed, user_id=1))
 
     assert result["status"] == "imported"
     assert result["files_imported"] == 0

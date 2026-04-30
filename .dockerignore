@@ -12,8 +12,11 @@ __pycache__
 .ruff_cache
 node_modules
 *.bak
+*.bak.*
 *.backup
 docker-compose.yml.bak*
+agents.yaml-updated
+workspace/
 .env
 .env.example
 .env.*

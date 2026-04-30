@@ -163,7 +163,7 @@ def _build_recovery_summary(parsed: DailyFitnessData) -> dict[str, Any]:
     hrv_values = [row.get("value_ms") for row in parsed.hrv_values]
     heart_rates = [row.get("heart_rate") for row in parsed.wellness_records]
 
-    summary = {
+    summary: dict[str, Any] = {
         "stress_avg": _avg_int(stress_values),
         "stress_max": _max_int(stress_values),
         "hrv_overnight_avg": _avg_int(hrv_values),
@@ -176,6 +176,30 @@ def _build_recovery_summary(parsed: DailyFitnessData) -> dict[str, Any]:
     sleep_duration = sum(v for k, v in sleep_minutes.items() if k != "awake")
     if sleep_duration:
         summary["sleep_duration_min"] = sleep_duration
+
+    # Activity metrics — monitoring records are cumulative daily counters; take the max value.
+    steps_vals = [row["steps"] for row in parsed.wellness_records if row.get("steps") is not None]
+    dist_vals = [row["distance_m"] for row in parsed.wellness_records if row.get("distance_m") is not None]
+    kcal_vals = [row["active_calories"] for row in parsed.wellness_records if row.get("active_calories") is not None]
+    active_min_vals = [row["duration_min"] for row in parsed.wellness_records if row.get("duration_min") is not None]
+
+    if steps_vals:
+        summary["steps"] = int(max(steps_vals))
+    if dist_vals:
+        summary["distance_km"] = round(max(dist_vals) / 1000.0, 3)
+    if kcal_vals:
+        summary["active_kcal"] = int(max(kcal_vals))
+    if active_min_vals:
+        summary["active_min"] = round(float(max(active_min_vals)), 1)
+
+    # data_quality: flag obvious sensor artifacts so queries can filter them.
+    if not parsed.wellness_records and not parsed.stress_records:
+        summary["data_quality"] = "incomplete"
+    elif summary.get("stress_max") is not None and summary["stress_max"] >= 75:
+        summary["data_quality"] = "stress_high_suspect"
+    else:
+        summary["data_quality"] = "ok"
+
     return {key: value for key, value in summary.items() if value is not None}
 
 
@@ -446,8 +470,9 @@ async def _upsert_recovery_metrics(conn: Any, import_date: date, user_id: int, s
         INSERT INTO recovery_metrics
             (date, user_id, stress_avg, stress_max, hrv_overnight_avg, sleep_duration_min,
              sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min,
-             rhr_overnight, source, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'garmin_fit_daily',now())
+             rhr_overnight, steps, distance_km, active_kcal, active_min,
+             data_quality, source, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'garmin_fit_daily',now())
         ON CONFLICT (date, user_id) DO UPDATE SET
             stress_avg = COALESCE(EXCLUDED.stress_avg, recovery_metrics.stress_avg),
             stress_max = COALESCE(EXCLUDED.stress_max, recovery_metrics.stress_max),
@@ -458,6 +483,11 @@ async def _upsert_recovery_metrics(conn: Any, import_date: date, user_id: int, s
             sleep_light_min = COALESCE(EXCLUDED.sleep_light_min, recovery_metrics.sleep_light_min),
             sleep_awake_min = COALESCE(EXCLUDED.sleep_awake_min, recovery_metrics.sleep_awake_min),
             rhr_overnight = COALESCE(EXCLUDED.rhr_overnight, recovery_metrics.rhr_overnight),
+            steps = COALESCE(EXCLUDED.steps, recovery_metrics.steps),
+            distance_km = COALESCE(EXCLUDED.distance_km, recovery_metrics.distance_km),
+            active_kcal = COALESCE(EXCLUDED.active_kcal, recovery_metrics.active_kcal),
+            active_min = COALESCE(EXCLUDED.active_min, recovery_metrics.active_min),
+            data_quality = EXCLUDED.data_quality,
             source = 'garmin_fit_daily',
             updated_at = now()
         """,
@@ -472,4 +502,9 @@ async def _upsert_recovery_metrics(conn: Any, import_date: date, user_id: int, s
         summary.get("sleep_light_min"),
         summary.get("sleep_awake_min"),
         summary.get("rhr_overnight"),
+        summary.get("steps"),
+        summary.get("distance_km"),
+        summary.get("active_kcal"),
+        summary.get("active_min"),
+        summary.get("data_quality", "ok"),
     )

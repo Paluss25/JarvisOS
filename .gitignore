@@ -31,6 +31,16 @@ workspace/knowledge/uploads/
 *.log
 logs/
 
+# Local backup/generated artifacts
+*.bak
+*.bak.*
+*.backup
+docker-compose.yml.bak*
+agents.yaml-updated
+
+# Runtime workspaces not registered as seed workspaces
+workspace/mark/
+
 # IDE
 .idea/
 .vscode/
