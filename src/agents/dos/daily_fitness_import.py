@@ -7,11 +7,14 @@ date/user rather than by sport activity.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 try:
     import fitdecode
@@ -161,7 +164,13 @@ def _build_recovery_summary(parsed: DailyFitnessData) -> dict[str, Any]:
     stress_values = [value for value in stress_values if value is not None]
     sleep_minutes = _sleep_minutes_by_level(parsed.sleep_levels)
     hrv_values = [row.get("value_ms") for row in parsed.hrv_values]
-    heart_rates = [row.get("heart_rate") for row in parsed.wellness_records]
+    heart_rates = [
+        row.get("heart_rate")
+        for row in parsed.wellness_records
+        if isinstance(row.get("heart_rate"), (int, float))
+        and not isinstance(row.get("heart_rate"), bool)
+        and row.get("heart_rate") > 0
+    ]
 
     summary: dict[str, Any] = {
         "stress_avg": _avg_int(stress_values),
@@ -321,7 +330,20 @@ async def import_daily_fitness_data(conn: Any, parsed: DailyFitnessData, *, user
         await _insert_daily_sleep_level_batches(conn, parsed.date, user_id, _rows_for_file_ids(parsed.sleep_levels, file_ids_by_sha), file_ids_by_sha)
         await _insert_daily_hrv_batches(conn, parsed.date, user_id, _rows_for_file_ids(parsed.hrv_values, file_ids_by_sha), file_ids_by_sha)
         await _insert_daily_skin_temp_batches(conn, parsed.date, user_id, _rows_for_file_ids(parsed.skin_temp_overnight, file_ids_by_sha), file_ids_by_sha)
-        await _upsert_recovery_metrics(conn, parsed.date, user_id, parsed.recovery_summary)
+
+        recovery_upserted = False
+        recovery_error: str | None = None
+        if parsed.recovery_summary:
+            try:
+                async with conn.transaction():
+                    await _upsert_recovery_metrics(conn, parsed.date, user_id, parsed.recovery_summary)
+                recovery_upserted = True
+            except Exception as exc:
+                recovery_error = f"{type(exc).__name__}: {exc}"
+                logger.warning(
+                    "recovery_metrics upsert failed for %s (user_id=%s): %s — daily_* preserved",
+                    parsed.date, user_id, recovery_error,
+                )
 
         return {
             "status": "imported",
@@ -338,7 +360,8 @@ async def import_daily_fitness_data(conn: Any, parsed: DailyFitnessData, *, user
             "hrv_values": len(_rows_for_file_ids(parsed.hrv_values, file_ids_by_sha)),
             "skin_temp_overnight": len(_rows_for_file_ids(parsed.skin_temp_overnight, file_ids_by_sha)),
             "recovery_summary": parsed.recovery_summary,
-            "recovery_metrics_upserted": bool(parsed.recovery_summary),
+            "recovery_metrics_upserted": recovery_upserted,
+            "recovery_metrics_error": recovery_error,
         }
 
 
