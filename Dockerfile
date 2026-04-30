@@ -4,6 +4,7 @@ WORKDIR /app
 
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # App runtime
     curl \
     ffmpeg \
     nodejs \
@@ -12,6 +13,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
     tesseract-ocr \
     tesseract-ocr-ita \
+    # Network diagnostics
+    dnsutils \
+    iputils-ping \
+    iputils-tracepath \
+    iproute2 \
+    mtr-tiny \
+    net-tools \
+    netcat-openbsd \
+    nmap \
+    socat \
+    tcpdump \
+    traceroute \
+    wget \
+    # System / process inspection
+    htop \
+    lsof \
+    procps \
+    strace \
+    sysstat \
+    # Data tools
+    jq \
+    postgresql-client \
+    redis-tools \
+    # Shell
+    less \
+    vim-tiny \
     && rm -rf /var/lib/apt/lists/*
 
 # Python deps

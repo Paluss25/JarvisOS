@@ -1414,13 +1414,13 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         resource = (args.get("resource") or "health").strip().lower()
 
         unifi_url = os.environ.get("UNIFI_URL", "https://10.10.10.1")
-        username = os.environ.get("UNIFI_USERNAME", "")
+        username = os.environ.get("UNIFI_USERNAME") or os.environ.get("UNIFI_USER", "")
         password = os.environ.get("UNIFI_PASSWORD", "")
 
         if not username or not password:
             return _text(
                 "UniFi credentials not configured. "
-                "Set UNIFI_USERNAME and UNIFI_PASSWORD environment variables."
+                "Set UNIFI_USER and UNIFI_PASSWORD environment variables."
             )
 
         try:
