@@ -45,6 +45,10 @@ class AgentConfig:
     # "off"      — no placeholder; typing indicator only; single reply_text at the end
     telegram_streaming_mode: str = "partial"
 
+    # Webhook mode (opt-in — leave None to keep polling)
+    telegram_webhook_url_env: str | None = None    # e.g. "CEO_TELEGRAM_WEBHOOK_URL"
+    telegram_webhook_secret_env: str | None = None # e.g. "CEO_TELEGRAM_WEBHOOK_SECRET"
+
     # ---------------------------------------------------------------------------
     # Multi-channel support (all optional — channels only start when their
     # primary token env var is set to a non-empty value in the environment)

@@ -35,6 +35,7 @@ _UNIT_TEST_FILES = {
     "test_model_routing_guard.py",
     "test_permission_layer.py",
     "test_redaction_engine.py",
+    "test_telegram_webhook.py",
 }
 
 _INTEGRATION_TEST_FILES = {
