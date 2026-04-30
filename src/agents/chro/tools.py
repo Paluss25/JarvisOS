@@ -191,7 +191,8 @@ _CLASSIFY_KEYWORDS = {
     "payslip": ["retribuzione", "cedolino", "busta paga", "netto", "lordo", "irpef", "inps a carico dipendente", "tfr competenza"],
     "leave_statement": ["ferie residue", "prospetto ferie", "rol residuo", "permessi residui"],
     "inps_extract": ["estratto conto inps", "anzianità contributiva", "contributi versati", "gestione separata"],
-    "expense_report": ["nota spese", "rimborso spese", "trasferta", "km percorsi"],
+    "business_trip": ["trasferta", "missione", "viaggio di lavoro", "destinazione", "velivolo", "aeromobile", "progetto"],
+    "expense_report": ["nota spese", "rimborso spese", "km percorsi", "scontrino", "ricevuta fiscale"],
 }
 
 
@@ -204,6 +205,7 @@ _SCHEMA_PATHS = {
     "leave_statement": "/app/memory/schemas/leave_statement.json",
     "inps_extract": "/app/memory/schemas/inps_extract.json",
     "expense_report": "/app/memory/schemas/expense_report.json",
+    "business_trip": "/app/memory/schemas/business_trip.json",
 }
 
 
@@ -574,7 +576,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "classify_document",
-        "Classify a sanitized document text into one of: payslip, leave_statement, inps_extract, expense_report, unknown. "
+        "Classify a sanitized document text into one of: payslip, leave_statement, inps_extract, expense_report, business_trip, unknown. "
         "Uses keyword matching first; falls back to LLM (Haiku) when ambiguous. "
         "text MUST already be PII-sanitized before calling this tool.",
         {"text": str},
@@ -609,7 +611,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                     "role": "user",
                     "content": (
                         "Classify this Italian HR document into exactly one category. "
-                        "Reply with only one word from: payslip, leave_statement, inps_extract, expense_report, unknown.\n\n"
+                        "Reply with only one word from: payslip, leave_statement, inps_extract, expense_report, business_trip, unknown.\n\n"
                         f"DOCUMENT (first 1500 chars):\n{text[:1500]}"
                     ),
                 }],
@@ -659,6 +661,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             "leave_statement": "snapshot_date (YYYY-MM-DD), ferie_accrued (number days), ferie_used (number days), ferie_remaining (number days), rol_accrued (number hours), rol_used (number hours), rol_remaining (number hours)",
             "inps_extract": "document_date (YYYY-MM-DD), contribution_period (string e.g. '2010-01 / 2026-03'), total_contributions (number EUR), projected_pension_age (integer), projected_monthly_pension (number EUR)",
             "expense_report": "expense_date (YYYY-MM-DD), category (string), amount_eur (number), reimbursed (boolean), employer_reference (string)",
+            "business_trip": "period_from (YYYY-MM-DD), period_to (YYYY-MM-DD), destination (string), country (string), project (string), aircraft (string), purpose (string), notes (string)",
         }.get(doc_type, "")
 
         try:
@@ -720,7 +723,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "validate_schema",
         "Validate extracted fields against the expected schema for the document type. "
-        "doc_type: payslip | leave_statement | inps_extract | expense_report. "
+        "doc_type: payslip | leave_statement | inps_extract | expense_report | business_trip."
         "fields: the JSON object returned by extract_fields. "
         "Returns 'valid' or raises a validation error message.",
         {"doc_type": str, "fields": {"type": "object"}},
@@ -750,7 +753,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "save_to_db",
         "INSERT validated extracted fields into the appropriate chro.* table. "
-        "doc_type: payslip | leave_statement | inps_extract | expense_report. "
+        "doc_type: payslip | leave_statement | inps_extract | expense_report | business_trip."
         "fields: the validated JSON object. case_id: UUID string for audit log grouping. "
         "source_file: the NAS path of the original document.",
         {"doc_type": str, "fields": {"type": "object"}, "case_id": str, "source_file": str},
@@ -848,12 +851,28 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                     elif doc_type == "expense_report":
                         row = await conn.fetchrow(
                             """INSERT INTO chro.expense_items
-                               (expense_date, category, amount_eur, reimbursed, employer_reference)
-                               VALUES ($1,$2,$3,$4,$5)
+                               (expense_date, category, amount_eur, reimbursed, employer_reference, trip_id)
+                               VALUES ($1,$2,$3,$4,$5,$6)
                                RETURNING id""",
                             _to_date(fields.get("expense_date")), fields.get("category"),
                             fields.get("amount_eur"), bool(fields.get("reimbursed", False)),
                             fields.get("employer_reference"),
+                            _to_uuid(fields.get("trip_id")) if fields.get("trip_id") else None,
+                        )
+                        record_id = str(row["id"])
+
+                    elif doc_type == "business_trip":
+                        row = await conn.fetchrow(
+                            """INSERT INTO chro.business_trips
+                               (period_from, period_to, destination, country, project,
+                                aircraft, purpose, notes, raw_json, source_file)
+                               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                               RETURNING id""",
+                            _to_date(fields.get("period_from")), _to_date(fields.get("period_to")),
+                            fields.get("destination"), fields.get("country"),
+                            fields.get("project"), fields.get("aircraft"),
+                            fields.get("purpose"), fields.get("notes"),
+                            json.dumps(fields), source_file,
                         )
                         record_id = str(row["id"])
 
@@ -880,7 +899,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         "Move a processed document from /app/hr-docs/inbox/ to /app/hr-docs/archive/YYYY/doc_type/. "
         "Call this AFTER save_to_db succeeds. "
         "src_path: full path of the file in inbox (e.g. /app/hr-docs/inbox/cedolino-2026-03.pdf). "
-        "doc_type: payslip | leave_statement | inps_extract | expense_report. "
+        "doc_type: payslip | leave_statement | inps_extract | expense_report | business_trip."
         "period_year: the year from the document's period_from or document_date field (e.g. 2026).",
         {"src_path": str, "doc_type": str, "period_year": int},
     )
