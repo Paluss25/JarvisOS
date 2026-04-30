@@ -15,12 +15,10 @@ Tools:
 """
 
 import asyncio
-import io
 import json
 import logging
 import os
 import socket as _socket
-import tarfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -151,7 +149,9 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No path provided.")
 
         target = (workspace_path / rel_path).resolve()
-        if not str(target).startswith(str(workspace_path.resolve())):
+        try:
+            target.relative_to(workspace_path.resolve())
+        except ValueError:
             return _text("Access denied: path is outside the workspace directory.")
 
         if not target.exists():
@@ -673,7 +673,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         "supervisorctl restart don",
         "supervisorctl restart dos",
         "supervisorctl restart mt",
-        "supervisorctl restart email-intelligence-agent",
+        "supervisorctl restart email_intelligence_agent",
         "supervisorctl restart ceo",
     }
 
@@ -800,45 +800,6 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             "If a recurring patch is required, add a wrapper in the agent "
             "image and an explicit allowlist before re-enabling this tool."
         )
-        # Unreachable code below kept for reference if the tool is ever
-        # re-enabled with a real HITL gate + path allowlist.
-        proxy = os.environ.get("DOCKER_PROXY_URL", "http://socket-proxy:2375")  # noqa: E501
-
-        # Build a tar archive in memory with the single file
-        filename = os.path.basename(path)
-        dir_path = os.path.dirname(path) or "/"
-
-        tar_buffer = io.BytesIO()
-        content_bytes = content.encode("utf-8")
-        with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
-            info = tarfile.TarInfo(name=filename)
-            info.size = len(content_bytes)
-            tar.addfile(info, io.BytesIO(content_bytes))
-        tar_buffer.seek(0)
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.put(
-                    f"{proxy}/containers/{container}/archive",
-                    params={"path": dir_path},
-                    content=tar_buffer.getvalue(),
-                    headers={"Content-Type": "application/x-tar"},
-                )
-                if resp.status_code == 404:
-                    return _text(f"Container '{container}' not found.")
-                if resp.status_code not in (200, 204):
-                    return _text(
-                        f"Docker archive PUT failed: HTTP {resp.status_code} — {resp.text[:200]}"
-                    )
-                return _text(
-                    f"File patched: {path} in container '{container}' "
-                    f"({len(content_bytes)} bytes written)"
-                )
-        except httpx.ConnectError:
-            return _text(f"Cannot reach Docker socket proxy at {proxy}.")
-        except Exception as exc:
-            logger.error("container_file_patch[%s%s]: error — %s", container, path, exc)
-            return {"content": [{"type": "text", "text": f"Patch error: {exc}"}], "is_error": True}
 
     # --- A2A send_message (Redis pub/sub) -----------------------------------
 

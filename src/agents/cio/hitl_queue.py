@@ -193,49 +193,64 @@ class HITLQueue:
             state.current_index = i
             self.save(state)
 
-            if task.status != "pending":
-                continue  # already resolved (resume after restart)
-
-            # Send task approval message with inline keyboard
-            task_text = self._build_task_text(task, i + 1, len(state.tasks))
-            await send_task_message(task_text, task.id)
-
-            # Wait for user response or timeout
-            event = asyncio.Event()
-            self._pending[task.id] = event
-
-            try:
-                await asyncio.wait_for(event.wait(), timeout=_HITL_TIMEOUT)
-            except asyncio.TimeoutError:
-                self._pending.pop(task.id, None)
-                self._results.pop(task.id, None)
-                task.status = "expired"
-                task.result = f"Timed out after {_HITL_TIMEOUT}s"
-                daily_log_fn(f"[HITL] Task expired: {task.title}")
-                self.save(state)
+            # Skip terminal states on resume
+            if task.status in ("completed", "rejected", "expired", "failed"):
                 continue
 
-            approved = self._results.pop(task.id, False)
-            self._pending.pop(task.id, None)
+            # Approval gate — only for pending tasks.
+            # "approved" tasks resume directly to execution (interrupted mid-remediation).
+            if task.status == "pending":
+                task_text = self._build_task_text(task, i + 1, len(state.tasks))
 
-            if approved:
+                # Register event BEFORE sending so a fast Telegram callback is never missed.
+                event = asyncio.Event()
+                self._pending[task.id] = event
+                try:
+                    await send_task_message(task_text, task.id)
+                except Exception as exc:
+                    self._pending.pop(task.id, None)
+                    logger.error("hitl_queue: failed to deliver task %s: %s", task.id, exc)
+                    task.status = "failed"
+                    task.result = f"Telegram delivery failed: {exc}"
+                    daily_log_fn(f"[HITL] Failed to deliver: {task.title}")
+                    self.save(state)
+                    continue
+
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=_HITL_TIMEOUT)
+                except asyncio.TimeoutError:
+                    self._pending.pop(task.id, None)
+                    self._results.pop(task.id, None)
+                    task.status = "expired"
+                    task.result = f"Timed out after {_HITL_TIMEOUT}s"
+                    daily_log_fn(f"[HITL] Task expired: {task.title}")
+                    self.save(state)
+                    continue
+
+                approved = self._results.pop(task.id, False)
+                self._pending.pop(task.id, None)
+
+                if not approved:
+                    task.status = "rejected"
+                    daily_log_fn(f"[HITL] Rejected: {task.title}")
+                    self.save(state)
+                    continue
+
                 task.status = "approved"
                 self.save(state)
-                try:
-                    result_text = await remediation_engine.execute(task.action)
-                    task.status = "completed"
-                    task.result = result_text
-                    await send_notification(f"✅ *Task {i + 1} completato*\n{result_text[:300]}")
-                    daily_log_fn(f"[HITL] Completed: {task.title} → {result_text[:80]}")
-                except Exception as exc:
-                    task.status = "failed"
-                    task.result = str(exc)
-                    await send_notification(f"❌ *Task {i + 1} fallito*\n```\n{str(exc)[:200]}\n```")
-                    daily_log_fn(f"[HITL] Failed: {task.title} — {exc}")
-            else:
-                task.status = "rejected"
-                daily_log_fn(f"[HITL] Rejected: {task.title}")
 
+            # Execution phase — reached for newly approved tasks and resumed "approved" tasks.
+            try:
+                result_text = await remediation_engine.execute(task.action)
+                task.status = "completed"
+                task.result = result_text
+                await send_notification(f"✅ *Task {i + 1} completato*\n{result_text[:300]}")
+                daily_log_fn(f"[HITL] Completed: {task.title} → {result_text[:80]}")
+            except Exception as exc:
+                task.status = "failed"
+                task.result = str(exc)
+                await send_notification(f"❌ *Task {i + 1} fallito*\n```\n{str(exc)[:200]}\n```")
+                daily_log_fn(f"[HITL] Failed: {task.title} — {exc}")
             self.save(state)
 
         # Final summary

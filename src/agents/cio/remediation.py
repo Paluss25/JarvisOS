@@ -136,6 +136,8 @@ class RemediationEngine:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, follow_redirects=True) as client:
             try:
                 resp = await client.get(url)
+                if resp.status_code >= 400:
+                    raise RuntimeError(f"infra_verify: {url} returned HTTP {resp.status_code}")
                 return f"infra_verify {url} → HTTP {resp.status_code}"
             except httpx.ConnectError:
                 raise RuntimeError(f"infra_verify: cannot connect to {url}")
@@ -149,12 +151,15 @@ class RemediationEngine:
     async def _pg_check(self, db_name: str) -> str:
         import asyncpg
         env_map = {
-            "nutrition": "DRHOUSE_POSTGRES_URL",
-            "sport": "DRHOUSE_SPORT_POSTGRES_URL",
-            "jarvis": "JARVIS_DB_URL",
-            "ceo": "JARVIS_DB_URL",
+            "sport": "SPORT_POSTGRES_URL",
+            "sport_metrics": "SPORT_POSTGRES_URL",
+            "nutrition": "NUTRITION_POSTGRES_URL",
+            "nutrition_data": "NUTRITION_POSTGRES_URL",
+            "gestionale": "GESTIONALE_POSTGRES_URL",
+            "cedolino": "CEDOLINO_POSTGRES_URL",
+            "jarvios": "JARVIOS_POSTGRES_URL",
         }
-        url_env = env_map.get(db_name, f"{db_name.upper()}_DB_URL")
+        url_env = env_map.get(db_name, f"{db_name.upper()}_POSTGRES_URL")
         url = os.environ.get(url_env, "")
         if not url:
             raise RuntimeError(f"pg_check: env var {url_env!r} not set")
