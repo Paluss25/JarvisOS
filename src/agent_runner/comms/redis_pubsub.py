@@ -53,6 +53,16 @@ class RedisA2A:
         """Register an async callback ``async def cb(msg: A2AMessage) -> None``."""
         self._callbacks.append(callback)
 
+    @property
+    def client(self) -> aioredis.Redis:
+        """Return the underlying Redis client (for non-pubsub operations such
+        as the InboxQueue's LIST commands). Raises if ``connect()`` was not
+        called yet.
+        """
+        if self._redis is None:
+            raise RuntimeError("RedisA2A not connected — call connect() first")
+        return self._redis
+
     async def listen(self) -> None:
         """Blocking listen loop — run as an asyncio task via lifespan.
 

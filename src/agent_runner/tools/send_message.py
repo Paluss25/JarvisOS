@@ -1,4 +1,15 @@
-"""send_message MCP tool — generic inter-agent communication via Redis + HTTP fallback."""
+"""send_message MCP tool — generic inter-agent communication via Redis + HTTP fallback.
+
+Two delivery modes:
+- ``wait_response=True``  (default, backward-compatible) → publishes a ``request``
+  envelope, awaits the receiver's correlated ``response``, returns the response
+  text. Used for queries that need a reply ("ping", "lookup", "ask").
+- ``wait_response=False`` → publishes a ``notification`` envelope and returns
+  immediately with the message id. Used for one-way broadcasts (morning briefings,
+  FYI copies, status updates) where the sender does not consume the receiver's
+  reasoning. Eliminates the head-of-line blocking that inflates p95 latency
+  when the receiver runs a long turn.
+"""
 
 import asyncio
 import logging
@@ -21,12 +32,29 @@ _AGENT_TIMEOUTS: dict[str, float] = {
 }
 
 
+def _coerce_bool(value, default: bool = True) -> bool:
+    """Best-effort bool coercion — MCP arg dicts often arrive with string values."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "1", "yes", "y", "on"):
+            return True
+        if v in ("false", "0", "no", "n", "off"):
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
+
 def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
     """Return the send_message async function bound to this agent's Redis transport.
 
     The returned function is suitable for registration with the MCP sdk_tool decorator.
-    It sends a request message via Redis pub/sub and awaits a correlated response.
-    Falls back to HTTP POST if Redis publish fails (e.g. Redis not available).
+    By default it sends a request and waits for a correlated response. Pass
+    ``wait_response=False`` for fire-and-forget notifications.
 
     Args:
         agent_id: This agent's ID (used as from_agent in the envelope).
@@ -67,21 +95,52 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
     redis_a2a.on_message(_handle_response)
 
     async def send_message(args: dict) -> str:
-        """Send a message to another agent and wait for their response.
+        """Send a message to another agent.
 
         Args (in dict):
             to: Target agent ID (e.g. "dos", "ceo")
             message: Natural language message to send
+            wait_response: If True (default) wait for the agent's reply. Set False
+                for one-way notifications (morning briefings, FYI copies) — returns
+                immediately with the message id, no head-of-line blocking on the
+                receiver's reasoning loop.
         Returns:
-            The target agent's response text, or an error string.
+            The target agent's response text (when wait_response=True), or a
+            short ``"[Sent: <id>]"`` ack (when wait_response=False), or an error.
         """
         to = (args.get("to") or "").strip()
         message = (args.get("message") or "").strip()
+        wait_response = _coerce_bool(args.get("wait_response"), default=True)
         if not to:
             return "Error: 'to' (target agent ID) is required."
         if not message:
             return "Error: 'message' is required."
 
+        msg_type = "request" if wait_response else "notification"
+
+        # Fire-and-forget path: publish and return immediately. No timeouts to
+        # track, no pending future, no cooldown logic — the sender's p95 is
+        # decoupled from the receiver's turn duration.
+        if not wait_response:
+            correlation_id = str(uuid.uuid4())
+            msg = A2AMessage(
+                from_agent=agent_id,
+                to_agent=to,
+                type=msg_type,
+                payload=message,
+                correlation_id=correlation_id,
+            )
+            try:
+                await redis_a2a.publish(msg)
+                return f"[Sent notification {msg.id[:8]} to {to}]"
+            except Exception as exc:
+                logger.warning(
+                    "send_message[%s→%s]: notification publish failed (%s)",
+                    agent_id, to, exc,
+                )
+                return f"Error: could not deliver notification to '{to}': {exc}"
+
+        # Request/response path (legacy behaviour, fully preserved).
         # Fast-fail only after a *streak* of timeouts. A single transient
         # 120s timeout no longer suppresses unrelated follow-up requests.
         last_timeout = _timeout_ts.get(to)
@@ -101,7 +160,7 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
         msg = A2AMessage(
             from_agent=agent_id,
             to_agent=to,
-            type="request",
+            type=msg_type,
             payload=message,
             correlation_id=correlation_id,
         )

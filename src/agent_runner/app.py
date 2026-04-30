@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from agent_runner.comms.message import A2AMessage
 from agent_runner.comms.redis_pubsub import RedisA2A
+from agent_runner.comms.inbox import InboxQueue
 from agent_runner.config import AgentConfig
 from agent_runner.client import create_agent_client, BaseAgentClient
 from agent_runner.memory.daily_logger import DailyLogger
@@ -54,6 +55,8 @@ def create_app(config: AgentConfig) -> FastAPI:
         "pipeline_task": None,
         "redis_a2a_task": None,
         "redis_a2a": None,
+        "inbox": None,
+        "inbox_drain_task": None,
         "slack_task": None,
         "discord_task": None,
         "mattermost_task": None,
@@ -93,17 +96,50 @@ def create_app(config: AgentConfig) -> FastAPI:
         # Wire up inbound A2A handler and start the listen loop
         if redis_a2a is not None:
             try:
+                # Inbox queue for batched notification consumption.
+                # Notifications are stored here and drained periodically by
+                # ``_inbox_drain_loop`` so multiple concurrent senders fold
+                # into a single agent turn instead of N parallel turns.
+                inbox = InboxQueue(config.id, redis_a2a.client)
+                state["inbox"] = inbox
+
                 async def _handle_a2a(msg: A2AMessage) -> None:
-                    """Callback: process inbound A2A request, publish response."""
+                    """Callback: process inbound A2A messages.
+
+                    - ``request``      → run a turn, publish correlated ``response``.
+                    - ``notification`` → enqueue into the agent's Redis inbox.
+                      The drain consumer reads the backlog atomically and
+                      processes it in a single batched turn (ack-then-batch).
+                    Other types are ignored.
+                    """
                     agent = state["agent"]
-                    if not agent or msg.type != "request":
+                    if not agent or msg.type not in ("request", "notification"):
                         return
+                    is_request = msg.type == "request"
                     try:
+                        prefix = "[A2A]" if is_request else "[A2A-notif]"
                         DailyLogger(config.workspace_path).log(
-                            f"[A2A] From {msg.from_agent}: {msg.payload[:100]}"
+                            f"{prefix} From {msg.from_agent}: {msg.payload[:100]}"
                         )
                     except Exception:
                         pass
+
+                    # Notifications: enqueue and return. The drain loop owns the
+                    # LLM call. Crash-safe (Redis persists) and busy-safe (no drop).
+                    if not is_request:
+                        try:
+                            qlen = await inbox.push(msg)
+                            logger.info(
+                                "%s: notification from %s queued (inbox depth=%d)",
+                                config.name, msg.from_agent, qlen,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "%s: failed to enqueue notification from %s — %s",
+                                config.name, msg.from_agent, exc,
+                            )
+                        return
+
                     # Fast path: structured JSON actions bypass the LLM entirely
                     if config.a2a_fast_path is not None:
                         try:
@@ -160,10 +196,65 @@ def create_app(config: AgentConfig) -> FastAPI:
                     except Exception as exc:
                         logger.warning("%s: a2a handler error — %s", config.name, exc)
 
+                async def _inbox_drain_loop() -> None:
+                    """Periodic consumer: drains the notification inbox into a
+                    single batched ``agent.query()`` turn.
+
+                    - Skips the tick if the agent is busy (notifications stay
+                      queued for the next drain — no loss).
+                    - Skips the tick if the inbox is empty.
+                    - When draining, builds a single prompt that lists every
+                      pending notification with sender + timestamp so the agent
+                      can see the full batch at once and respond holistically.
+                    """
+                    interval = float(getattr(config, "inbox_drain_interval_s", 60))
+                    while True:
+                        try:
+                            await asyncio.sleep(interval)
+                            agent = state["agent"]
+                            if not agent or agent.is_busy:
+                                continue
+                            messages = await inbox.drain()
+                            if not messages:
+                                continue
+                            parts = [
+                                f"[Inbox batch — {len(messages)} pending "
+                                f"notification(s) since last drain]"
+                            ]
+                            for i, m in enumerate(messages, 1):
+                                parts.append(
+                                    f"\n--- {i}. From {m.from_agent} "
+                                    f"({m.timestamp}) ---\n{m.payload}"
+                                )
+                            prompt = "\n".join(parts)
+                            try:
+                                await agent.query(
+                                    prompt,
+                                    session_id="a2a-inbox",
+                                    source="a2a",
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "%s: inbox batch turn failed — %s",
+                                    config.name, exc,
+                                )
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as exc:
+                            logger.warning(
+                                "%s: inbox drain loop error — %s",
+                                config.name, exc,
+                            )
+
                 redis_a2a.on_message(_handle_a2a)
                 state["redis_a2a"] = redis_a2a
                 state["redis_a2a_task"] = asyncio.create_task(redis_a2a.listen())
-                logger.info("%s: Redis A2A subscriber started", config.name)
+                state["inbox_drain_task"] = asyncio.create_task(_inbox_drain_loop())
+                drain_interval = float(getattr(config, "inbox_drain_interval_s", 60))
+                logger.info(
+                    "%s: Redis A2A subscriber + inbox drain (every %.0fs) started",
+                    config.name, drain_interval,
+                )
             except Exception as exc:
                 logger.warning("%s: Redis A2A subscriber failed — %s", config.name, exc)
 
@@ -232,7 +323,7 @@ def create_app(config: AgentConfig) -> FastAPI:
         # Shutdown
         logger.info("%s: shutting down…", config.name)
         for key in ("telegram_task", "scheduler_task", "pipeline_task", "redis_a2a_task",
-                    "slack_task", "discord_task", "mattermost_task"):
+                    "inbox_drain_task", "slack_task", "discord_task", "mattermost_task"):
             task = state.get(key)
             if task and not task.done():
                 task.cancel()

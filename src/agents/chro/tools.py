@@ -147,6 +147,8 @@ _PII_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r'\b(IT)?\s?P\.?\s?IVA\s*:?\s*\d{11}\b', re.IGNORECASE), '[PIVA_REDACTED]'),
     # P.IVA bare number (11 digits following typical IT VAT context)
     (re.compile(r'\bIT\s?\d{11}\b'), '[PIVA_REDACTED]'),
+    # Email addresses
+    (re.compile(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b'), '[EMAIL_REDACTED]'),
     # Street address patterns — including abbreviated forms (P.zza, C.so, Via S., c/o)
     # Corso/Largo require an uppercase first letter after the keyword to avoid false positives
     # on common Italian HR phrases like "Corso di formazione..." or "Largo accordo..."
@@ -158,16 +160,30 @@ _PII_PATTERNS: list[tuple[re.Pattern, str]] = [
     ), '[ADDR_REDACTED]'),
 ]
 
+# Employee full name loaded once at module import — set CHRO_EMPLOYEE_FULL_NAME in .env
+# Format: "Nome Cognome" (the reversed "Cognome Nome" form is also auto-redacted)
+_EMPLOYEE_FULL_NAME: str = os.environ.get("CHRO_EMPLOYEE_FULL_NAME", "").strip()
+
 
 def sanitize_pii(text: str, extra_names: list[str] | None = None) -> str:
     """Redact PII from document text before any LLM call. Purely local — no network."""
     result = text
     for pattern, replacement in _PII_PATTERNS:
         result = pattern.sub(replacement, result)
-    if extra_names:
-        for name in extra_names:
-            if len(name) >= 3:
-                result = re.sub(re.escape(name), '[NAME_REDACTED]', result, flags=re.IGNORECASE)
+
+    # Build name list: caller-supplied + auto-injected employee name (both "Nome Cognome" and "Cognome Nome")
+    names: list[str] = list(extra_names or [])
+    if _EMPLOYEE_FULL_NAME and _EMPLOYEE_FULL_NAME not in names:
+        names.append(_EMPLOYEE_FULL_NAME)
+        parts = _EMPLOYEE_FULL_NAME.split()
+        if len(parts) == 2:
+            reversed_form = f"{parts[1]} {parts[0]}"
+            if reversed_form not in names:
+                names.append(reversed_form)
+
+    for name in names:
+        if len(name) >= 3:
+            result = re.sub(r'\b' + re.escape(name) + r'\b', '[NAME_REDACTED]', result, flags=re.IGNORECASE)
     return result
 
 
@@ -686,8 +702,10 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         "sanitize_pii",
         "Redact PII from document text before passing to any LLM. "
         "Replaces: codice fiscale → [CF_REDACTED], IBAN → [IBAN_REDACTED], "
-        "street addresses → [ADDR_REDACTED], P.IVA → [PIVA_REDACTED]. "
-        "Pass extra_names as a list of name strings to also redact (e.g. ['Mario Rossi']).",
+        "email addresses → [EMAIL_REDACTED], street addresses → [ADDR_REDACTED], "
+        "P.IVA → [PIVA_REDACTED]. Employee name (from CHRO_EMPLOYEE_FULL_NAME env) is "
+        "always auto-redacted in both 'Nome Cognome' and 'Cognome Nome' forms. "
+        "Pass extra_names to redact additional names on demand.",
         {"text": str, "extra_names": {"type": "array", "items": {"type": "string"}, "default": []}},
     )
     async def sanitize_pii_tool(args: dict) -> dict:
@@ -964,7 +982,8 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             "Send a message to another agent and wait for their response. "
             "Use 'to' to specify the target agent ID (e.g. 'ceo', 'cfo'). "
             "'message' is the natural language request.",
-            {"to": str, "message": str},
+            "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
+            {"to": str, "message": str, "wait_response": bool},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
