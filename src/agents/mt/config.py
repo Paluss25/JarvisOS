@@ -15,6 +15,7 @@ MT_BUILTIN_CRONS = [
             "'archive' → call sort_email with email_id and payload_json; "
             "'create_task' → call create_task with title derived from subject; "
             "'draft_reply' → call draft_reply with email_id, subject, sender, body_redacted; "
+            "draft_reply creates a draft_pending item and must not be treated as sent or complete; "
             "'forward_to_cos' → call forward_to_cos with payload_json=<full entry as JSON> and a brief reason. "
             "COS is only reachable via forward_to_cos (A2A) — never write files to contact COS. "
             "After processing all entries, call report_issue with any technical issues observed "
@@ -93,6 +94,7 @@ def build_mt_config(workspace_root: Path = Path("/app/workspace/mt")) -> AgentCo
         a2a_fast_path=mt_fast_path,
         extra_mcp_servers={
             "protonmail-email": {"type": "sse", "url": "http://protonmail-mcp:3000/sse"},
+            "gmx-email": {"type": "sse", "url": "http://gmx-mcp:3001/sse"},
         },
         builtin_crons=MT_BUILTIN_CRONS,
         allowed_tools=[

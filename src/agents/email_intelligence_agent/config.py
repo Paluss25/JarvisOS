@@ -27,6 +27,7 @@ async def _emailintel_a2a_fast_path(payload: dict) -> dict | None:
             account=payload.get("account", ""),
             subject=payload.get("subject", "(no subject)"),
             body=payload.get("body", "(empty body)"),
+            attachments=payload.get("attachments", []),
             sender=payload.get("sender", ""),
             received_at=payload.get("received_at", ""),
         )

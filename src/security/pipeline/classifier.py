@@ -1,5 +1,6 @@
 """Layer 3 — Classifier: domain, sensitivity, risk, and priority classification."""
 
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,8 @@ class ClassificationResult:
 
 class Classifier:
     """Classify an email by business domain, sensitivity, risk, and priority."""
+
+    _EMAIL_RE = re.compile(r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})", re.IGNORECASE)
 
     _DOMAIN_KEYWORDS: Dict[str, List[str]] = {
         "finance": [
@@ -92,15 +95,22 @@ class Classifier:
         """Return override dict if sender matches, else None."""
         self._load_whitelist()
         sender = sender.strip().lower()
+        match = self._EMAIL_RE.search(sender)
+        candidates = [sender]
+        if match:
+            candidates.append(match.group(1).lower())
 
         email_overrides: Dict[str, Any] = self._whitelist_data.get("email_overrides") or {}
-        if sender in email_overrides:
-            return email_overrides[sender]
+        for candidate in candidates:
+            if candidate in email_overrides:
+                return email_overrides[candidate]
 
         domain_overrides: Dict[str, Any] = self._whitelist_data.get("domain_overrides") or {}
         for pattern, entry in domain_overrides.items():
-            if sender.endswith(pattern.lower()):
-                return entry
+            pattern = str(pattern).strip().lower()
+            for candidate in candidates:
+                if candidate.endswith(pattern):
+                    return entry
 
         return None
 

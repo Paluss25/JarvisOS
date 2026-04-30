@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import uuid
+import fcntl
 from pathlib import Path
 
 from security.pipeline.ingest_gate import IngestGate
@@ -100,6 +101,7 @@ def _run_security_pipeline(
     classification = Classifier().classify(
         subject=ingest.sanitized_subject,
         body=ingest.sanitized_body,
+        sender=sender,
     )
 
     # Layer 4: RedactionEngine
@@ -265,22 +267,41 @@ def _compute_action_hint(payload: dict) -> str:
         return "forward_to_cos"
 
     domain = str(classification.get("primary_domain", "")).lower()
+    subject = str(payload.get("subject", "")).lower()
+    body = str(payload.get("body_redacted", "")).lower()
+    sender = str(payload.get("sender", "")).lower()
+    text = f"{subject} {body}"
+
+    action_keywords = (
+        "fattura", "invoice", "scadenza", "deadline", "urgente", "urgent",
+        "action required", "da fare", "ricorda", "reminder", "todo",
+        "action may be required", "requires your action", "richiede conferma",
+        "conferma", "confirm your identity",
+    )
+    if any(keyword in text for keyword in action_keywords):
+        return "create_task"
+
+    auto_archive_senders = (
+        "linkedin.com", "mail.fineconews.com", "news@", "newsletter@",
+        "noreply@", "no-reply@", "notifications@", "invitations@",
+    )
+    auto_archive_subjects = (
+        "newsletter", "digest", "promotion", "offerta", "unsubscribe",
+        "annulla l'iscrizione", "voglio collegarmi", "invito linkedin",
+    )
     if domain in {"newsletter", "marketing", "automated", "spam", "notification"}:
+        return "archive"
+    if any(marker in sender for marker in auto_archive_senders) and risk in {"none", "low"}:
+        return "archive"
+    if any(marker in subject for marker in auto_archive_subjects) and risk in {"none", "low"}:
         return "archive"
 
     if (
         str(classification.get("sensitivity", "")).lower() == "public"
-        and str(classification.get("priority", "")).lower() == "low"
+        and str(classification.get("priority", "")).lower() in {"low", "normal"}
+        and float(classification.get("confidence") or 0.0) < 0.3
     ):
         return "archive"
-
-    subject = str(payload.get("subject", "")).lower()
-    action_keywords = (
-        "fattura", "invoice", "scadenza", "deadline", "urgente", "urgent",
-        "action required", "da fare", "ricorda", "reminder", "todo",
-    )
-    if any(keyword in subject for keyword in action_keywords):
-        return "create_task"
 
     if domain == "personal" and bool(policy.get("allow")):
         return "draft_reply"
@@ -288,11 +309,52 @@ def _compute_action_hint(payload: dict) -> str:
     return "forward_to_cos"
 
 
+def _digest_key(entry: dict) -> str:
+    account = str(entry.get("account", "")).strip()
+    email_id = str(entry.get("email_id", "")).strip()
+    received_at = str(entry.get("received_at", "")).strip()
+    return "|".join(part for part in (account, email_id, received_at) if part)
+
+
 def _write_to_digest(entry: dict, digest_path: Path) -> None:
-    """Append one JSON object per line to the MT digest file."""
+    """Append one JSON object per line to the MT digest file.
+
+    The digest is shared state between EIA and MT. Keep writes serialized,
+    deduplicate by account/email_id/received_at, and retain only the newest
+    MT_DIGEST_MAX_LINES entries to avoid unbounded growth.
+    """
     digest_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(digest_path, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    lock_path = digest_path.with_suffix(digest_path.suffix + ".lock")
+    max_lines = int(os.environ.get("MT_DIGEST_MAX_LINES") or 1000)
+
+    with open(lock_path, "w", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        entries: list[dict] = []
+        if digest_path.exists():
+            for line in digest_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    parsed = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if isinstance(parsed, dict):
+                    entries.append(parsed)
+
+        new_key = _digest_key(entry)
+        if new_key and any(_digest_key(existing) == new_key for existing in entries):
+            return
+
+        entries.append(entry)
+        if max_lines > 0 and len(entries) > max_lines:
+            entries = entries[-max_lines:]
+
+        tmp_path = digest_path.with_suffix(digest_path.suffix + ".tmp")
+        tmp_path.write_text(
+            "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in entries),
+            encoding="utf-8",
+        )
+        tmp_path.replace(digest_path)
 
 
 # ---------------------------------------------------------------------------
@@ -420,8 +482,8 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
             "send_message",
             "Send a message to another agent and wait for their response. "
             "Use 'to' to specify the target agent ID (e.g. 'cos'). "
-            "'message' is the natural language request to send.",
-            "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
+            "'message' is the natural language request to send. "
+            "Set wait_response=false for one-way notifications; default true blocks until reply.",
             {"to": str, "message": str, "wait_response": bool},
         )
         async def send_message(args: dict) -> dict:

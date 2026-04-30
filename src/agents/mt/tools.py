@@ -62,17 +62,65 @@ def _ics_dtline(prop: str, dt: datetime.datetime) -> str:
 
 
 def _mark_processed(workspace: Path, email_id: str) -> None:
+    _mark_email_state(workspace, email_id=email_id, status="processed")
     processed_path = workspace / "processed_ids.txt"
     processed_path.parent.mkdir(parents=True, exist_ok=True)
     with open(processed_path, "a", encoding="utf-8") as handle:
         handle.write(email_id + "\n")
 
 
+def _email_state_key(email_id: str, account: str = "", received_at: str = "") -> str:
+    return "|".join(part for part in (account.strip(), email_id.strip(), received_at.strip()) if part)
+
+
+def _mark_email_state(
+    workspace: Path,
+    email_id: str,
+    status: str,
+    account: str = "",
+    received_at: str = "",
+    metadata: dict | None = None,
+) -> None:
+    if not email_id:
+        return
+    state_path = workspace / "processed_email_state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+        if not isinstance(state, dict):
+            state = {}
+    except (json.JSONDecodeError, ValueError, OSError):
+        state = {}
+    key = _email_state_key(email_id, account, received_at)
+    state[key] = {
+        "email_id": email_id,
+        "account": account,
+        "received_at": received_at,
+        "status": status,
+        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **(metadata or {}),
+    }
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _read_processed_ids(workspace: Path) -> set[str]:
     processed_path = workspace / "processed_ids.txt"
-    if not processed_path.exists():
-        return set()
-    return set(processed_path.read_text(encoding="utf-8").splitlines())
+    processed = set()
+    if processed_path.exists():
+        processed.update(processed_path.read_text(encoding="utf-8").splitlines())
+    state_path = workspace / "processed_email_state.json"
+    if state_path.exists():
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            if isinstance(state, dict):
+                for key, record in state.items():
+                    if isinstance(record, dict) and record.get("status") == "processed":
+                        processed.add(key)
+                        if record.get("email_id"):
+                            processed.add(str(record["email_id"]))
+        except (json.JSONDecodeError, ValueError, OSError):
+            pass
+    return processed
 
 
 def _read_digest(digest_path: Path, processed_ids: set[str], max_items: int = 10) -> list[dict]:
@@ -88,7 +136,12 @@ def _read_digest(digest_path: Path, processed_ids: set[str], max_items: int = 10
         except (json.JSONDecodeError, ValueError):
             continue
         uid = str(entry.get("email_id", ""))
-        if uid and uid not in processed_ids:
+        key = _email_state_key(
+            uid,
+            str(entry.get("account", "")),
+            str(entry.get("received_at", "")),
+        )
+        if uid and uid not in processed_ids and key not in processed_ids:
             items.append(entry)
             if len(items) >= max_items:
                 break
@@ -291,8 +344,8 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
 
         @sdk_tool(
             "send_message",
-            "Send a message to another agent and wait for their response.",
-            "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
+            "Send a message to another agent and wait for their response. "
+            "Set wait_response=false for one-way notifications; default true blocks until reply.",
             {"to": str, "message": str, "wait_response": bool},
         )
         async def send_message(args: dict) -> dict:
@@ -318,6 +371,7 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
             message = f"MT escalation: {reason}\n\nPayload:\n{payload_raw}"
             result = await _send_message_fn({"to": "cos", "message": message})
             if email_id:
+                _mark_email_state(workspace_path, email_id=email_id, status="processed")
                 _mark_processed(workspace_path, email_id)
             return _text(f"Forwarded to COS. Response: {result}")
 
@@ -427,7 +481,7 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "sort_email",
-        "Move an email to the appropriate folder via protonmail-mcp /sort.",
+        "Move an email to the appropriate folder via the account-specific email-mcp /sort endpoint.",
         {"email_id": str, "payload_json": str},
     )
     async def sort_email_tool(args: dict) -> dict:
@@ -445,6 +499,14 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
 
             # Offload blocking client to a threadpool — do not stall the event loop.
             result = await asyncio.to_thread(sort_email_client, email_id, payload)
+            _mark_email_state(
+                workspace_path,
+                email_id=email_id,
+                account=str(payload.get("account", "")),
+                received_at=str(payload.get("received_at", "")),
+                status="processed",
+                metadata={"sort_result": result},
+            )
             _mark_processed(workspace_path, email_id)
             return _text(json.dumps(result))
         except Exception as exc:
@@ -468,16 +530,50 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         drafts_dir = workspace_path / "drafts"
         drafts_dir.mkdir(parents=True, exist_ok=True)
         draft_path = drafts_dir / f"{email_id}.txt"
+        draft_text = (
+            "Ciao,\n\n"
+            "ho ricevuto il tuo messaggio. Ti rispondo a breve con i dettagli.\n\n"
+            "A presto,\n"
+            "Emiliano"
+        )
+        if instructions:
+            draft_text = (
+                "Ciao,\n\n"
+                f"{instructions}\n\n"
+                "A presto,\n"
+                "Emiliano"
+            )
         draft_path.write_text(
             f"Subject: Re: {subject}\n"
             f"To: {sender}\n"
+            "Status: draft_pending\n"
             f"--- Original ---\n{body}\n"
             f"--- Instructions ---\n{instructions or 'none'}\n"
-            "--- Draft (fill in) ---\n[draft text not yet generated — use LLM to complete]\n",
+            f"--- Draft ---\n{draft_text}\n",
             encoding="utf-8",
         )
-        _mark_processed(workspace_path, email_id)
-        return _text(f"Draft scaffold saved to drafts/{email_id}.txt. Re: {subject} | To: {sender}")
+        status_path = drafts_dir / "draft_status.json"
+        try:
+            draft_status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
+            if not isinstance(draft_status, dict):
+                draft_status = {}
+        except (json.JSONDecodeError, ValueError, OSError):
+            draft_status = {}
+        draft_status[email_id] = {
+            "status": "draft_pending",
+            "subject": subject,
+            "sender": sender,
+            "path": f"drafts/{email_id}.txt",
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        status_path.write_text(json.dumps(draft_status, ensure_ascii=False, indent=2), encoding="utf-8")
+        _mark_email_state(
+            workspace_path,
+            email_id=email_id,
+            status="draft_pending",
+            metadata={"draft_path": f"drafts/{email_id}.txt"},
+        )
+        return _text(f"draft_pending saved to drafts/{email_id}.txt. Re: {subject} | To: {sender}")
 
     @sdk_tool("create_task", "Create a new task entry in task_log.json.", {"title": str, "notes": str, "due_date": str})
     async def create_task(args: dict) -> dict:

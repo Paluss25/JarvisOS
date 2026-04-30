@@ -66,6 +66,26 @@ if "rapidfuzz" not in sys.modules:
     sys.modules["rapidfuzz.fuzz"] = _rf_mock.fuzz
 
 # ---------------------------------------------------------------------------
+# Mock caldav — not needed by MT unit tests that exercise email helpers
+# ---------------------------------------------------------------------------
+if "caldav" not in sys.modules:
+    _caldav_mock = MagicMock()
+    _caldav_lib_mock = MagicMock()
+    _caldav_error_mock = MagicMock()
+    _caldav_lib_mock.error = _caldav_error_mock
+    _caldav_mock.lib = _caldav_lib_mock
+    sys.modules["caldav"] = _caldav_mock
+    sys.modules["caldav.lib"] = _caldav_lib_mock
+    sys.modules["caldav.lib.error"] = _caldav_error_mock
+
+if "vobject" not in sys.modules:
+    _vobject_mock = MagicMock()
+    _vobject_icalendar_mock = MagicMock()
+    _vobject_mock.icalendar = _vobject_icalendar_mock
+    sys.modules["vobject"] = _vobject_mock
+    sys.modules["vobject.icalendar"] = _vobject_icalendar_mock
+
+# ---------------------------------------------------------------------------
 # Mock telegram — for testing Telegram bot without python-telegram-bot
 # ---------------------------------------------------------------------------
 if "telegram" not in sys.modules:
