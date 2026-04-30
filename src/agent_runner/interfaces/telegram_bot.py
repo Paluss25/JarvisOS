@@ -473,7 +473,7 @@ async def _cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         from agent_runner.memory.daily_logger import DailyLogger
-        log_text = DailyLogger(config.workspace_path, user_id=update.effective_chat.id).read_today()
+        log_text = DailyLogger(config.workspace_path).read_today()  # cost entries written to system log
         cost_re = re.compile(r"\[COST\] \$([0-9]+\.[0-9]+)")
         costs = [float(m) for m in cost_re.findall(log_text)]
         total = sum(costs)
