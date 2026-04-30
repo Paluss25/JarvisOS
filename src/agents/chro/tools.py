@@ -894,6 +894,190 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             logger.error("save_to_db(%s): error — %s", doc_type, exc)
             return {"content": [{"type": "text", "text": f"DB error: {exc}"}], "is_error": True}
 
+    # Allow-listed columns per table for update_db/write_db (no system columns).
+    _WRITABLE_COLUMNS = {
+        "payslips": {
+            "period_from", "period_to", "employer", "gross_pay", "net_pay",
+            "inps_employee", "irpef_withheld", "tfr_accrued",
+            "leave_residual_days", "rol_residual_hours", "raw_json", "source_file",
+        },
+        "leave_snapshots": {
+            "snapshot_date", "ferie_accrued", "ferie_used", "ferie_remaining",
+            "rol_accrued", "rol_used", "rol_remaining", "payslip_id",
+        },
+        "pension_extracts": {
+            "document_date", "contribution_period", "total_contributions",
+            "projected_pension_age", "projected_monthly_pension",
+            "raw_json", "source_file",
+        },
+        "expense_items": {
+            "expense_date", "category", "amount_eur", "reimbursed",
+            "employer_reference", "trip_id",
+        },
+        "business_trips": {
+            "period_from", "period_to", "destination", "country", "project",
+            "aircraft", "purpose", "notes", "raw_json", "source_file",
+        },
+    }
+    _DATE_COLUMNS = {
+        "period_from", "period_to", "snapshot_date", "expense_date", "document_date",
+    }
+    _UUID_COLUMNS = {"trip_id", "payslip_id"}
+    _JSON_COLUMNS = {"raw_json"}
+
+    @sdk_tool(
+        "write_db",
+        "Unified write tool for chro.* tables — performs INSERT, UPDATE, or DELETE on a single row. "
+        "action: 'insert' | 'update' | 'delete'. "
+        "table: payslips | leave_snapshots | pension_extracts | expense_items | business_trips. "
+        "id: UUID of the row (REQUIRED for update and delete; optional for insert — when provided on insert, the row is upserted on id). "
+        "fields: object {column: value} — REQUIRED for insert and update; ignored for delete. Only writable columns are accepted. "
+        "Returns the affected row id and the operation performed. Auditable: every call writes a chro.hr_audit_log entry.",
+        {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["insert", "update", "delete"]},
+                "table": {"type": "string"},
+                "id": {"type": "string"},
+                "fields": {"type": "object"},
+                "case_id": {"type": "string"},
+            },
+            "required": ["action", "table"],
+        },
+    )
+    async def write_db(args: dict) -> dict:
+        args = _parse_args(args)
+        action = (args.get("action") or "").strip().lower()
+        table = (args.get("table") or "").strip().lower()
+        row_id = (args.get("id") or "").strip()
+        fields = args.get("fields") or {}
+        if isinstance(fields, str):
+            try:
+                fields = json.loads(fields)
+            except Exception:
+                return _text("fields must be a JSON object.")
+        case_id = (args.get("case_id") or "").strip()
+
+        if action not in {"insert", "update", "delete"}:
+            return {"content": [{"type": "text", "text": f"Unknown action: {action}"}], "is_error": True}
+        if table not in _WRITABLE_COLUMNS:
+            return {"content": [{"type": "text", "text": f"Unknown or non-writable table: {table}"}], "is_error": True}
+        if action in {"update", "delete"} and not row_id:
+            return {"content": [{"type": "text", "text": f"action={action} requires `id`."}], "is_error": True}
+        if action in {"insert", "update"} and not fields:
+            return {"content": [{"type": "text", "text": f"action={action} requires non-empty `fields`."}], "is_error": True}
+
+        import asyncpg
+        import datetime as _dt
+
+        def _to_date(val):
+            if val is None or val == "":
+                return None
+            if isinstance(val, _dt.date):
+                return val
+            return _dt.date.fromisoformat(str(val))
+
+        def _to_uuid(val):
+            if val is None or val == "":
+                return None
+            if isinstance(val, uuid.UUID):
+                return val
+            try:
+                return uuid.UUID(str(val))
+            except (ValueError, TypeError):
+                return uuid.uuid4()
+
+        def _coerce(col: str, val):
+            if val is None:
+                return None
+            if col in _DATE_COLUMNS:
+                return _to_date(val)
+            if col in _UUID_COLUMNS:
+                return _to_uuid(val)
+            if col in _JSON_COLUMNS:
+                return val if isinstance(val, str) else json.dumps(val)
+            if col == "reimbursed":
+                return bool(val)
+            return val
+
+        url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
+        if not url:
+            return _text("CHRO_POSTGRES_URL not configured.")
+
+        whitelist = _WRITABLE_COLUMNS[table]
+        rejected = [k for k in fields.keys() if k not in whitelist]
+        accepted = {k: _coerce(k, v) for k, v in fields.items() if k in whitelist}
+
+        try:
+            conn = await asyncpg.connect(url)
+            try:
+                async with conn.transaction():
+                    if action == "delete":
+                        result = await conn.execute(
+                            f"DELETE FROM chro.{table} WHERE id = $1",
+                            _to_uuid(row_id),
+                        )
+                        affected = int(result.split()[-1]) if result else 0
+                        record_id = row_id
+
+                    elif action == "update":
+                        if not accepted:
+                            return {"content": [{"type": "text", "text": f"No writable columns in fields. Allowed: {sorted(whitelist)}. Rejected: {rejected}"}], "is_error": True}
+                        cols = list(accepted.keys())
+                        set_clause = ", ".join(f"{c}=${i+2}" for i, c in enumerate(cols))
+                        sql = f"UPDATE chro.{table} SET {set_clause} WHERE id = $1 RETURNING id"
+                        row = await conn.fetchrow(sql, _to_uuid(row_id), *[accepted[c] for c in cols])
+                        if row is None:
+                            return {"content": [{"type": "text", "text": f"No row in chro.{table} with id={row_id}"}], "is_error": True}
+                        record_id = str(row["id"])
+                        affected = 1
+
+                    else:  # insert
+                        if not accepted:
+                            return {"content": [{"type": "text", "text": f"No writable columns in fields. Allowed: {sorted(whitelist)}. Rejected: {rejected}"}], "is_error": True}
+                        cols = list(accepted.keys())
+                        placeholders = ", ".join(f"${i+1}" for i in range(len(cols)))
+                        if row_id:
+                            cols_with_id = ["id"] + cols
+                            placeholders_with_id = ", ".join(f"${i+1}" for i in range(len(cols_with_id)))
+                            update_clause = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols)
+                            sql = (
+                                f"INSERT INTO chro.{table} ({', '.join(cols_with_id)}) "
+                                f"VALUES ({placeholders_with_id}) "
+                                f"ON CONFLICT (id) DO UPDATE SET {update_clause} "
+                                f"RETURNING id"
+                            )
+                            row = await conn.fetchrow(sql, _to_uuid(row_id), *[accepted[c] for c in cols])
+                        else:
+                            sql = (
+                                f"INSERT INTO chro.{table} ({', '.join(cols)}) "
+                                f"VALUES ({placeholders}) "
+                                f"RETURNING id"
+                            )
+                            row = await conn.fetchrow(sql, *[accepted[c] for c in cols])
+                        record_id = str(row["id"])
+                        affected = 1
+
+                    await conn.execute(
+                        """INSERT INTO chro.hr_audit_log
+                           (case_id, agent_id, action, output_schema_version, confidence)
+                           VALUES ($1, $2, $3, $4, $5)""",
+                        _to_uuid(case_id or record_id), "chro",
+                        f"write_db:{action}:{table}:{','.join(sorted(accepted.keys())) if accepted else 'none'}",
+                        "1.0",
+                        None,
+                    )
+
+                msg = f"OK action={action} table={table} id={record_id} affected={affected}"
+                if rejected:
+                    msg += f" rejected_columns={rejected}"
+                return _text(msg)
+            finally:
+                await conn.close()
+        except Exception as exc:
+            logger.error("write_db(%s/%s): error — %s", action, table, exc)
+            return {"content": [{"type": "text", "text": f"DB error: {exc}"}], "is_error": True}
+
     @sdk_tool(
         "archive_doc",
         "Move a processed document from /app/hr-docs/inbox/ to /app/hr-docs/archive/YYYY/doc_type/. "
@@ -1023,7 +1207,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         daily_log, memory_search, memory_get, query_db,
         receive_document, extract_text,
         sanitize_pii_tool, classify_document, extract_fields,
-        validate_schema, save_to_db, archive_doc,
+        validate_schema, save_to_db, write_db, archive_doc,
         dispatch_to_specialist,
     ]
     if send_message is not None:
