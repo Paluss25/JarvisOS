@@ -17,6 +17,16 @@ def _now_str() -> str:
     return datetime.now(tz=_TZ).strftime("%H:%M:%S")
 
 
+def _dated_path(workspace_path: Path, d: date, user_id: int | None = None) -> Path:
+    """Compute the path for a memory file on a specific date.
+
+    Does NOT create directories — only computes the path.
+    """
+    if user_id is not None:
+        return workspace_path / "memory" / f"user-{user_id}" / f"{d.isoformat()}.md"
+    return workspace_path / "memory" / f"{d.isoformat()}.md"
+
+
 def _today_path(workspace_path: str | Path, user_id: int | None = None) -> Path:
     root = Path(workspace_path)
     if user_id is not None:
@@ -24,7 +34,7 @@ def _today_path(workspace_path: str | Path, user_id: int | None = None) -> Path:
     else:
         memory_dir = root / "memory"
     memory_dir.mkdir(parents=True, exist_ok=True)
-    return memory_dir / f"{date.today().isoformat()}.md"
+    return _dated_path(root, date.today(), user_id)
 
 
 def _append(path: Path, entry: str) -> None:
@@ -93,10 +103,7 @@ class DailyLogger:
 
     def read_date(self, d: date) -> str:
         """Return the memory file content for a specific date (empty string if absent)."""
-        if self.user_id is not None:
-            p = self.workspace_path / "memory" / f"user-{self.user_id}" / f"{d.isoformat()}.md"
-        else:
-            p = self.workspace_path / "memory" / f"{d.isoformat()}.md"
+        p = _dated_path(self.workspace_path, d, self.user_id)
         try:
             return p.read_text(encoding="utf-8")
         except FileNotFoundError:

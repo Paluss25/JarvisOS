@@ -5,6 +5,8 @@ from pathlib import Path
 import tempfile
 import pytest
 
+# Ensure src/ is on sys.path for test discovery. While conftest.py defines mocks,
+# it does not configure pythonpath, so this explicit insertion is required here.
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from agent_runner.memory.daily_logger import DailyLogger
