@@ -233,14 +233,26 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
             )
         url = f"{base_url}/{target}/analyze"
 
+        # Per-runtime timeout: strategy sub-agents do heavy LLM synthesis
+        # (Sonnet for thesis/scenario, Opus thinking for opportunity ranking)
+        # which routinely takes 60–180s; the lightweight finance/cost/market
+        # workers are DB-bound and stay under 30s.
+        runtime_timeouts = {
+            "finance": 30.0,
+            "cost": 30.0,
+            "market": 30.0,
+            "strategy": 300.0,
+        }
+        timeout_s = runtime_timeouts.get(runtime, 30.0)
+
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=timeout_s) as client:
                 resp = await client.post(
                     url,
                     json=task,
                     headers={"Content-Type": "application/json"},
                 )
-                if not resp.ok:
+                if not resp.is_success:
                     text = resp.text[:300]
                     return _text(
                         f"Worker {runtime}/{target} returned HTTP {resp.status_code}: {text}"
@@ -249,7 +261,7 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
                 return _text(json.dumps(data, ensure_ascii=False, indent=2))
 
         except httpx.TimeoutException:
-            return _text(f"Worker {runtime}/{target} timed out after 30 seconds.")
+            return _text(f"Worker {runtime}/{target} timed out after {timeout_s:.0f}s.")
         except httpx.ConnectError as exc:
             return _text(f"Cannot reach worker {runtime} at {base_url}: {exc}")
         except Exception as exc:
@@ -292,7 +304,7 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
                     },
                     headers={"Content-Type": "application/json"},
                 )
-                if not resp.ok:
+                if not resp.is_success:
                     return _text(f"Memory API returned HTTP {resp.status_code}: {resp.text[:200]}")
 
                 body = resp.json()
@@ -352,7 +364,7 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
                     },
                     headers={"Content-Type": "application/json"},
                 )
-                if not resp.ok:
+                if not resp.is_success:
                     return _text(f"RAG API returned HTTP {resp.status_code}: {resp.text[:200]}")
 
                 data = resp.json()
@@ -377,7 +389,8 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
             "'message' is the natural language request to send. "
             "Use for executive briefings, HITL approvals for financial actions, "
             "or cross-domain escalation.",
-            {"to": str, "message": str},
+            "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
+            {"to": str, "message": str, "wait_response": bool},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
