@@ -22,6 +22,7 @@ def create_platform_app() -> FastAPI:
     from platform_api.events import router as events_router
     from platform_api.tasks import router as tasks_router
     from platform_api.token_keepalive import TokenKeepalive
+    from platform_api.webhooks import router as webhooks_router
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator:
@@ -61,6 +62,7 @@ def create_platform_app() -> FastAPI:
     app.include_router(domains_router)
     app.include_router(events_router)
     app.include_router(audit_router)
+    app.include_router(webhooks_router)
 
     # Health endpoint (no auth required)
     @app.get("/health")

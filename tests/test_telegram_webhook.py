@@ -45,3 +45,59 @@ def test_agent_config_webhook_fields_accept_values():
     )
     assert config.telegram_webhook_url_env == "CEO_TELEGRAM_WEBHOOK_URL"
     assert config.telegram_webhook_secret_env == "CEO_TELEGRAM_WEBHOOK_SECRET"
+
+
+# ---------------------------------------------------------------------------
+# P1.T1 — platform_api webhook proxy
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_proxy_forwards_body_to_agent_port():
+    """Gateway must forward the raw body to localhost:{port}/telegram/webhook."""
+    import httpx
+    import respx
+    from fastapi import FastAPI
+    from platform_api.webhooks import router
+
+    app = FastAPI()
+    app.include_router(router)
+    transport = httpx.ASGITransport(app=app)
+
+    with respx.mock:
+        route = respx.post("http://localhost:8000/telegram/webhook").mock(
+            return_value=httpx.Response(200)
+        )
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/webhooks/ceo",
+                content=b'{"update_id": 1}',
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Telegram-Bot-Api-Secret-Token": "mysecret",
+                },
+            )
+        assert resp.status_code == 200
+        assert route.called
+        assert "localhost:8000" in str(respx.calls[0].request.url)
+        assert respx.calls[0].request.headers["X-Telegram-Bot-Api-Secret-Token"] == "mysecret"
+
+
+@pytest.mark.asyncio
+async def test_proxy_returns_404_for_unknown_agent():
+    """Gateway must return 404 if agent_id is not in AGENT_PORTS."""
+    import httpx
+    from fastapi import FastAPI
+    from platform_api.webhooks import router
+
+    app = FastAPI()
+    app.include_router(router)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/webhooks/unknown_agent",
+            content=b"{}",
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert resp.status_code == 404
