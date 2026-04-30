@@ -5,7 +5,13 @@ agno, etc.) before any test module is collected, so that imports in src.*
 never fail due to missing packages in the test venv.
 """
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
 # ---------------------------------------------------------------------------
 # Mock claude_agent_sdk — not installed in test venv
