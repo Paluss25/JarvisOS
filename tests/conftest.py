@@ -28,16 +28,18 @@ if "claude_agent_sdk" not in sys.modules:
     # call the registered tool functions via server._tools.
     class _ToolEntry:
         """Minimal stand-in for a registered SDK tool."""
-        __slots__ = ("name", "fn")
+        __slots__ = ("name", "description", "schema", "fn")
 
-        def __init__(self, name: str, fn):
+        def __init__(self, name: str, description: str, schema, fn):
             self.name = name
+            self.description = description
+            self.schema = schema
             self.fn = fn
 
     def _sdk_tool_factory(name, description="", schema=None):
         """Return a decorator that wraps fn in a _ToolEntry."""
         def decorator(fn):
-            return _ToolEntry(name=name, fn=fn)
+            return _ToolEntry(name=name, description=description, schema=schema, fn=fn)
         return decorator
 
     class _FakeServer:

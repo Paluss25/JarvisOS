@@ -49,6 +49,9 @@ prompt-toolkit
 # Parquet (Roger/Strava)
 pyarrow>=17.0.0
 
+# Garmin FIT parsing
+fitdecode>=0.10.0
+
 # Utilities
 python-dotenv
 tzdata
