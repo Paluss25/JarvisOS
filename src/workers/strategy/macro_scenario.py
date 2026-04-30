@@ -30,6 +30,7 @@ from workers.shared.cfo_sidecar import (
     fetch_macro_indicators,
     fetch_portfolio_snapshot,
 )
+from workers.shared.redaction import redact
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -76,9 +77,9 @@ async def _run_claude_simulation(
         "You are a senior macro strategist simulating the impact of a single "
         "scenario on a private investor's portfolio. Be sober, quantitative "
         "where you can, and explicit about assumptions when you can't.\n\n"
-        f"Scenario: {scenario}\n\n"
-        f"Current portfolio snapshot:\n{json.dumps(portfolio, ensure_ascii=False)}\n\n"
-        f"Latest macro indicators:\n{json.dumps(macro_indicators, ensure_ascii=False)}\n\n"
+        f"Scenario: {redact(scenario)}\n\n"
+        f"Current portfolio snapshot:\n{json.dumps(redact(portfolio), ensure_ascii=False)}\n\n"
+        f"Latest macro indicators:\n{json.dumps(redact(macro_indicators), ensure_ascii=False)}\n\n"
         "Produce a JSON object with:\n"
         " - by_asset_class: array — for each asset class present in the portfolio, "
         "estimate impact_pct (signed percentage change in EUR value) and a 1-sentence rationale.\n"

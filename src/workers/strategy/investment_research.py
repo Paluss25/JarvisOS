@@ -23,6 +23,7 @@ from workers.shared.cfo_sidecar import (
     create_signal,
     fetch_research_fundamentals,
 )
+from workers.shared.redaction import redact
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -63,11 +64,12 @@ async def _run_claude_synthesis(symbol: str, context: dict[str, Any]) -> dict[st
         '"confidence_score":0.0,"recommendation":"buy|hold|sell","key_risks":["..."],'
         '"sources":["..."]}'
     )
+    safe_context = redact(context)
     prompt = (
         f"You are a senior equity-research analyst writing for a single private investor. "
         f"Asset: {symbol}.\n\n"
         f"Context (recent news related to the asset, current macro indicators, "
-        f"Perplexity-grounded fundamentals with citations):\n{json.dumps(context, ensure_ascii=False)}\n\n"
+        f"Perplexity-grounded fundamentals with citations):\n{json.dumps(safe_context, ensure_ascii=False)}\n\n"
         "Produce a JSON object with exactly these fields:\n"
         " - thesis: ~500-word narrative covering the company/asset state, valuation context, and forward outlook.\n"
         " - bull_case / bear_case / base_case: 1 paragraph each, mutually exclusive scenarios.\n"

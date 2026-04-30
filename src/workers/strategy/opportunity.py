@@ -38,6 +38,7 @@ from workers.shared.cfo_sidecar import (
     fetch_market_news,
     fetch_technical_analysis,
 )
+from workers.shared.redaction import redact
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -155,12 +156,12 @@ async def _rank_with_opus(
         "You are Warren, a sober CFO scanning the market for the user's daily 09:00 "
         "opportunity briefing. You have four input streams (some may be empty):\n\n"
         f"RSI signals (oversold ≤ {_RSI_OVERSOLD}, overbought ≥ {_RSI_OVERBOUGHT}):\n"
-        f"{json.dumps(rsi_signals, ensure_ascii=False)}\n\n"
+        f"{json.dumps(redact(rsi_signals), ensure_ascii=False)}\n\n"
         f"News sentiment outliers (|score| ≥ {_DEFAULT_SENTIMENT_THRESHOLD}):\n"
-        f"{json.dumps(sentiment_outliers, ensure_ascii=False)}\n\n"
-        f"Macro releases (last 24h):\n{json.dumps(macro_releases, ensure_ascii=False)}\n\n"
+        f"{json.dumps(redact(sentiment_outliers), ensure_ascii=False)}\n\n"
+        f"Macro releases (last 24h):\n{json.dumps(redact(macro_releases), ensure_ascii=False)}\n\n"
         f"Current holdings (for context — favor opportunities that improve diversification):\n"
-        f"{json.dumps(holdings, ensure_ascii=False)}\n\n"
+        f"{json.dumps(redact(holdings), ensure_ascii=False)}\n\n"
         f"Pick the top {top_n} opportunities. For each, return: rank, symbol, "
         "kind (buy|reduce|hedge|watch), 1-2 sentence thesis, priority "
         "(high|medium|low), confidence in [0.0, 1.0], and the source tags "
