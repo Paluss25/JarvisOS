@@ -145,6 +145,30 @@ async def create_approval(
         return response.json()
 
 
+async def decide_approval(
+    approval_id: int,
+    *,
+    decision: str,
+    decided_by: str,
+    notes: str | None = None,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """Approve or reject a pending approval request via the sidecar."""
+    if decision not in ("approved", "rejected"):
+        raise ValueError("decision must be 'approved' or 'rejected'")
+    body: dict[str, Any] = {"decision": decision, "decided_by": decided_by}
+    if notes is not None:
+        body["notes"] = notes
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{sidecar_url()}/approvals/{approval_id}/decide",
+            json=body,
+            headers=auth_headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+
 async def fetch_holdings(*, timeout: float = 30.0) -> list[dict[str, Any]]:
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.get(

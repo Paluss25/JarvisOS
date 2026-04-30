@@ -1082,6 +1082,69 @@ async def _handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 # ---------------------------------------------------------------------------
+# CFO approval callback handler (Warren — capital_move, paper trades, …)
+# ---------------------------------------------------------------------------
+
+async def _handle_cfo_approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Approve / Deny on a CFO approval request inline keyboard.
+
+    Callback data shape: `cfo_approval:approve|deny:<id>` — produced by
+    `workers.shared.telegram_notify.send_cfo_approval_request`.
+    """
+    config = context.bot_data.get("config")
+    query = update.callback_query
+    if not is_authorized(query.message.chat.id, config.telegram_chat_id_env if config else None):
+        await query.answer("Not authorised.")
+        return
+
+    await query.answer()
+
+    parts = (query.data or "").split(":")
+    if len(parts) != 3 or parts[0] != "cfo_approval":
+        return
+
+    _, action, approval_id_raw = parts
+    try:
+        approval_id = int(approval_id_raw)
+    except ValueError:
+        logger.warning("telegram: cfo_approval invalid id=%s", approval_id_raw)
+        return
+
+    decision = "approved" if action == "approve" else "rejected"
+    decided_by = (config.name if config else "operator").lower()
+
+    error_text: str | None = None
+    try:
+        from workers.shared.cfo_sidecar import decide_approval
+        await decide_approval(
+            approval_id,
+            decision=decision,
+            decided_by=decided_by,
+            notes="via Telegram inline button",
+        )
+    except Exception as exc:
+        logger.error(
+            "telegram: cfo-data-service /approvals/%s/decide failed — %s",
+            approval_id, exc,
+        )
+        error_text = str(exc)
+
+    if error_text:
+        label = f"⚠️ Decision *{decision}* failed: `{error_text[:80]}`"
+    else:
+        label = "✅ Approved" if decision == "approved" else "❌ Denied"
+
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.edit_message_text(
+            (query.message.text or "") + f"\n\n*{label}*",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # HITL issue gate callback handler (CIO)
 # ---------------------------------------------------------------------------
 
@@ -2000,6 +2063,7 @@ async def start_polling(agent: Any, session_manager: Any, config: Any, redis_a2a
             app.add_handler(MessageHandler(filters.Document.ALL, _handle_document))
             app.add_handler(CallbackQueryHandler(_handle_callback, pattern=r"^perm:"))
             app.add_handler(CallbackQueryHandler(_handle_issue_callback, pattern=r"^issue:(approve|reject):\w+"))
+            app.add_handler(CallbackQueryHandler(_handle_cfo_approval_callback, pattern=r"^cfo_approval:(approve|deny):\d+"))
 
             logger.info(
                 "telegram: starting polling for %s (allowed_chat_id=%s)",

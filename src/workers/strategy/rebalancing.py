@@ -29,6 +29,7 @@ from workers.shared.cfo_sidecar import (
     create_approval,
     fetch_rebalance_advice,
 )
+from workers.shared.telegram_notify import send_cfo_approval_request
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -96,6 +97,20 @@ async def analyze(task: TaskEnvelope) -> dict[str, Any]:
         except Exception as exc:
             logger.warning("rebalancing-advisor: approval persist failed — %s", exc)
             approval_record = {"persisted": False, "error": str(exc)}
+
+        approval_id = (approval_record or {}).get("id")
+        if approval_id is not None:
+            extra_lines = [
+                f"*Bands:* ±{band_pct:.2f} pp · *Lookback:* {lookback_days}d",
+                f"*Out-of-band classes:* {len(out_of_band)}",
+            ]
+            push_result = await send_cfo_approval_request(
+                approval_id=int(approval_id),
+                summary=summary,
+                request_type="capital_move",
+                extra_lines=extra_lines,
+            )
+            approval_record["telegram_push"] = bool(push_result.get("ok"))
 
     return {
         "status": "ok",
