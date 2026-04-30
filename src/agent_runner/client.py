@@ -47,11 +47,17 @@ class BaseAgentClient:
         await client.disconnect()
     """
 
-    def __init__(self, config: AgentConfig, system_prompt: str, options: ClaudeAgentOptions) -> None:
+    def __init__(self, config: AgentConfig, system_prompt: str, options: ClaudeAgentOptions, redis_a2a=None) -> None:
         self.config = config
         self.name = config.name
         self._system_prompt = system_prompt
         self._options = options
+        # Held so `_refresh_mcp_options()` can rebuild a fresh in-process MCP
+        # server before every (re)connect — the SDK does not refresh server
+        # bindings when the same options object is reused across SDK
+        # reincarnations, which causes long-lived agents to lose visibility
+        # of their `mcp__<id>-tools__*` tools after the first subprocess.
+        self._redis_a2a = redis_a2a
         self._sdk: ClaudeSDKClient | None = None
         self._lock = asyncio.Lock()
         # True while *any* code path is consuming `_sdk.receive_response()`.
@@ -77,7 +83,43 @@ class BaseAgentClient:
 
     # -- Lifecycle ----------------------------------------------------------
 
+    def _refresh_mcp_options(self) -> None:
+        """Rebuild the in-process MCP server before each (re)connect.
+
+        Reusing the same MCP server `instance` object across multiple
+        ClaudeSDKClient lifecycles leaves the new claude CLI subprocess
+        with a stale stdio bridge: the `mcp__<id>-tools__*` entries are
+        announced at session init but tool invocations resolve to a
+        dead/replaced server and surface as "No such tool available"
+        (or get filtered out of the deferred-tool manifest entirely).
+        Refreshing the factory output rebinds the bridge cleanly.
+        """
+        if not self.config.mcp_server_factory:
+            return
+        try:
+            new_server = self.config.mcp_server_factory(
+                self.config.workspace_path, redis_a2a=self._redis_a2a
+            )
+        except Exception as exc:
+            logger.warning(
+                "agent[%s]: mcp_server_factory refresh failed — %s",
+                self.config.id, exc,
+            )
+            return
+        if new_server is None:
+            return
+        mcp_servers = {f"{self.config.id}-tools": new_server}
+        if self.config.extra_mcp_servers:
+            mcp_servers.update(self.config.extra_mcp_servers)
+        try:
+            self._options = self._options.model_copy(
+                update={"mcp_servers": mcp_servers}
+            )
+        except AttributeError:
+            self._options.mcp_servers = mcp_servers
+
     async def connect(self) -> None:
+        self._refresh_mcp_options()
         self._sdk = ClaudeSDKClient(options=self._options)
         await self._sdk.connect()
         logger.info("agent[%s]: ClaudeSDKClient connected", self.config.id)
@@ -99,6 +141,7 @@ class BaseAgentClient:
             except Exception:
                 pass
             self._sdk = None
+        self._refresh_mcp_options()
         self._sdk = ClaudeSDKClient(options=self._options)
         await self._sdk.connect()
         logger.info("agent[%s]: subprocess reconnected", self.config.id)
@@ -470,7 +513,12 @@ def create_agent_client(config: AgentConfig, redis_a2a=None) -> "BaseAgentClient
     dl = DailyLogger(workspace_path)
     dl.log(f"[AGENT INIT] {config.name} (ClaudeSDKClient, persistent) ready")
     logger.info("agent[%s]: %s initialized (not yet connected)", config.id, config.name)
-    return BaseAgentClient(config=config, system_prompt=system_prompt, options=options)
+    return BaseAgentClient(
+        config=config,
+        system_prompt=system_prompt,
+        options=options,
+        redis_a2a=redis_a2a,
+    )
 
 
 def _build_system_prompt(ctx: dict) -> str:

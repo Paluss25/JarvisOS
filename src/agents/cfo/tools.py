@@ -388,8 +388,11 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
             "Use 'to' to specify the target agent ID (e.g. 'ceo' for the CEO). "
             "'message' is the natural language request to send. "
             "Use for executive briefings, HITL approvals for financial actions, "
-            "or cross-domain escalation.",
-            "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
+            "or cross-domain escalation. "
+            "Set wait_response=false for one-way notifications (morning briefings, "
+            "FYI copies, status broadcasts) — returns immediately without blocking "
+            "on the receiver's reasoning. Default true preserves request/response "
+            "semantics: the call blocks until the target agent replies.",
             {"to": str, "message": str, "wait_response": bool},
         )
         async def send_message(args: dict) -> dict:
