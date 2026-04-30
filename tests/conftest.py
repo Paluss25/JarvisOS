@@ -5,7 +5,10 @@ agno, etc.) before any test module is collected, so that imports in src.*
 never fail due to missing packages in the test venv.
 """
 import sys
+import types
+from datetime import timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -155,12 +158,42 @@ if "rapidfuzz" not in sys.modules:
     sys.modules["rapidfuzz.fuzz"] = _rf_mock.fuzz
 
 # ---------------------------------------------------------------------------
-# Mock caldav — not needed by MT unit tests that exercise email helpers
+# Optional dependency shims
 # ---------------------------------------------------------------------------
+try:
+    import httpx as _httpx  # noqa: F401
+except ImportError:
+    _httpx_mock = types.ModuleType("httpx")
+
+    class _HTTPStatusError(Exception):
+        def __init__(self, message="", *, request=None, response=None):
+            super().__init__(message)
+            self.request = request
+            self.response = response
+
+    _httpx_mock.HTTPStatusError = _HTTPStatusError
+    _httpx_mock.AsyncClient = MagicMock
+    sys.modules["httpx"] = _httpx_mock
+
+if "redis" not in sys.modules:
+    _redis_mock = types.ModuleType("redis")
+    _redis_asyncio_mock = types.ModuleType("redis.asyncio")
+    _redis_asyncio_mock.Redis = MagicMock
+    _redis_mock.asyncio = _redis_asyncio_mock
+    sys.modules["redis"] = _redis_mock
+    sys.modules["redis.asyncio"] = _redis_asyncio_mock
+
 if "caldav" not in sys.modules:
-    _caldav_mock = MagicMock()
-    _caldav_lib_mock = MagicMock()
-    _caldav_error_mock = MagicMock()
+    _caldav_mock = types.ModuleType("caldav")
+    _caldav_lib_mock = types.ModuleType("caldav.lib")
+    _caldav_error_mock = types.ModuleType("caldav.lib.error")
+
+    class _CalDAVNotFoundError(Exception):
+        pass
+
+    _caldav_mock.DAVClient = MagicMock
+    _caldav_mock.Calendar = MagicMock
+    _caldav_error_mock.NotFoundError = _CalDAVNotFoundError
     _caldav_lib_mock.error = _caldav_error_mock
     _caldav_mock.lib = _caldav_lib_mock
     sys.modules["caldav"] = _caldav_mock
@@ -168,8 +201,72 @@ if "caldav" not in sys.modules:
     sys.modules["caldav.lib.error"] = _caldav_error_mock
 
 if "vobject" not in sys.modules:
-    _vobject_mock = MagicMock()
-    _vobject_icalendar_mock = MagicMock()
+    _vobject_mock = types.ModuleType("vobject")
+    _vobject_icalendar_mock = types.ModuleType("vobject.icalendar")
+    _vobject_icalendar_mock.utc = timezone.utc
+
+    def _parse_lines(raw: str) -> dict[str, str]:
+        values = {}
+        for line in raw.replace("\r\n", "\n").splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            values[key.split(";", 1)[0].lower()] = value
+        return values
+
+    def _prop(value: str):
+        return SimpleNamespace(value=value)
+
+    def _read_one(raw: str):
+        values = _parse_lines(raw)
+        if "begin" in values and values["begin"].upper() == "VCARD":
+            card = SimpleNamespace()
+            for key in ("uid", "fn", "email", "tel", "note"):
+                if key in values:
+                    setattr(card, key, _prop(values[key]))
+            return card
+
+        event = SimpleNamespace()
+        for key in ("uid", "summary", "dtstart", "dtend", "description"):
+            if key in values:
+                setattr(event, key, _prop(values[key]))
+        return SimpleNamespace(vevent=event)
+
+    class _FakeComponent:
+        def __init__(self, name: str):
+            self.name = name.upper()
+            self._props: list[tuple[str, object]] = []
+
+        def add(self, name: str):
+            entry = SimpleNamespace(value="")
+            self._props.append((name.upper(), entry))
+            return entry
+
+        def lines(self) -> list[str]:
+            rendered = [f"BEGIN:{self.name}"]
+            for name, entry in self._props:
+                rendered.append(f"{name}:{entry.value}")
+            rendered.append(f"END:{self.name}")
+            return rendered
+
+    class _FakeCalendar:
+        def __init__(self):
+            self._components: list[_FakeComponent] = []
+
+        def add(self, name: str):
+            component = _FakeComponent(name)
+            self._components.append(component)
+            return component
+
+        def serialize(self) -> str:
+            lines = ["BEGIN:VCALENDAR", "VERSION:2.0"]
+            for component in self._components:
+                lines.extend(component.lines())
+            lines.append("END:VCALENDAR")
+            return "\r\n".join(lines) + "\r\n"
+
+    _vobject_mock.readOne = _read_one
+    _vobject_mock.iCalendar = _FakeCalendar
     _vobject_mock.icalendar = _vobject_icalendar_mock
     sys.modules["vobject"] = _vobject_mock
     sys.modules["vobject.icalendar"] = _vobject_icalendar_mock
