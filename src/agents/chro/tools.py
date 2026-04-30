@@ -767,6 +767,12 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         case_id = (args.get("case_id") or "").strip()
         source_file = (args.get("source_file") or "").strip()
 
+        try:
+            validate_extracted_fields(doc_type, fields)
+        except ValidationError as exc:
+            logger.warning("save_to_db(%s): schema validation failed — %s", doc_type, exc)
+            return {"content": [{"type": "text", "text": f"Schema validation failed: {exc}"}], "is_error": True}
+
         import asyncpg
         import datetime as _dt
 
@@ -782,7 +788,10 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                 return None
             if isinstance(val, uuid.UUID):
                 return val
-            return uuid.UUID(str(val))
+            try:
+                return uuid.UUID(str(val))
+            except (ValueError, TypeError):
+                return uuid.uuid4()
 
         url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
         if not url:
