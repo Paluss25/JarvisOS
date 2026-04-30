@@ -527,7 +527,8 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             "Send a message to another agent and wait for their response. "
             "Use 'to' to specify the target agent ID (e.g. 'dos', 'ceo'). "
             "'message' is the natural language request to send.",
-            {"to": str, "message": str},
+            "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
+            {"to": str, "message": str, "wait_response": bool},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
@@ -745,6 +746,10 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         all_tools.append(log_meal)
     if delete_meal is not None:
         all_tools.append(delete_meal)
+    from agent_runner.tools.memory_box import create_query_memory_tool
+    _query_memory = create_query_memory_tool("coh")
+    if _query_memory is not None:
+        all_tools.append(_query_memory)
 
     try:
         server = create_sdk_mcp_server(name="coh-tools", tools=all_tools)

@@ -292,21 +292,33 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         @sdk_tool(
             "send_message",
             "Send a message to another agent and wait for their response.",
-            {"to": str, "message": str},
+            "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
+            {"to": str, "message": str, "wait_response": bool},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
             return _text(await _send_message_fn(args))
 
-        @sdk_tool("forward_to_cos", "Forward a payload to ChiefOfStaff (COS) via A2A Redis bus.", {"payload_json": str, "reason": str})
+        @sdk_tool("forward_to_cos", "Forward a payload to ChiefOfStaff (COS) via A2A Redis bus. Marks the email as processed so it is not re-polled.", {"payload_json": str, "reason": str, "email_id": str})
         async def forward_to_cos(args: dict) -> dict:
             args = _parse_args(args)
             payload_raw = args.get("payload_json", "").strip()
             reason = args.get("reason", "escalation from MT").strip()
+            email_id = args.get("email_id", "").strip()
             if not payload_raw:
                 return _text("payload_json is required.")
+            # Fallback: extract email_id from payload_json so legacy callers still advance the cursor.
+            if not email_id:
+                try:
+                    payload_obj = json.loads(payload_raw)
+                    if isinstance(payload_obj, dict):
+                        email_id = str(payload_obj.get("email_id", "")).strip()
+                except (json.JSONDecodeError, ValueError):
+                    pass
             message = f"MT escalation: {reason}\n\nPayload:\n{payload_raw}"
             result = await _send_message_fn({"to": "cos", "message": message})
+            if email_id:
+                _mark_processed(workspace_path, email_id)
             return _text(f"Forwarded to COS. Response: {result}")
 
     else:
@@ -880,7 +892,10 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
             uid = f"training-{year}w{week_number:02d}d{day_of_week}"
             title = _TRAINING_TITLE_MAP.get(session_type, f"🏋️ {session_type.replace('_', ' ').title()}")
 
-            date = datetime.date.fromisocalendar(year, week_number, day_of_week + 1)
+            # DB convention is Postgres EXTRACT(DOW): 0=Sun, 1=Mon, ..., 6=Sat.
+            # ISO calendar weekday is 1=Mon, ..., 7=Sun. Sunday wraps from 0 -> 7.
+            iso_weekday = day_of_week if day_of_week != 0 else 7
+            date = datetime.date.fromisocalendar(year, week_number, iso_weekday)
             dtstart = datetime.datetime(date.year, date.month, date.day, 18, 0, 0, tzinfo=rome)
             dtend = dtstart + datetime.timedelta(minutes=planned_duration)
 
@@ -932,6 +947,10 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
         all_tools.append(send_message)
     if forward_to_cos is not None:
         all_tools.append(forward_to_cos)
+    from agent_runner.tools.memory_box import create_query_memory_tool
+    _query_memory = create_query_memory_tool("mt")
+    if _query_memory is not None:
+        all_tools.append(_query_memory)
 
     logger.info("mcp_server: MT tools registered (%d tools)", len(all_tools))
     return create_sdk_mcp_server(name="mt-tools", tools=all_tools)

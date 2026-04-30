@@ -852,7 +852,8 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             "Use 'to' to specify the target agent ID (e.g. 'ceo' for the CEO). "
             "'message' is the natural language request to send. "
             "Use this for cross-domain escalation, executive decisions, or business context.",
-            {"to": str, "message": str},
+            "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
+            {"to": str, "message": str, "wait_response": bool},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
@@ -991,6 +992,10 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
     ]
     if send_message is not None:
         all_tools.append(send_message)
+    from agent_runner.tools.memory_box import create_query_memory_tool
+    _query_memory = create_query_memory_tool("cio")
+    if _query_memory is not None:
+        all_tools.append(_query_memory)
     try:
         server = create_sdk_mcp_server(name="cio-tools", tools=all_tools)
         logger.info(
