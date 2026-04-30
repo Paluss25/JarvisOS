@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import socket as _socket
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1062,6 +1063,481 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
             logger.error("collect_and_remediate: failed — %s", exc, exc_info=True)
             return {"content": [{"type": "text", "text": f"Error: {exc}"}], "is_error": True}
 
+    # --- Remote SSH execution -----------------------------------------------
+
+    _SSH_KEY = "/root/.ssh/id_ed25519"
+    _SSH_USER = "paluss"
+
+    _SSH_ALLOWED_HOSTS: dict[str, str] = {
+        "10.10.200.50": "traefik",
+        "10.10.200.51": "crowdsec",
+        "10.10.200.60": "docker-light",
+        "10.10.200.61": "docker-utility",
+        "10.10.200.62": "dns",
+        "10.10.200.71": "docker-heavy",
+        "10.10.200.120": "build-server",
+        "10.10.200.139": "docker-ai",
+    }
+
+    # Shell metacharacters that enable injection or chaining
+    _SSH_BANNED_CHARS = ("|", ";", "&&", "||", "$(", "`")
+    # Destructive operations never allowed over SSH
+    _SSH_BANNED_WORDS = (
+        "rm -rf", "rm -f ", "rmdir ", "mv /", "dd ", "mkfs", "fdisk", "parted",
+        "shutdown", "reboot", "halt", "poweroff",
+        "passwd ", "useradd ", "userdel ", "usermod ",
+        "> /etc", "> /usr", "> /bin", "> /sbin", "> /lib",
+        "| bash", "| sh ", "| python", "| ruby",
+    )
+    _SSH_ALLOWED_PREFIXES = (
+        # System info / resources
+        "df", "free", "uptime", "who", "w", "date", "hostname", "uname",
+        "top -bn", "iostat", "vmstat", "dstat", "sar ",
+        # Processes
+        "ps ", "ps\n",
+        # Logs
+        "journalctl", "dmesg",
+        "cat /var/log", "cat /etc/", "cat /home/paluss/docker/",
+        "tail ", "head ", "less ",
+        # Filesystem (read only)
+        "ls ", "ls\n", "ls -", "find ", "stat ", "du ", "lsblk", "lsof ",
+        # Search
+        "grep ",
+        # Network diagnostics
+        "ip addr", "ip route", "ip link", "ip neigh", "ip -s",
+        "ss ", "netstat ", "ping ", "traceroute ", "mtr ",
+        "nslookup ", "dig ",
+        "curl -s ", "curl -I ", "curl -f ",
+        # Docker operations (read + safe lifecycle)
+        "docker ps", "docker stats", "docker logs", "docker inspect",
+        "docker images", "docker network", "docker volume",
+        "docker info", "docker version", "docker system df",
+        "docker restart ", "docker start ", "docker stop ",
+        "docker compose ps", "docker compose logs", "docker compose config",
+        "docker-compose ps", "docker-compose logs",
+        # Systemd
+        "systemctl status", "systemctl list-units", "systemctl show",
+        "systemctl is-", "systemctl restart ", "systemctl start ", "systemctl stop ",
+        # Supervisorctl (for jarvios hosts)
+        "supervisorctl status", "supervisorctl tail", "supervisorctl pid",
+        "supervisorctl restart ", "supervisorctl start ", "supervisorctl stop ",
+        # DNS-specific (pihole on .62)
+        "pihole ", "nft list", "iptables -L",
+        # Misc
+        "env", "printenv", "id", "whoami", "last ",
+    )
+
+    @sdk_tool(
+        "ssh_exec",
+        "Execute a read-only or safe lifecycle command on a remote homelab host via SSH. "
+        "Only VLAN-200 hosts are reachable; only allowlisted command prefixes are accepted; "
+        "pipes (|), semicolons (;), and shell substitution are blocked. "
+        "host: one of 10.10.200.{50=traefik, 51=crowdsec, 60=docker-light, "
+        "61=docker-utility, 62=dns, 71=docker-heavy, 120=build-server, 139=docker-ai}. "
+        "command: single shell command, no metacharacters. "
+        "Examples: 'df -h', 'docker ps -a', 'systemctl status traefik', "
+        "'docker logs --tail 50 pihole', 'journalctl -u docker --since \"1 hour ago\"', "
+        "'docker restart crowdsec'.",
+        {
+            "type": "object",
+            "properties": {
+                "host": {"type": "string"},
+                "command": {"type": "string"},
+                "timeout": {"type": "integer", "default": 30},
+            },
+            "required": ["host", "command"],
+        },
+    )
+    async def ssh_exec(args: dict) -> dict:
+        args = _parse_args(args)
+        host = args.get("host", "").strip()
+        command = args.get("command", "").strip()
+        timeout = max(5, min(120, int(args.get("timeout") or 30)))
+
+        if not host:
+            host_list = ", ".join(f"{h} ({n})" for h, n in sorted(_SSH_ALLOWED_HOSTS.items()))
+            return _text(f"host is required. Allowed: {host_list}")
+        if host not in _SSH_ALLOWED_HOSTS:
+            host_list = ", ".join(sorted(_SSH_ALLOWED_HOSTS))
+            return _text(f"Host '{host}' not on allowlist. Allowed: {host_list}")
+        if not command:
+            return _text("command is required.")
+
+        for banned in _SSH_BANNED_CHARS:
+            if banned in command:
+                return _text(
+                    f"Command rejected: contains banned character {banned!r}. "
+                    "Use a single command without pipes or chaining."
+                )
+        for banned_word in _SSH_BANNED_WORDS:
+            if banned_word in command:
+                return _text(f"Command rejected: contains blocked pattern {banned_word!r}.")
+
+        if not any(command.startswith(p) for p in _SSH_ALLOWED_PREFIXES):
+            sample = ", ".join(list(_SSH_ALLOWED_PREFIXES)[:12])
+            return _text(
+                f"Command rejected: '{command[:60]}' does not match any allowlisted prefix. "
+                f"Allowed prefixes include: {sample} ..."
+            )
+
+        host_label = _SSH_ALLOWED_HOSTS[host]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ssh",
+                "-i", _SSH_KEY,
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null",
+                "-o", f"ConnectTimeout={min(10, timeout)}",
+                "-o", "BatchMode=yes",
+                "-o", "LogLevel=ERROR",
+                f"{_SSH_USER}@{host}",
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return _text(f"SSH command timed out after {timeout}s on {host} ({host_label})")
+
+            stdout = stdout_b.decode("utf-8", errors="replace").strip()
+            stderr = stderr_b.decode("utf-8", errors="replace").strip()
+            rc = proc.returncode
+
+            parts = [f"Host: {host} ({host_label}) — exit {rc}"]
+            if stdout:
+                parts.append(f"STDOUT:\n{stdout}")
+            if stderr:
+                parts.append(f"STDERR:\n{stderr}")
+            if not stdout and not stderr:
+                parts.append("(no output)")
+            return _text("\n\n".join(parts))
+
+        except FileNotFoundError:
+            return _text("SSH binary not found — openssh-client not installed in the container image.")
+        except Exception as exc:
+            logger.error("ssh_exec[%s/%s]: error — %s", host, command[:40], exc)
+            return _text(f"SSH error: {exc}")
+
+    # --- Prometheus metrics -------------------------------------------------
+
+    @sdk_tool(
+        "prometheus_query",
+        "Run a PromQL instant query against the homelab Prometheus instance. "
+        "Returns current metric values with their labels. "
+        "Common queries: "
+        "'up{job=\"node_exporter\"}' — node health per host; "
+        "'100 - (avg by(instance)(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)' — CPU %; "
+        "'node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100' — free RAM %; "
+        "'node_filesystem_avail_bytes{mountpoint=\"/\"}' — root disk free; "
+        "'container_memory_usage_bytes{name=~\".+\"}' — container RAM. "
+        "Prometheus URL from env PROMETHEUS_URL (default https://prometheus.prova9x.com).",
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "range_minutes": {"type": "integer", "default": 0},
+                "step": {"type": "string", "default": "1m"},
+            },
+            "required": ["query"],
+        },
+    )
+    async def prometheus_query(args: dict) -> dict:
+        args = _parse_args(args)
+        query = args.get("query", "").strip()
+        if not query:
+            return _text("query is required (valid PromQL expression).")
+
+        prom_url = os.environ.get("PROMETHEUS_URL", "https://prometheus.prova9x.com")
+        range_minutes = int(args.get("range_minutes") or 0)
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+                if range_minutes > 0:
+                    now = datetime.now(timezone.utc)
+                    start = now - timedelta(minutes=range_minutes)
+                    step = (args.get("step") or "1m").strip()
+                    resp = await client.get(
+                        f"{prom_url}/api/v1/query_range",
+                        params={
+                            "query": query,
+                            "start": start.isoformat(),
+                            "end": now.isoformat(),
+                            "step": step,
+                        },
+                    )
+                else:
+                    resp = await client.get(
+                        f"{prom_url}/api/v1/query",
+                        params={"query": query},
+                    )
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.TimeoutException:
+            return _text(f"Prometheus query timed out ({prom_url}).")
+        except httpx.HTTPStatusError as exc:
+            return _text(f"Prometheus HTTP {exc.response.status_code}: {exc.response.text[:300]}")
+        except Exception as exc:
+            return _text(f"Prometheus error: {exc}")
+
+        if data.get("status") != "success":
+            return _text(f"Prometheus returned error: {data.get('error', 'unknown')}")
+
+        result_type = data["data"]["resultType"]
+        results = data["data"]["result"]
+
+        if not results:
+            return _text(f"No data for query: {query}")
+
+        lines = [f"Query: {query}", f"Type: {result_type} ({len(results)} series)", ""]
+
+        if result_type == "vector":
+            for r in results:
+                labels = r.get("metric", {})
+                name = labels.get("__name__", "metric")
+                label_str = "{" + ", ".join(
+                    f'{k}="{v}"' for k, v in sorted(labels.items()) if k != "__name__"
+                ) + "}"
+                val = r["value"][1]
+                try:
+                    val_fmt = f"{float(val):.4g}"
+                except (ValueError, TypeError):
+                    val_fmt = str(val)
+                lines.append(f"  {name}{label_str} = {val_fmt}")
+        elif result_type == "matrix":
+            for r in results:
+                labels = r.get("metric", {})
+                label_str = str(labels)
+                values = r.get("values", [])
+                if values:
+                    last_val = values[-1][1]
+                    lines.append(f"  {label_str}: {len(values)} samples, last={last_val}")
+        else:
+            lines.append(json.dumps(results[:5], indent=2))
+
+        return _text("\n".join(lines))
+
+    # --- ICMP ping check ----------------------------------------------------
+
+    @sdk_tool(
+        "ping_check",
+        "Check ICMP reachability of any homelab host or IP. "
+        "Uses the system ping binary — no SSH or special permissions required. "
+        "hosts: comma-separated list of IPs or hostnames. "
+        "count: ping packets per host (default 2, max 5). "
+        "Returns RTT and packet loss for each host.",
+        {
+            "type": "object",
+            "properties": {
+                "hosts": {"type": "string"},
+                "count": {"type": "integer", "default": 2},
+            },
+            "required": ["hosts"],
+        },
+    )
+    async def ping_check(args: dict) -> dict:
+        args = _parse_args(args)
+        hosts_raw = args.get("hosts", "").strip()
+        if not hosts_raw:
+            return _text("hosts is required (comma-separated IPs or hostnames).")
+        count = max(1, min(5, int(args.get("count") or 2)))
+
+        host_list = [h.strip() for h in hosts_raw.split(",") if h.strip()]
+        results = []
+
+        for host in host_list:
+            if re.search(r'[;|$`&<> ]', host):
+                results.append(f"{host}: REJECTED — invalid characters in hostname")
+                continue
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ping", "-c", str(count), "-W", "3", host,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=15)
+                stdout = stdout_b.decode("utf-8", errors="replace")
+                rc = proc.returncode
+
+                if rc == 0:
+                    m = re.search(
+                        r"(\d+) packets transmitted, (\d+) received.*?(\d+)% packet loss",
+                        stdout,
+                    )
+                    rtt_m = re.search(r"rtt min/avg/max/mdev = [\d.]+/([\d.]+)/", stdout)
+                    if m:
+                        tx, rx, loss = m.group(1), m.group(2), m.group(3)
+                        avg_rtt = rtt_m.group(1) if rtt_m else "?"
+                        results.append(f"{host}: ALIVE — {loss}% loss, avg RTT {avg_rtt}ms ({rx}/{tx} received)")
+                    else:
+                        results.append(f"{host}: ALIVE (exit 0)")
+                else:
+                    results.append(f"{host}: UNREACHABLE (exit {rc})")
+            except asyncio.TimeoutError:
+                results.append(f"{host}: TIMEOUT")
+            except FileNotFoundError:
+                results.append(f"{host}: ERROR — ping binary not found in container")
+            except Exception as exc:
+                results.append(f"{host}: ERROR — {exc}")
+
+        return _text("\n".join(results))
+
+    # --- UniFi network health -----------------------------------------------
+
+    @sdk_tool(
+        "unifi_query",
+        "Query the UniFi controller (UDM SE at 10.10.10.1) for network health and device status. "
+        "resource options: "
+        "'health' — subsystem health overview (WAN, LAN, WLAN, VPN); "
+        "'devices' — all managed APs and switches with state and uptime; "
+        "'clients' — connected client count summary; "
+        "'alerts' — recent unresolved network alerts; "
+        "'vpn' — active VPN sessions. "
+        "Credentials from env UNIFI_USERNAME and UNIFI_PASSWORD. "
+        "UNIFI_URL defaults to https://10.10.10.1.",
+        {
+            "type": "object",
+            "properties": {
+                "resource": {
+                    "type": "string",
+                    "enum": ["health", "devices", "clients", "alerts", "vpn"],
+                    "default": "health",
+                },
+            },
+            "required": ["resource"],
+        },
+    )
+    async def unifi_query(args: dict) -> dict:
+        args = _parse_args(args)
+        resource = (args.get("resource") or "health").strip().lower()
+
+        unifi_url = os.environ.get("UNIFI_URL", "https://10.10.10.1")
+        username = os.environ.get("UNIFI_USERNAME", "")
+        password = os.environ.get("UNIFI_PASSWORD", "")
+
+        if not username or not password:
+            return _text(
+                "UniFi credentials not configured. "
+                "Set UNIFI_USERNAME and UNIFI_PASSWORD environment variables."
+            )
+
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=15.0, follow_redirects=True) as client:
+                login_resp = await client.post(
+                    f"{unifi_url}/api/auth/login",
+                    json={"username": username, "password": password},
+                    headers={"Content-Type": "application/json"},
+                )
+                if login_resp.status_code not in (200, 201):
+                    return _text(
+                        f"UniFi login failed: HTTP {login_resp.status_code}. "
+                        "Check UNIFI_USERNAME and UNIFI_PASSWORD."
+                    )
+
+                base = f"{unifi_url}/proxy/network/api/s/default"
+
+                if resource == "health":
+                    resp = await client.get(f"{base}/stat/health")
+                    data = resp.json().get("data", [])
+                    lines = ["=== UniFi Subsystem Health ==="]
+                    for sub in data:
+                        name = sub.get("subsystem", "?")
+                        status = sub.get("status", "?")
+                        num_user = sub.get("num_user", "")
+                        num_adopted = sub.get("num_adopted", "")
+                        num_disconnected = sub.get("num_disconnected", "")
+                        detail = ""
+                        if num_user:
+                            detail += f" clients={num_user}"
+                        if num_adopted:
+                            detail += f" adopted={num_adopted}"
+                        if num_disconnected and int(num_disconnected) > 0:
+                            detail += f" DISCONNECTED={num_disconnected}"
+                        lines.append(f"  {name}: {status}{detail}")
+                    return _text("\n".join(lines))
+
+                elif resource == "devices":
+                    resp = await client.get(f"{base}/stat/device")
+                    data = resp.json().get("data", [])
+                    lines = [f"=== UniFi Devices ({len(data)} total) ==="]
+                    _state_label = {
+                        0: "disconnected", 1: "connected", 2: "isolated", 4: "adopting"
+                    }
+                    for d in sorted(data, key=lambda x: x.get("name", "")):
+                        name = d.get("name") or d.get("hostname", "?")
+                        model = d.get("model", "?")
+                        state_val = d.get("state", "?")
+                        state = _state_label.get(state_val, str(state_val))
+                        ip = d.get("ip", "?")
+                        uptime = d.get("uptime", 0)
+                        uptime_h = f"{uptime // 3600}h" if uptime else "?"
+                        num_sta = d.get("num_sta", 0)
+                        lines.append(
+                            f"  {name} ({model}) — {state}, IP={ip}, up={uptime_h}, clients={num_sta}"
+                        )
+                    return _text("\n".join(lines))
+
+                elif resource == "clients":
+                    resp = await client.get(f"{base}/stat/sta")
+                    data = resp.json().get("data", [])
+                    wireless = sum(1 for c in data if not c.get("is_wired", True))
+                    wired = sum(1 for c in data if c.get("is_wired", False))
+                    lines = [
+                        f"=== UniFi Active Clients ({len(data)} total) ===",
+                        f"  Wireless: {wireless}",
+                        f"  Wired:    {wired}",
+                        "",
+                        "Sample clients (first 15 by hostname):",
+                    ]
+                    for c in sorted(data, key=lambda x: x.get("hostname") or x.get("ip", ""))[:15]:
+                        hostname = c.get("hostname") or c.get("ip", "?")
+                        ip = c.get("ip", "?")
+                        vlan = c.get("vlan", "default")
+                        tx_mb = round(c.get("tx_bytes", 0) / 1024 / 1024, 1)
+                        rx_mb = round(c.get("rx_bytes", 0) / 1024 / 1024, 1)
+                        lines.append(f"  {hostname} ({ip}) VLAN={vlan} tx={tx_mb}MB rx={rx_mb}MB")
+                    return _text("\n".join(lines))
+
+                elif resource == "alerts":
+                    resp = await client.get(f"{base}/stat/alarm", params={"archived": "false"})
+                    data = resp.json().get("data", [])
+                    if not data:
+                        return _text("No active UniFi alerts.")
+                    lines = [f"=== UniFi Alerts ({len(data)} unarchived) ==="]
+                    for alert in data[:20]:
+                        msg = alert.get("msg", "?")
+                        key = alert.get("key", "?")
+                        ts = alert.get("datetime", "?")
+                        lines.append(f"  [{ts}] {key}: {msg}")
+                    return _text("\n".join(lines))
+
+                elif resource == "vpn":
+                    resp = await client.get(f"{base}/stat/remoteuservpn")
+                    data = resp.json().get("data", [])
+                    if not data:
+                        return _text("No active VPN sessions (or endpoint not available).")
+                    lines = [f"=== VPN Sessions ({len(data)} active) ==="]
+                    for v in data:
+                        name = v.get("name") or v.get("username", "?")
+                        ip = v.get("virtual_ip") or v.get("ip", "?")
+                        tx_mb = round(v.get("tx_bytes", 0) / 1024 / 1024, 1)
+                        rx_mb = round(v.get("rx_bytes", 0) / 1024 / 1024, 1)
+                        lines.append(f"  {name} — IP={ip}, tx={tx_mb}MB, rx={rx_mb}MB")
+                    return _text("\n".join(lines))
+
+                else:
+                    return _text(f"Unknown resource '{resource}'. Use: health, devices, clients, alerts, vpn")
+
+        except httpx.ConnectError:
+            return _text(f"Cannot connect to UniFi controller at {unifi_url}.")
+        except httpx.TimeoutException:
+            return _text(f"UniFi query timed out ({unifi_url}).")
+        except Exception as exc:
+            logger.error("unifi_query[%s]: error — %s", resource, exc)
+            return _text(f"UniFi error: {exc}")
+
     # --- Build server -------------------------------------------------------
 
     all_tools = [
@@ -1070,6 +1546,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         docker_query, docker_action, tcp_check, dns_lookup, pg_query,
         loki_query, runbook_list, runbook_read, runbook_write,
         container_exec, container_file_patch,
+        ssh_exec, prometheus_query, ping_check, unifi_query,
         cron_create, cron_list, cron_update, cron_delete, collect_and_remediate,
     ]
     if send_message is not None:
