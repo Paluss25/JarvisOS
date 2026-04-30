@@ -101,3 +101,113 @@ async def test_proxy_returns_404_for_unknown_agent():
         )
 
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# P2.T1 — _make_webhook_handler
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_handler_calls_process_update_on_valid_request():
+    """Handler must call ptb_app.process_update() with the parsed Update."""
+    import httpx
+    from fastapi import FastAPI
+    from agent_runner.interfaces.telegram_bot import _make_webhook_handler
+    from telegram import Update
+
+    ptb = MagicMock()
+    ptb.bot = MagicMock()
+    ptb.process_update = AsyncMock()
+
+    fake_update = MagicMock(spec=Update)
+
+    with patch("agent_runner.interfaces.telegram_bot.Update") as mock_cls:
+        mock_cls.de_json.return_value = fake_update
+        handler = _make_webhook_handler(ptb, webhook_secret="")
+        app = FastAPI()
+        app.add_api_route("/telegram/webhook", handler, methods=["POST"])
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/telegram/webhook",
+                json={"update_id": 1},
+            )
+
+    assert resp.status_code == 200
+    ptb.process_update.assert_awaited_once_with(fake_update)
+
+
+@pytest.mark.asyncio
+async def test_handler_rejects_wrong_secret():
+    """Handler must return 403 when the secret-token header does not match."""
+    import httpx
+    from fastapi import FastAPI
+    from agent_runner.interfaces.telegram_bot import _make_webhook_handler
+
+    ptb = MagicMock()
+    ptb.process_update = AsyncMock()
+
+    handler = _make_webhook_handler(ptb, webhook_secret="correct_secret")
+    app = FastAPI()
+    app.add_api_route("/telegram/webhook", handler, methods=["POST"])
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/telegram/webhook",
+            json={"update_id": 1},
+            headers={"X-Telegram-Bot-Api-Secret-Token": "wrong_secret"},
+        )
+
+    assert resp.status_code == 403
+    ptb.process_update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handler_skips_secret_check_when_secret_empty():
+    """Handler must not check the secret header if webhook_secret is empty."""
+    import httpx
+    from fastapi import FastAPI
+    from agent_runner.interfaces.telegram_bot import _make_webhook_handler
+
+    ptb = MagicMock()
+    ptb.bot = MagicMock()
+    ptb.process_update = AsyncMock()
+
+    with patch("agent_runner.interfaces.telegram_bot.Update") as mock_cls:
+        mock_cls.de_json.return_value = MagicMock()
+        handler = _make_webhook_handler(ptb, webhook_secret="")
+        app = FastAPI()
+        app.add_api_route("/telegram/webhook", handler, methods=["POST"])
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/telegram/webhook",
+                json={"update_id": 1},
+                # No secret header at all
+            )
+
+    assert resp.status_code == 200
+    ptb.process_update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_handler_returns_200_even_when_process_update_raises():
+    """Handler must swallow process_update exceptions and return 200 to Telegram."""
+    import httpx
+    from fastapi import FastAPI
+    from agent_runner.interfaces.telegram_bot import _make_webhook_handler
+
+    ptb = MagicMock()
+    ptb.bot = MagicMock()
+    ptb.process_update = AsyncMock(side_effect=RuntimeError("boom"))
+
+    with patch("agent_runner.interfaces.telegram_bot.Update") as mock_cls:
+        mock_cls.de_json.return_value = MagicMock()
+        handler = _make_webhook_handler(ptb, webhook_secret="")
+        app = FastAPI()
+        app.add_api_route("/telegram/webhook", handler, methods=["POST"])
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/telegram/webhook", json={"update_id": 1})
+
+    assert resp.status_code == 200
