@@ -2041,7 +2041,6 @@ async def start_polling(agent: Any, session_manager: Any, config: Any, redis_a2a
             async with app:
                 await app.start()
                 try:
-                    from telegram import BotCommand
                     await app.bot.set_my_commands([BotCommand(cmd, desc) for cmd, desc in _COMMANDS])
                     logger.info("telegram: bot commands registered (%d commands)", len(_COMMANDS))
                 except Exception as exc:
