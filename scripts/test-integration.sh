@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON_BIN="${PYTHON:-python3}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-exec "$PYTHON_BIN" -m pytest -m "integration" "$@"
+exec bash "$SCRIPT_DIR/_pytest-suite.sh" integration "${PYTEST_INTEGRATION_TIMEOUT:-180s}" "integration" "$@"
