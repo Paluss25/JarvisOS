@@ -39,6 +39,7 @@ _UNIT_TEST_FILES = {
     "test_permission_layer.py",
     "test_redaction_engine.py",
     "test_telegram_webhook.py",
+    "test_extractor.py",
 }
 
 _INTEGRATION_TEST_FILES = {

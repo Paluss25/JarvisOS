@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Employment contract extracted fields",
+  "type": "object",
+  "required": ["contract_type"],
+  "properties": {
+    "contract_type": {"type": "string"},
+    "employer": {"type": ["string", "null"]},
+    "role": {"type": ["string", "null"]},
+    "start_date": {"type": ["string", "null"], "format": "date"},
+    "end_date": {"type": ["string", "null"], "format": "date"},
+    "gross_yearly": {"type": ["number", "null"]},
+    "metadata": {"type": "object"}
+  }
+}

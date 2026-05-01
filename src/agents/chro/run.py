@@ -20,6 +20,17 @@ def main():
     )
 
     app = create_app(config)
+
+    # Mount the CHRO HTTP API (HR business plane) — additive; the existing
+    # control-plane endpoints (/chat, /a2a, /health, ...) are untouched.
+    try:
+        from agents.chro.api import router as chro_router
+        app.include_router(chro_router)
+    except Exception as exc:  # pragma: no cover — defensive at startup
+        logging.getLogger(__name__).error(
+            "CHRO HTTP router failed to mount: %s", exc, exc_info=True
+        )
+
     port = int(os.environ.get("AGENT_PORT", str(config.port)))
     uvicorn.run(app, host="0.0.0.0", port=port, log_level=config.log_level.lower())
 
