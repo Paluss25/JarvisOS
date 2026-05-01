@@ -12,7 +12,9 @@ Tools:
   get_recent_activities  — Typed: recent sport activities by date range
   get_training_plan      — Typed: training plan for a given ISO week number
   get_waist_measurements — Typed: waist circumference measurements by date range
-  medical_query          — Semantic search across ingested medical PDFs (referti, analysis reports)
+  medical_query          — Semantic search merged across analisi-cliniche + referti-medici collections
+  lab_query              — Deterministic time series for a named lab parameter (via /coh/lab-values)
+  lab_anomalies          — Recent abnormal lab values across all panels (via /coh/lab-anomalies)
 """
 
 import json
@@ -130,7 +132,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "daily_log",
         "Append a timestamped entry to today's DrHouse health memory log. Use this to record significant health events, decisions, flags, or information worth remembering. message is required.",
-        {"message": {"type": "string", "default": ""}},
+        {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]},
     )
     async def daily_log(args: dict) -> dict:
         args = _parse_args(args)
@@ -150,7 +152,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "Search across long-term health memory (MEMORY.md) and all daily logs (memory/*.md) using text matching. "
         "Use this to recall past health events, medical notes, decisions, or tracked conditions. "
         "Results include the matching lines with surrounding context, most recent files first.",
-        {"query": str, "top_k": {"type": "integer", "default": 5}},
+        {"type": "object", "properties": {"query": {"type": "string"}, "top_k": {"type": "integer", "default": 5}}, "required": ["query"]},
     )
     async def memory_search(args: dict) -> dict:
         args = _parse_args(args)
@@ -195,7 +197,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "Read a specific memory file from the DrHouse workspace. "
         "Use path relative to workspace root, e.g. 'MEMORY.md' or 'memory/2026-04-16.md'. "
         "Optionally specify start_line and num_lines to read a slice.",
-        {"path": str, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}},
+        {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer", "default": 1}, "num_lines": {"type": "integer", "default": 50}}, "required": ["path"]},
     )
     async def memory_get(args: dict) -> dict:
         args = _parse_args(args)
@@ -273,7 +275,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "  activity_fit_files: id, activity_id, user_id, source_path, file_sha256, manufacturer, product, serial_number, time_created, imported_at, raw_summary_json. "
         "  activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT session/lap/record/field data linked by activity_id and fit_file_id. "
         "  daily_fit_files, daily_fit_fields, daily_wellness_records, daily_stress_records, daily_respiration_records, daily_sleep_levels, daily_hrv_values, daily_skin_temp_overnight: Garmin daily fitness FIT data linked by date and user_id. "
-        "  daily_fitness_enriched: recovery_metrics plus imported Garmin daily wellness/sleep/HRV/skin-temperature data. "
+        "  daily_fitness_enriched (VIEW — use for daily recovery/sleep/HRV queries): date, user_id, daily_fit_file_count, body_battery_am, body_battery_pm, stress_avg, stress_max, hrv_overnight_avg, hrv_status, sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, rhr_overnight, steps, distance_km, active_kcal, active_min, data_quality, min_wellness_hr, avg_wellness_hr, skin_average_deviation_c, skin_average_7_day_deviation_c, skin_nightly_value_c. NOTE: hrv column is hrv_overnight_avg (integer ms), status column is hrv_status — no _ms suffix, no hrv_overnight_status. "
         "Only SELECT statements are permitted — DrHouse has read-only access to both databases.",
         {
             "type": "object",
@@ -361,7 +363,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "Get meals for a date or date range. "
         "date_from and date_to are ISO date strings (YYYY-MM-DD). Omit date_to for a single day. "
         "meal_type: optional filter — 'breakfast', 'lunch', 'dinner', 'snack'.",
-        {"date_from": str, "date_to": str, "meal_type": str},
+        {"type": "object", "properties": {"date_from": {"type": "string"}, "date_to": {"type": "string"}, "meal_type": {"type": "string"}}, "required": []},
     )
     async def get_meals(args: dict) -> dict:
         args = _parse_args(args)
@@ -386,7 +388,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "Get body measurements for a date or date range. "
         "date_from and date_to are ISO date strings. Omit date_to for a single day. "
         "Returns weight, BMI, body fat, muscle mass, bone mass, BMR and more.",
-        {"date_from": str, "date_to": str},
+        {"type": "object", "properties": {"date_from": {"type": "string"}, "date_to": {"type": "string"}}, "required": []},
     )
     async def get_body_measurements(args: dict) -> dict:
         args = _parse_args(args)
@@ -408,7 +410,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "Get aggregated daily nutrition summaries for a date range. "
         "date_from and date_to are ISO date strings. Omit date_to for a single day. "
         "Returns total_calories, total_protein, total_carbs, total_fat, meals_logged per day.",
-        {"date_from": str, "date_to": str},
+        {"type": "object", "properties": {"date_from": {"type": "string"}, "date_to": {"type": "string"}}, "required": []},
     )
     async def get_daily_nutrition(args: dict) -> dict:
         args = _parse_args(args)
@@ -453,7 +455,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "days: how many days to look back (default 7). "
         "Returns id, source, type, date, duration_min, distance_km, avg_hr, max_hr, calories, load_score, elevation_gain_m. "
         "Use this instead of health_query for the morning briefing and EOD consolidation.",
-        {"days": {"type": "integer", "default": 7}},
+        {"type": "object", "properties": {"days": {"type": "integer", "default": 7}}, "required": []},
     )
     async def get_recent_activities(args: dict) -> dict:
         args = _parse_args(args)
@@ -478,7 +480,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "week_number: ISO week (1–53). Omit to use current week. "
         "Returns id, week_number, day_of_week, session_type, planned_duration, planned_intensity, status, actual_activity_id. "
         "Use this instead of health_query for training plan lookups.",
-        {"week_number": {"type": "integer", "default": 0}},
+        {"type": "object", "properties": {"week_number": {"type": "integer", "default": 0}}, "required": []},
     )
     async def get_training_plan(args: dict) -> dict:
         args = _parse_args(args)
@@ -503,7 +505,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "Get waist circumference measurements from the waist_measurements table. "
         "days: how many days to look back (default 30). "
         "NOTE: waist_cm lives in waist_measurements, NOT in body_measurements — use this tool, not health_query.",
-        {"days": {"type": "integer", "default": 30}},
+        {"type": "object", "properties": {"days": {"type": "integer", "default": 30}}, "required": []},
     )
     async def get_waist_measurements(args: dict) -> dict:
         args = _parse_args(args)
@@ -533,10 +535,13 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             "Use 'to' to specify the target agent ID (e.g. 'dos', 'ceo'). "
             "'message' is the natural language request to send. "
             "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
-            {"to": str, "message": str, "wait_response": bool},
+            {"type": "object", "properties": {"to": {"type": "string"}, "message": {"type": "string"}, "wait_response": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "default": True}}, "required": ["to", "message"]},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
+            wr = args.get("wait_response", True)
+            if isinstance(wr, str):
+                args["wait_response"] = wr.lower() not in ("false", "0", "no")
             return _text(await _send_message_fn(args))
 
         @sdk_tool(
@@ -651,7 +656,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             "Delete a logged meal from the nutrition database by its id. "
             "Use this to remove test entries, duplicates, or incorrectly logged meals. "
             "meal_id: the integer id returned by log_meal or from a health_query.",
-            {"meal_id": {"anyOf": [{"type": "integer"}, {"type": "string"}]}},
+            {"type": "object", "properties": {"meal_id": {"anyOf": [{"type": "integer"}, {"type": "string"}]}}, "required": ["meal_id"]},
         )
         async def delete_meal(args: dict) -> dict:
             args = _parse_args(args)
@@ -695,56 +700,138 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "medical_query",
-        "Semantic search across ingested medical PDF reports (referti, blood tests, diagnostics). "
-        "Returns the most relevant excerpts from documents previously ingested via 'memory-box ingest --collection medical'. "
-        "Use this when the user references a medical report, lab result, or diagnostic document. "
+        "Semantic search across ingested medical PDFs (lab analyses + medical reports). "
+        "Returns the most relevant excerpts merged from the analisi-cliniche and referti-medici collections. "
+        "Use this when the user asks about a referto, blood test, or diagnostic document. "
         "Do NOT infer or fabricate values — only report what is found in the results.",
-        {"query": str, "top_k": {"type": "integer", "default": 5}},
+        {"type": "object", "properties": {"query": {"type": "string"}, "top_k": {"type": "integer", "default": 5}}, "required": ["query"]},
     )
     async def medical_query(args: dict) -> dict:
+        import asyncio
         import httpx
         args = _parse_args(args)
-        query = args.get("query", "").strip()
+        query = (args.get("query") or "").strip()
         if not query:
             return _text("No query provided.")
         top_k = _to_int(args.get("top_k")) or 5
 
-        try:
+        async def _query_one(coll: str) -> list:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
-                    f"{_MEMORY_BOX_URL}/query",
-                    json={"query": query, "collection": "medical", "top_k": top_k},
-                )
-        except httpx.RequestError as exc:
-            return _text(f"medical_query: connection error — {exc}")
+                try:
+                    r = await client.post(
+                        f"{_MEMORY_BOX_URL}/query",
+                        json={"query": query, "collection": coll, "top_k": top_k, "user": "paluss"},
+                    )
+                    if r.status_code == 500:
+                        return []
+                    if not r.is_success:
+                        return []
+                    results = (r.json() or {}).get("results", [])
+                    # Tag each result with its origin collection so the merged output is unambiguous.
+                    for item in results:
+                        item.setdefault("collection", coll)
+                    return results
+                except httpx.RequestError:
+                    return []
 
-        if resp.status_code == 500:
-            return _text(
-                "No medical documents found. "
-                "Ingest a PDF first with: memory-box ingest --file <path> --collection medical"
-            )
-        if not resp.is_success:
-            return _text(f"medical_query: unexpected error {resp.status_code}")
-
-        data = resp.json()
-        results = data.get("results", [])
-        if not results:
-            return _text(f"No results found for '{query}' in medical documents.")
+        lab, rep = await asyncio.gather(
+            _query_one("analisi-cliniche"),
+            _query_one("referti-medici"),
+        )
+        merged = sorted(lab + rep, key=lambda r: r.get("score", 0), reverse=True)[:top_k]
+        if not merged:
+            return _text(f"No results found for '{query}' in medical collections.")
 
         parts = []
-        for i, r in enumerate(results, 1):
-            text = r.get("text", "").strip()
+        for i, r in enumerate(merged, 1):
+            text = (r.get("text") or "").strip()
             score = r.get("score", 0)
-            source = r.get("source", "") or r.get("metadata", {}).get("source", "")
-            header = f"[{i}] score={score:.2f}" + (f" — {source}" if source else "")
-            parts.append(f"{header}\n{text}")
-
+            coll = r.get("collection", "?")
+            parts.append(f"[{i}] coll={coll} score={score:.2f}\n{text}")
         return _text("\n\n---\n\n".join(parts))
+
+    @sdk_tool(
+        "lab_query",
+        "Deterministic SQL query of lab values from coh.lab_panels and coh.lab_values. "
+        "Use this when the user asks for a specific parameter trend or current value. "
+        "Returns time series sorted by collection_date DESC.",
+        {
+            "type": "object",
+            "properties": {
+                "parameter_name": {"type": "string"},
+                "from_date": {"type": "string"},
+                "to_date": {"type": "string"},
+                "limit": {"type": "integer", "default": 50},
+            },
+            "required": ["parameter_name"],
+        },
+    )
+    async def lab_query(args: dict) -> dict:
+        import httpx
+        args = _parse_args(args)
+        pname = (args.get("parameter_name") or "").strip()
+        if not pname:
+            return _text("parameter_name is required.")
+        params = {
+            "parameter_name": pname,
+            "user_id": "paluss",
+            "limit": _to_int(args.get("limit")) or 50,
+        }
+        if args.get("from_date"):
+            params["from_date"] = args["from_date"]
+        if args.get("to_date"):
+            params["to_date"] = args["to_date"]
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get("http://localhost:8006/coh/lab-values", params=params)
+        except httpx.RequestError as exc:
+            return _text(f"lab_query: connection error — {exc}")
+        if not resp.is_success:
+            return _text(f"lab_query: error {resp.status_code} — {resp.text}")
+        rows = resp.json()
+        if not rows:
+            return _text(f"No lab values found for '{pname}'.")
+        lines = [
+            f"{r['collection_date']}: {r['value']} {r.get('unit') or ''} "
+            f"(range {r.get('ref_range_low')}-{r.get('ref_range_high')}) "
+            f"[{r.get('abnormal_flag')}]"
+            for r in rows
+        ]
+        return _text("\n".join(lines))
+
+    @sdk_tool(
+        "lab_anomalies",
+        "Recent abnormal lab values across all panels. Useful for proactive review.",
+        {"type": "object", "properties": {"days": {"type": "integer", "default": 90}}, "required": []},
+    )
+    async def lab_anomalies(args: dict) -> dict:
+        import httpx
+        args = _parse_args(args)
+        days = _to_int(args.get("days")) or 90
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    "http://localhost:8006/coh/lab-anomalies",
+                    params={"user_id": "paluss", "days": days},
+                )
+        except httpx.RequestError as exc:
+            return _text(f"lab_anomalies: connection error — {exc}")
+        if not resp.is_success:
+            return _text(f"lab_anomalies: error {resp.status_code} — {resp.text}")
+        rows = resp.json()
+        if not rows:
+            return _text(f"No anomalies in the last {days} days.")
+        lines = [
+            f"{r['collection_date']} — {r['parameter_name']}: {r['value']} {r.get('unit') or ''} "
+            f"({r['abnormal_flag']}, range {r.get('ref_range_low')}-{r.get('ref_range_high')})"
+            for r in rows
+        ]
+        return _text("\n".join(lines))
 
     all_tools = [daily_log, memory_search, memory_get, health_query,
                  get_meals, get_body_measurements, get_daily_nutrition,
                  get_nutrition_goals, get_recent_activities, get_training_plan, get_waist_measurements,
-                 medical_query, report_issue]
+                 medical_query, lab_query, lab_anomalies, report_issue]
     if send_message is not None:
         all_tools.append(send_message)
     if log_meal is not None:

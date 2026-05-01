@@ -57,12 +57,17 @@ DRHOUSE_BUILTIN_CRONS = [
         "schedule": "weekly@mon@09:00",
         "prompt": (
             "Weekly Executive Health Brief. Produce an integrated, data-driven health report covering:\n"
-            "1. Training adherence and load trend (request weekly sport summary from Roger via send_message)\n"
-            "2. Nutrition adherence — average daily macros vs. targets, caloric balance\n"
-            "3. Body composition movement — weight and waist trend direction\n"
-            "4. Recovery quality assessment\n"
-            "5. Cross-domain analysis: conflicts, alignment issues, positive synergies\n"
-            "6. Top 3 actionable recommendations for the coming week\n"
+            "1. Lab panel review — call lab_query for: 'Glicemia', 'HDL', 'LDL', 'Colesterolo totale', "
+            "'Trigliceridi', 'TSH', 'Creatinina', 'GFR' over the last 12 months. "
+            "Compare latest panel to previous one, note significant trends.\n"
+            "2. Anomalies — call lab_anomalies(days=90) to list any abnormal_flag != 'normal' values; "
+            "highlight 'critical' first.\n"
+            "3. Training adherence and load trend (request weekly sport summary from Roger via send_message).\n"
+            "4. Nutrition adherence — average daily macros vs targets, caloric balance.\n"
+            "5. Body composition movement — weight and waist trend direction.\n"
+            "6. Recovery quality assessment (sleep, HRV, readiness if available).\n"
+            "7. Cross-domain analysis: conflicts, alignment, synergies.\n"
+            "8. Top 3 actionable recommendations for the coming week.\n"
             "Send the full report to Jarvis via send_message for executive awareness. "
             "Be data-driven, direct, and flag any medical concerns explicitly."
         ),
