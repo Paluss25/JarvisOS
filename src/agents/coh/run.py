@@ -20,6 +20,17 @@ def main():
     )
 
     app = create_app(config)
+
+    # Mount the COH HTTP API (medical business plane) — additive; the existing
+    # control-plane endpoints (/chat, /a2a, /health, ...) are untouched.
+    try:
+        from agents.coh.api import router as coh_router
+        app.include_router(coh_router)
+    except Exception as exc:  # pragma: no cover — defensive at startup
+        logging.getLogger(__name__).error(
+            "COH HTTP router failed to mount: %s", exc, exc_info=True
+        )
+
     port = int(os.environ.get("AGENT_PORT", str(config.port)))
     uvicorn.run(app, host="0.0.0.0", port=port, log_level=config.log_level.lower())
 

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["panel_name", "collection_date", "values"],
+  "properties": {
+    "panel_name": {"type": "string"},
+    "lab_name": {"type": ["string", "null"]},
+    "physician": {"type": ["string", "null"]},
+    "collection_date": {"type": "string", "format": "date"},
+    "report_date": {"type": ["string", "null"], "format": "date"},
+    "values": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["parameter_name"],
+        "properties": {
+          "parameter_name": {"type": "string"},
+          "value": {"type": ["number", "null"]},
+          "value_text": {"type": ["string", "null"]},
+          "unit": {"type": ["string", "null"]},
+          "ref_range_low": {"type": ["number", "null"]},
+          "ref_range_high": {"type": ["number", "null"]},
+          "abnormal_flag": {
+            "type": ["string", "null"],
+            "enum": ["normal", "high", "low", "critical", null]
+          },
+          "notes": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "metadata": {"type": "object"}
+  }
+}

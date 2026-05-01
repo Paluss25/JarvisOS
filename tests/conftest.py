@@ -40,6 +40,7 @@ _UNIT_TEST_FILES = {
     "test_redaction_engine.py",
     "test_telegram_webhook.py",
     "test_extractor.py",
+    "test_coh_extractor.py",
 }
 
 _INTEGRATION_TEST_FILES = {
