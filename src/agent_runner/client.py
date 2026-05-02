@@ -32,8 +32,9 @@ logger = logging.getLogger(__name__)
 
 _tracer = get_tracer(__name__)
 
-_STREAM_TIMEOUT = 480   # seconds — raised from 300; fast-path meal logging ~10s, full pipeline safety margin
+_STREAM_TIMEOUT = 480   # seconds — fallback default; per-agent override via AgentConfig.stream_timeout_s
 _IMAGE_TIMEOUT = 120    # seconds — generous for large vision requests
+_MARGIN_S = 30          # AGENT_MAX_TURN_S must be >= STREAM_TIMEOUT + this margin
 
 
 class BaseAgentClient:
@@ -52,6 +53,22 @@ class BaseAgentClient:
         self.name = config.name
         self._system_prompt = system_prompt
         self._options = options
+        # Validate timeout layering: outer A2A cap must leave room for the
+        # inner SDK stream timeout + margin so the receiver can always publish
+        # a sentinel response on hard-cap exit.
+        if config.agent_max_turn_s < config.stream_timeout_s + _MARGIN_S:
+            raise ValueError(
+                f"AgentConfig '{config.id}': agent_max_turn_s "
+                f"({config.agent_max_turn_s:.0f}s) must be >= "
+                f"stream_timeout_s ({config.stream_timeout_s:.0f}s) + "
+                f"{_MARGIN_S}s margin. Adjust JARVIOS_AGENT_MAX_TURN_S"
+                f"[_{config.id.upper()}] or JARVIOS_STREAM_TIMEOUT"
+                f"[_{config.id.upper()}]."
+            )
+        logger.info(
+            "agent[%s]: stream_timeout=%.0fs, agent_max_turn=%.0fs",
+            config.id, config.stream_timeout_s, config.agent_max_turn_s,
+        )
         # Held so `_refresh_mcp_options()` can rebuild a fresh in-process MCP
         # server before every (re)connect — the SDK does not refresh server
         # bindings when the same options object is reused across SDK
@@ -330,14 +347,14 @@ class BaseAgentClient:
                     text_parts: list[str] = []
                     self._stream_active = True
                     try:
-                        async with asyncio.timeout(_STREAM_TIMEOUT):
+                        async with asyncio.timeout(self.config.stream_timeout_s):
                             async for msg in self._sdk.receive_response():
                                 if self._process_message(msg, text_parts):
                                     break
                     except TimeoutError:
                         logger.error(
-                            "agent[%s]: query timed out after %ss — reconnecting",
-                            self.config.id, _STREAM_TIMEOUT,
+                            "agent[%s]: query timed out after %.0fs — reconnecting",
+                            self.config.id, self.config.stream_timeout_s,
                         )
                         await self._reconnect()
                         raise
@@ -392,7 +409,7 @@ class BaseAgentClient:
         AGENT_BUSY.labels(agent_id=self.config.id).set(1)
         self._stream_active = True
         try:
-            async with asyncio.timeout(_STREAM_TIMEOUT):
+            async with asyncio.timeout(self.config.stream_timeout_s):
                 async for chunk in self._iter_stream_response():
                     yield chunk
             if self._last_result_msg is not None:
@@ -404,7 +421,7 @@ class BaseAgentClient:
                     duration_ms=int(rm.duration_ms or 0),
                 )
         except TimeoutError:
-            logger.error("agent[%s]: stream timed out after %ss — reconnecting", self.config.id, _STREAM_TIMEOUT)
+            logger.error("agent[%s]: stream timed out after %.0fs — reconnecting", self.config.id, self.config.stream_timeout_s)
             await self._reconnect()
             raise
         finally:

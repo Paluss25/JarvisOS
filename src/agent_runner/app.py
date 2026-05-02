@@ -179,22 +179,63 @@ def create_app(config: AgentConfig) -> FastAPI:
                         )
                         await redis_a2a.publish(busy_resp)
                         return
+                    # Hard-cap the agent turn so the sender never hangs waiting
+                    # for a wedged generation. The outer wait_for is the SAFETY
+                    # NET; agent.query() has its own inner stream timeout
+                    # (config.stream_timeout_s, default 480s). They are layered:
+                    # outer (config.agent_max_turn_s, default 600s) >= inner +
+                    # 30s margin (validated in BaseAgentClient.__init__).
+                    response_text: str | None = None
+                    error: str | None = None
                     try:
-                        response_text = await agent.query(
-                            f"[Message from {msg.from_agent}]\n\n{msg.payload}",
-                            session_id=f"a2a-{msg.from_agent}",
-                            source="a2a",
+                        response_text = await asyncio.wait_for(
+                            agent.query(
+                                f"[Message from {msg.from_agent}]\n\n{msg.payload}",
+                                session_id=f"a2a-{msg.from_agent}",
+                                source="a2a",
+                            ),
+                            timeout=config.agent_max_turn_s,
+                        )
+                    except asyncio.TimeoutError:
+                        error = (
+                            f"agent turn exceeded {config.agent_max_turn_s:.0f}s "
+                            "(outer cap) — aborted"
+                        )
+                        logger.warning(
+                            "%s: a2a hard cap timeout for cid=%.8s from %s",
+                            config.name, msg.correlation_id or "n/a", msg.from_agent,
+                        )
+                    except Exception as exc:
+                        error = f"agent error: {type(exc).__name__}: {exc}"
+                        logger.warning(
+                            "%s: a2a handler error for cid=%.8s — %s",
+                            config.name, msg.correlation_id or "n/a", exc,
+                            exc_info=True,
+                        )
+                    finally:
+                        # CONTRACT: receiver MUST always publish a correlated
+                        # response, even on error/timeout, so the sender's
+                        # pending future / pending HASH is never leaked.
+                        payload = (
+                            response_text
+                            if response_text is not None
+                            else f"[ERROR: {error}]"
                         )
                         response = A2AMessage(
                             from_agent=config.id,
                             to_agent=msg.from_agent,
                             type="response",
-                            payload=response_text,
+                            payload=payload,
                             correlation_id=msg.correlation_id,
                         )
-                        await redis_a2a.publish(response)
-                    except Exception as exc:
-                        logger.warning("%s: a2a handler error — %s", config.name, exc)
+                        try:
+                            await redis_a2a.publish(response)
+                        except Exception as pub_exc:
+                            logger.error(
+                                "%s: CRITICAL — failed to publish A2A "
+                                "response for cid=%.8s — %s",
+                                config.name, msg.correlation_id or "n/a", pub_exc,
+                            )
 
                 async def _inbox_drain_loop() -> None:
                     """Periodic consumer: drains the notification inbox into a

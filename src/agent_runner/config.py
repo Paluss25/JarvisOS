@@ -138,3 +138,53 @@ class AgentConfig:
     @property
     def log_level(self) -> str:
         return self._resolve(self.log_level_env) or "INFO"
+
+    @property
+    def agent_max_turn_s(self) -> float:
+        """Hard cap on agent.query() invoked from the A2A handler.
+
+        Resolution order:
+        1. ``JARVIOS_AGENT_MAX_TURN_S_<AGENT_ID_UPPER>`` (per-agent override)
+        2. ``JARVIOS_AGENT_MAX_TURN_S`` (global default)
+        3. 600.0 (built-in default)
+
+        Must be ``>= stream_timeout_s + 30`` so the A2A handler has margin to
+        publish the timeout sentinel response after the inner SDK stream
+        timeout fires. Validated at startup in BaseAgentClient.
+        """
+        per_agent = os.environ.get(f"JARVIOS_AGENT_MAX_TURN_S_{self.id.upper()}")
+        if per_agent:
+            try:
+                return float(per_agent)
+            except ValueError:
+                pass
+        global_val = os.environ.get("JARVIOS_AGENT_MAX_TURN_S")
+        if global_val:
+            try:
+                return float(global_val)
+            except ValueError:
+                pass
+        return 600.0
+
+    @property
+    def stream_timeout_s(self) -> float:
+        """Inner SDK stream timeout for ``agent.query()`` / ``agent.stream()``.
+
+        Resolution order mirrors :attr:`agent_max_turn_s`:
+        1. ``JARVIOS_STREAM_TIMEOUT_<AGENT_ID_UPPER>`` (per-agent override)
+        2. ``JARVIOS_STREAM_TIMEOUT`` (global default)
+        3. 480.0 (built-in default — historical value).
+        """
+        per_agent = os.environ.get(f"JARVIOS_STREAM_TIMEOUT_{self.id.upper()}")
+        if per_agent:
+            try:
+                return float(per_agent)
+            except ValueError:
+                pass
+        global_val = os.environ.get("JARVIOS_STREAM_TIMEOUT")
+        if global_val:
+            try:
+                return float(global_val)
+            except ValueError:
+                pass
+        return 480.0
