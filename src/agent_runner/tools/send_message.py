@@ -346,6 +346,24 @@ def create_send_message_tool(
             reply_channel = _arg_or_chain("reply_channel", "reply_channel")
             reply_chat_id = _arg_or_chain("reply_chat_id", "reply_chat_id")
             reply_intent = _arg_or_chain("reply_intent", "reply_intent")
+            # Auto-resolve reply_chat_id from agent config when the LLM set
+            # reply_channel='telegram' but didn't pass a chat_id. Each agent
+            # has exactly one Telegram chat (its allowed_chat_id), so this
+            # is unambiguous and removes the LLM's burden of remembering it.
+            # ContextVar from _stream_to_agent doesn't reach here because the
+            # SDK's tool-dispatch task is spawned at agent.connect() time
+            # (before the per-turn chain context is set).
+            if reply_channel == "telegram" and not reply_chat_id:
+                _cfg = getattr(redis_a2a, "_config", None)
+                if _cfg is not None and _cfg.telegram_chat_id_env:
+                    _resolved = _cfg._resolve(_cfg.telegram_chat_id_env)
+                    if _resolved:
+                        reply_chat_id = _resolved
+                        logger.debug(
+                            "send_message[%s→%s]: auto-resolved reply_chat_id "
+                            "from config (telegram_chat_id_env=%s)",
+                            agent_id, to, _cfg.telegram_chat_id_env,
+                        )
             envelope.reply_channel = reply_channel
             envelope.reply_chat_id = reply_chat_id
             envelope.reply_intent = reply_intent

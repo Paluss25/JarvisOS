@@ -1,13 +1,15 @@
 """Telegram webhook proxy — platform_api receives Telegram updates and
 forwards them to the correct agent's FastAPI app at localhost:{port}.
 
-The forward is fire-and-forget: we ack Telegram with 200 OK as soon as the
-inner POST returns OR after a short bounded wait, so a slow agent.query()
-inside python-telegram-bot does NOT cause Telegram to retry (which produces
-the user-visible "(no response)" + duplicate dispatch pattern).
+Inner agent endpoints now enqueue the update onto PTB's ``update_queue`` and
+return 200 within ~50ms (see ``agent_runner.interfaces.telegram_bot.
+_make_webhook_handler``), so the proxy no longer needs the duplicate
+background re-fire that previously caused ``_chat_generations`` races and
+silent placeholder loss for slow LLM streams. A short read timeout is
+sufficient — anything beyond it indicates the inner FastAPI is genuinely
+unreachable, which we surface as 502 to the upstream.
 """
 
-import asyncio
 import logging
 
 import httpx
@@ -30,23 +32,10 @@ AGENT_PORTS: dict[str, int] = {
     "mt": 8009,
 }
 
-# Bounded wait for the inner agent endpoint. python-telegram-bot in webhook
-# mode normally returns within ~50ms (it queues the update for the dispatcher
-# task and acks immediately). If the inner endpoint takes longer than this
-# cap, we ack Telegram anyway and the inner POST keeps running in the
-# background — Telegram's own webhook timeout is 60s, our retry-storm
-# protection sits well below that.
-_INNER_FORWARD_TIMEOUT_S = 30.0
-
-
-async def _fire_and_forget_forward(url: str, body: bytes, headers: dict) -> None:
-    """Background-task fallback: completes the forward even after we acked
-    Telegram, so the agent still receives every update."""
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            await client.post(url, content=body, headers=headers)
-    except Exception as exc:
-        logger.warning("webhooks: background forward to %s failed — %s", url, exc)
+# The inner handler now enqueues + returns 200 immediately (~50ms typical).
+# A short cap is intentional: anything slower means the inner FastAPI is
+# unhealthy, not just busy with an LLM turn.
+_INNER_FORWARD_TIMEOUT_S = 5.0
 
 
 @router.post("/webhooks/{agent_id}")
@@ -68,18 +57,6 @@ async def telegram_webhook(agent_id: str, request: Request) -> Response:
         async with httpx.AsyncClient(timeout=_INNER_FORWARD_TIMEOUT_S) as client:
             resp = await client.post(target, content=body, headers=headers)
         return Response(status_code=resp.status_code)
-    except (httpx.ReadTimeout, httpx.PoolTimeout):
-        # The inner endpoint is taking too long — most likely the agent is
-        # mid-turn. Telegram has already delivered to us; we MUST ack with
-        # 200 to prevent retry storms ("(no response)" from the user side).
-        # Re-issue the forward as a background task so the update is not lost.
-        logger.warning(
-            "webhooks: inner forward to %s exceeded %.0fs — acking 200 and "
-            "completing in background",
-            target, _INNER_FORWARD_TIMEOUT_S,
-        )
-        asyncio.create_task(_fire_and_forget_forward(target, body, headers))
-        return Response(status_code=200)
     except httpx.HTTPError as exc:
         logger.warning("webhooks: forward to %s failed — %s", target, exc)
         return Response(status_code=502)
