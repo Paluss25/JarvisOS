@@ -130,6 +130,10 @@ def build_drhouse_config(workspace_root: Path = Path("/app/workspace/coh")) -> A
         log_level_env="LOG_LEVEL",
         env_prefix="DRHOUSE_",
         memory_backend="filesystem",
+        # Reduce Telegram edit-rate by streaming progress only (active tool
+        # name + spinner) instead of every token. Halves the chunked edit
+        # calls for nutrition pipelines that produce 1500+ token summaries.
+        telegram_streaming_mode="progress",
         mcp_server_factory=create_drhouse_mcp_server,
         builtin_crons=DRHOUSE_BUILTIN_CRONS,
         allowed_tools=[

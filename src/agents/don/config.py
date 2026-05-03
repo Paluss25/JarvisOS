@@ -54,6 +54,9 @@ def build_nutrition_config(workspace_root: Path = Path("/app/workspace/don")) ->
         log_level_env="LOG_LEVEL",
         env_prefix="NUTRITION_",
         memory_backend="filesystem",
+        # Same rationale as COH: progress-only streaming reduces Telegram
+        # flood-control risk during long nutrition_execute summaries.
+        telegram_streaming_mode="progress",
         mcp_server_factory=create_nutrition_mcp_server,
         a2a_fast_path=handle_a2a_action,
         builtin_crons=NUTRITION_BUILTIN_CRONS,
