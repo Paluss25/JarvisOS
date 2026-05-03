@@ -44,6 +44,7 @@ _UNIT_TEST_FILES = {
     "test_pending_store.py",
     "test_send_message_async.py",
     "test_inbox_retry.py",
+    "test_a2a_restart_safety.py",
 }
 
 _INTEGRATION_TEST_FILES = {

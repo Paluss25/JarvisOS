@@ -356,6 +356,56 @@ def create_app(config: AgentConfig) -> FastAPI:
                     "%s: Redis A2A subscriber + inbox drain (every %.0fs) started",
                     config.name, drain_interval,
                 )
+
+                # ----- Restart-safety: drain stale pending requests --------
+                # When a receiver crashes mid-processing, the request envelope
+                # has already left the pub/sub channel but no response was
+                # published. The pending-store HASH still exists at the
+                # SENDER side. To prevent senders from waiting until TTL
+                # expiry (24h), at startup we scan for stale pending entries
+                # addressed to us and emit an explicit error response so the
+                # sender's continuation fires with a clear failure message.
+                async def _drain_stale_pending() -> None:
+                    try:
+                        stale = await pending_store.scan_stale(
+                            agent_id=config.id, older_than_s=300.0
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "%s: stale pending scan failed — %s",
+                            config.name, exc,
+                        )
+                        return
+                    if not stale:
+                        return
+                    logger.warning(
+                        "%s: draining %d stale pending request(s) at startup",
+                        config.name, len(stale),
+                    )
+                    for entry in stale:
+                        err = A2AMessage(
+                            from_agent=config.id,
+                            to_agent=entry.from_agent,
+                            type="response",
+                            payload=(
+                                f"[ERROR: receiver '{config.id}' restarted "
+                                f"while processing — request dropped at "
+                                f"startup scan. cid={entry.correlation_id[:8]}]"
+                            ),
+                            correlation_id=entry.correlation_id,
+                        )
+                        try:
+                            await redis_a2a.publish(err)
+                        except Exception as pub_exc:
+                            logger.warning(
+                                "%s: failed to publish stale-drain "
+                                "error response for cid=%.8s — %s",
+                                config.name, entry.correlation_id, pub_exc,
+                            )
+
+                state["stale_pending_task"] = asyncio.create_task(
+                    _drain_stale_pending()
+                )
             except Exception as exc:
                 logger.warning("%s: Redis A2A subscriber failed — %s", config.name, exc)
 
@@ -443,7 +493,8 @@ def create_app(config: AgentConfig) -> FastAPI:
         # Shutdown
         logger.info("%s: shutting down…", config.name)
         for key in ("telegram_task", "scheduler_task", "pipeline_task", "redis_a2a_task",
-                    "inbox_drain_task", "slack_task", "discord_task", "mattermost_task"):
+                    "inbox_drain_task", "stale_pending_task",
+                    "slack_task", "discord_task", "mattermost_task"):
             task = state.get(key)
             if task and not task.done():
                 task.cancel()
