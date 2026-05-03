@@ -113,6 +113,10 @@ def _build_continuation_envelope(
         parent_correlation_id=entry.correlation_id,
         hop_count=entry.hop_count,
         max_hops=entry.max_hops,
+        # Reply-routing for the originator-authored feedback loop.
+        reply_channel=entry.reply_channel,
+        reply_chat_id=entry.reply_chat_id,
+        reply_intent=entry.reply_intent,
     )
 
 
@@ -319,6 +323,28 @@ def create_send_message_tool(
                 hop_count=new_hop,
                 max_hops=MAX_HOPS,
             )
+            # Reply-routing fields. Inherit from the chain context (a nested
+            # async send started from a continuation turn keeps the original
+            # user's reply channel) unless the caller explicitly overrides
+            # them in args. Empty strings collapse to None.
+            def _arg_or_chain(arg_name: str, chain_key: str) -> str | None:
+                v = args.get(arg_name)
+                if isinstance(v, str):
+                    v = v.strip() or None
+                if v is not None:
+                    return v
+                if chain is None:
+                    return None
+                cv = chain.get(chain_key)
+                if isinstance(cv, str):
+                    return cv or None
+                return cv
+            reply_channel = _arg_or_chain("reply_channel", "reply_channel")
+            reply_chat_id = _arg_or_chain("reply_chat_id", "reply_chat_id")
+            reply_intent = _arg_or_chain("reply_intent", "reply_intent")
+            envelope.reply_channel = reply_channel
+            envelope.reply_chat_id = reply_chat_id
+            envelope.reply_intent = reply_intent
             entry = PendingEntry(
                 correlation_id=correlation_id,
                 from_agent=agent_id, to_agent=to,
@@ -329,6 +355,9 @@ def create_send_message_tool(
                 hop_count=new_hop,
                 max_hops=MAX_HOPS,
                 context_hint=_truncate(args.get("context_hint"), 500),
+                reply_channel=reply_channel,
+                reply_chat_id=str(reply_chat_id) if reply_chat_id is not None else None,
+                reply_intent=reply_intent,
             )
             try:
                 await pending_store.put(entry)

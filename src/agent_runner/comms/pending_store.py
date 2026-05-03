@@ -46,6 +46,12 @@ class PendingEntry:
     sender_session_id: str | None = None
     sender_user_id: str | None = None
     context_hint: str | None = None      # max ~500 chars of caller context
+    # Structured reply-routing for the originator-authored feedback loop.
+    # ``context_hint`` is free-text for the LLM; these fields are typed
+    # routing data read by ``send_telegram_message`` via the chain context.
+    reply_channel: str | None = None     # "telegram" | "slack" | "mattermost" | "cron" | None
+    reply_chat_id: str | None = None     # external channel id (Telegram chat id as string)
+    reply_intent: str | None = None      # short label, e.g. "tennis_event_inserted"
 
 
 class PendingResponseStore:
@@ -169,4 +175,7 @@ class PendingResponseStore:
             sender_session_id=_opt("sender_session_id"),
             sender_user_id=_opt("sender_user_id"),
             context_hint=_opt("context_hint"),
+            reply_channel=_opt("reply_channel"),
+            reply_chat_id=_opt("reply_chat_id"),
+            reply_intent=_opt("reply_intent"),
         )

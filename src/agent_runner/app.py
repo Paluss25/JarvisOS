@@ -98,6 +98,20 @@ def create_app(config: AgentConfig) -> FastAPI:
                 _pending_store_early = PendingResponseStore(redis_a2a.client)
                 redis_a2a._inbox = _inbox_early           # type: ignore[attr-defined]
                 redis_a2a._pending_store = _pending_store_early  # type: ignore[attr-defined]
+                # Stash AgentConfig on redis_a2a so send_telegram_message can
+                # resolve the per-agent token + allowed_chat_id without
+                # changing the create_<agent>_mcp_server() factory signature
+                # (which would touch all 8 agents + client.py).
+                # ⚠ Service-locator workaround — AgentConfig is more
+                # semantically coupled to Agent state than to redis_a2a, but
+                # we already use this same pattern for ``_inbox`` and
+                # ``_pending_store``. If a 4th attachment is needed, replace
+                # the bag-on-redis_a2a with an explicit A2AContext object.
+                redis_a2a._config = config  # type: ignore[attr-defined]
+                logger.info(
+                    "%s: stashed _inbox/_pending_store/_config on redis_a2a",
+                    config.name,
+                )
             except Exception as exc:
                 logger.warning("%s: Redis A2A init failed — %s", config.name, exc)
                 redis_a2a = None
@@ -314,6 +328,14 @@ def create_app(config: AgentConfig) -> FastAPI:
                                         "root_correlation_id": m.root_correlation_id,
                                         "parent_correlation_id": m.parent_correlation_id,
                                         "hop_count": int(m.hop_count or 0),
+                                        # Reply-routing for the originator-authored
+                                        # feedback loop. send_telegram_message reads
+                                        # these via read_chain_context() to decide
+                                        # whether the user can be replied to and on
+                                        # which channel.
+                                        "reply_channel": getattr(m, "reply_channel", None),
+                                        "reply_chat_id": getattr(m, "reply_chat_id", None),
+                                        "reply_intent": getattr(m, "reply_intent", None),
                                     }
                             prompt = "\n".join(parts)
                             from agent_runner.comms.chain_context import (

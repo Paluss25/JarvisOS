@@ -20,12 +20,22 @@ from contextvars import ContextVar
 from typing import TypedDict
 
 
-class ChainContext(TypedDict):
-    """Snapshot of A2A chain metadata visible to nested sends within one turn."""
+class ChainContext(TypedDict, total=False):
+    """Snapshot of A2A chain metadata visible to nested sends within one turn.
+
+    Required keys: ``root_correlation_id``, ``parent_correlation_id``, ``hop_count``.
+    Optional keys: ``reply_channel`` / ``reply_chat_id`` / ``reply_intent`` —
+    populated when the original delegation came from a user channel
+    (Telegram for now). Used by ``send_telegram_message`` to decide whether
+    a feedback message is allowed and to which chat it should go.
+    """
 
     root_correlation_id: str
     parent_correlation_id: str
     hop_count: int  # hop_count of the message that triggered this turn — new sends should be > this
+    reply_channel: str | None
+    reply_chat_id: str | None
+    reply_intent: str | None
 
 
 _chain_ctx: ContextVar[ChainContext | None] = ContextVar(

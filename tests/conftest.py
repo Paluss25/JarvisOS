@@ -45,6 +45,7 @@ _UNIT_TEST_FILES = {
     "test_send_message_async.py",
     "test_inbox_retry.py",
     "test_a2a_restart_safety.py",
+    "test_send_telegram_message.py",
 }
 
 _INTEGRATION_TEST_FILES = {
@@ -297,11 +298,24 @@ if "telegram" not in sys.modules:
     _tg_constants = MagicMock()
     _tg_constants.ParseMode = MagicMock()
 
-    # telegram.error
+    # telegram.error — use distinct subclasses so `except BadRequest` does
+    # NOT catch generic Exception (matches real PTB inheritance for tests
+    # that depend on except-clause ordering, e.g. send_telegram_message).
+    class _TelegramError(Exception):
+        pass
+    class _BadRequest(_TelegramError):
+        pass
+    class _NetworkError(_TelegramError):
+        pass
+    class _RetryAfter(_TelegramError):
+        def __init__(self, retry_after=0, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.retry_after = retry_after
     _tg_error = MagicMock()
-    _tg_error.BadRequest = Exception
-    _tg_error.NetworkError = Exception
-    _tg_error.RetryAfter = Exception
+    _tg_error.TelegramError = _TelegramError
+    _tg_error.BadRequest = _BadRequest
+    _tg_error.NetworkError = _NetworkError
+    _tg_error.RetryAfter = _RetryAfter
 
     # telegram.ext
     _tg_ext = MagicMock()

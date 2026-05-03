@@ -431,7 +431,7 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
             "Use 'to' to specify the target agent ID (e.g. 'coh', 'dos', 'ceo'). "
             "'message' is the natural language request to send. "
             "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
-            {"to": str, "message": str, "wait_response": bool, "mode": str, "context_hint": str},
+            {"to": str, "message": str, "wait_response": bool, "mode": str, "context_hint": str, "reply_channel": str, "reply_chat_id": str, "reply_intent": str},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
@@ -466,6 +466,31 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
     ]
     if send_message is not None:
         all_tools.append(send_message)
+    # ----- send_telegram_message (originator-authored Telegram feedback) -----
+    # Registered only when redis_a2a is wired and this agent has a Telegram
+    # token configured (so headless agents like DON skip it gracefully).
+    _stm_config = getattr(redis_a2a, "_config", None) if redis_a2a is not None else None
+    if _stm_config is not None and _stm_config.telegram_token_env:
+        from agent_runner.tools.send_telegram_message import create_send_telegram_message_tool
+        _send_telegram_fn = create_send_telegram_message_tool(_stm_config, redis_a2a)
+
+        @sdk_tool(
+            "send_telegram_message",
+            "Push a Telegram message to the user's chat OUTSIDE of an active stream. "
+            "Call ONLY from a continuation turn after an [A2A-CONTINUATION] envelope "
+            "drains. Triple-guarded: (1) refuses unless inside a continuation, "
+            "(2) refuses if reply_channel != 'telegram', (3) refuses if reply_chat_id "
+            "!= your allowed_chat_id. Idempotent: a 2nd call for the same "
+            "parent_correlation_id is a no-op (24h TTL). Pass 'text' = user-facing "
+            "summary in Italian, max ~4000 chars.",
+            {"text": str},
+        )
+        async def send_telegram_message(args: dict) -> dict:
+            args = _parse_args(args)
+            return _text(await _send_telegram_fn(args))
+
+        all_tools.append(send_telegram_message)
+
 
     try:
         server = create_sdk_mcp_server(name="don-tools", tools=all_tools)
