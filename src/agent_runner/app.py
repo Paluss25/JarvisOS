@@ -305,6 +305,7 @@ def create_app(config: AgentConfig) -> FastAPI:
                                 set_chain_context, reset_chain_context,
                             )
                             token = set_chain_context(chain_meta) if chain_meta else None
+                            turn_failed = False
                             try:
                                 await agent.query(
                                     prompt,
@@ -312,6 +313,7 @@ def create_app(config: AgentConfig) -> FastAPI:
                                     source="a2a",
                                 )
                             except Exception as exc:
+                                turn_failed = True
                                 logger.warning(
                                     "%s: inbox batch turn failed — %s",
                                     config.name, exc,
@@ -319,6 +321,24 @@ def create_app(config: AgentConfig) -> FastAPI:
                             finally:
                                 if token is not None:
                                     reset_chain_context(token)
+                            # On failure, requeue continuation envelopes so a
+                            # transient agent.query() error doesn't silently
+                            # drop the receiver's reply. Plain notifications
+                            # have no recovery semantics — they get logged
+                            # and dropped (legacy behaviour preserved).
+                            if turn_failed:
+                                for m in messages:
+                                    is_continuation = bool(
+                                        m.parent_correlation_id
+                                        and m.root_correlation_id
+                                    )
+                                    if not is_continuation:
+                                        continue
+                                    requeued = await inbox.requeue_with_retry(
+                                        m, max_retries=2
+                                    )
+                                    if not requeued:
+                                        await inbox.dead_letter(m)
                         except asyncio.CancelledError:
                             break
                         except Exception as exc:
