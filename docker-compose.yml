@@ -49,6 +49,14 @@ services:
       MT_MATTERMOST_CHANNEL_ID: "3ejph99crtrjtk5eeuc46fe4oa"
       PROMETHEUS_URL: "https://prometheus.prova9x.com"
       UNIFI_URL: "https://10.10.10.1"
+      # ── A2A async — per-agent timeout overrides ────────────────────────────
+      # Outer cap (agent_max_turn_s) must be >= inner stream_timeout_s + 30s.
+      # COH/DON: nutrition pipeline has many sequential tool calls + reasoning;
+      # 480s default leaves no headroom and times out mid-summary.
+      JARVIOS_STREAM_TIMEOUT_COH: "720"
+      JARVIOS_AGENT_MAX_TURN_S_COH: "780"
+      JARVIOS_STREAM_TIMEOUT_DON: "720"
+      JARVIOS_AGENT_MAX_TURN_S_DON: "780"
     labels:
       # Jarvis API — jarvis.prova9x.com
       - "traefik.enable=true"
