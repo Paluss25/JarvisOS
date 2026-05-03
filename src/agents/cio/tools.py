@@ -909,6 +909,8 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
                     "to": {"type": "string"},
                     "message": {"type": "string"},
                     "wait_response": {"type": "boolean", "default": True},
+                    "mode": {"type": "string", "enum": ["sync", "async"], "default": "sync", "description": "sync (default) blocks until reply. async returns instantly; reply arrives as a continuation envelope in a new turn — use for delegated long tasks (>30s)."},
+                    "context_hint": {"type": "string", "description": "Optional note (≤500 chars) attached to the pending entry and surfaced in the continuation prompt when async reply arrives."},
                 },
                 "required": ["to", "message"],
             },

@@ -41,6 +41,10 @@ _UNIT_TEST_FILES = {
     "test_telegram_webhook.py",
     "test_extractor.py",
     "test_coh_extractor.py",
+    "test_pending_store.py",
+    "test_send_message_async.py",
+    "test_inbox_retry.py",
+    "test_a2a_restart_safety.py",
 }
 
 _INTEGRATION_TEST_FILES = {
@@ -178,12 +182,19 @@ except ImportError:
     sys.modules["httpx"] = _httpx_mock
 
 if "redis" not in sys.modules:
-    _redis_mock = types.ModuleType("redis")
-    _redis_asyncio_mock = types.ModuleType("redis.asyncio")
-    _redis_asyncio_mock.Redis = MagicMock
-    _redis_mock.asyncio = _redis_asyncio_mock
-    sys.modules["redis"] = _redis_mock
-    sys.modules["redis.asyncio"] = _redis_asyncio_mock
+    # Try the real package first — tests like test_pending_store.py need a
+    # working redis.asyncio against a live Redis. Fall back to a mock only when
+    # redis-py is genuinely missing (some lean unit-test envs).
+    try:
+        import redis  # noqa: F401  pylint: disable=unused-import
+        import redis.asyncio  # noqa: F401  pylint: disable=unused-import
+    except ImportError:
+        _redis_mock = types.ModuleType("redis")
+        _redis_asyncio_mock = types.ModuleType("redis.asyncio")
+        _redis_asyncio_mock.Redis = MagicMock
+        _redis_mock.asyncio = _redis_asyncio_mock
+        sys.modules["redis"] = _redis_mock
+        sys.modules["redis.asyncio"] = _redis_asyncio_mock
 
 if "caldav" not in sys.modules:
     _caldav_mock = types.ModuleType("caldav")

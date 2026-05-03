@@ -21,7 +21,12 @@ from agent_runner.memory.daily_logger import DailyLogger
 from agent_runner.memory.session_manager import SessionManager
 from agent_runner.memory.pipeline import run_pipeline
 from agent_runner.memory.pipeline.queue import PipelineItem, PipelineQueue
-from agent_runner.telemetry import configure_logging, setup_telemetry
+from agent_runner.telemetry import (
+    A2A_RESPONSE_PUBLISHED,
+    A2A_STALE_PENDING_DRAINED,
+    configure_logging,
+    setup_telemetry,
+)
 
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -70,13 +75,29 @@ def create_app(config: AgentConfig) -> FastAPI:
 
         import os
 
-        # Redis A2A — create first so it can be passed to the MCP factory
+        # Redis A2A — create first so it can be passed to the MCP factory.
+        # Inbox + PendingResponseStore are constructed RIGHT AFTER the
+        # connection succeeds and attached to ``redis_a2a`` as private attrs
+        # (``_inbox`` / ``_pending_store``), so that ``create_send_message_tool``
+        # — which is invoked synchronously inside ``create_agent_client`` /
+        # ``_refresh_mcp_options`` below — can autodiscover them without
+        # requiring every agent factory's signature to be widened.
         redis_a2a: RedisA2A | None = None
         if os.environ.get("REDIS_URL"):
             try:
                 redis_a2a = RedisA2A(config.id)
                 await redis_a2a.connect()
                 logger.info("%s: Redis A2A connected", config.name)
+                # Inbox: per-agent Redis LIST for batched notification + async
+                # continuation delivery. Drain consumer started below in the
+                # subscriber wiring block.
+                _inbox_early = InboxQueue(config.id, redis_a2a.client)
+                # Pending store: per-cid Redis HASH for durable async
+                # request/response correlation across sender restarts.
+                from agent_runner.comms.pending_store import PendingResponseStore
+                _pending_store_early = PendingResponseStore(redis_a2a.client)
+                redis_a2a._inbox = _inbox_early           # type: ignore[attr-defined]
+                redis_a2a._pending_store = _pending_store_early  # type: ignore[attr-defined]
             except Exception as exc:
                 logger.warning("%s: Redis A2A init failed — %s", config.name, exc)
                 redis_a2a = None
@@ -96,12 +117,13 @@ def create_app(config: AgentConfig) -> FastAPI:
         # Wire up inbound A2A handler and start the listen loop
         if redis_a2a is not None:
             try:
-                # Inbox queue for batched notification consumption.
-                # Notifications are stored here and drained periodically by
-                # ``_inbox_drain_loop`` so multiple concurrent senders fold
-                # into a single agent turn instead of N parallel turns.
-                inbox = InboxQueue(config.id, redis_a2a.client)
+                # Reuse the inbox + pending_store already created and attached
+                # to ``redis_a2a`` above (so the MCP send_message tool — built
+                # before this block runs — can autodiscover them).
+                inbox = redis_a2a._inbox  # type: ignore[attr-defined]
+                pending_store = redis_a2a._pending_store  # type: ignore[attr-defined]
                 state["inbox"] = inbox
+                state["pending_store"] = pending_store
 
                 async def _handle_a2a(msg: A2AMessage) -> None:
                     """Callback: process inbound A2A messages.
@@ -179,22 +201,73 @@ def create_app(config: AgentConfig) -> FastAPI:
                         )
                         await redis_a2a.publish(busy_resp)
                         return
+                    # Hard-cap the agent turn so the sender never hangs waiting
+                    # for a wedged generation. The outer wait_for is the SAFETY
+                    # NET; agent.query() has its own inner stream timeout
+                    # (config.stream_timeout_s, default 480s). They are layered:
+                    # outer (config.agent_max_turn_s, default 600s) >= inner +
+                    # 30s margin (validated in BaseAgentClient.__init__).
+                    response_text: str | None = None
+                    error: str | None = None
                     try:
-                        response_text = await agent.query(
-                            f"[Message from {msg.from_agent}]\n\n{msg.payload}",
-                            session_id=f"a2a-{msg.from_agent}",
-                            source="a2a",
+                        response_text = await asyncio.wait_for(
+                            agent.query(
+                                f"[Message from {msg.from_agent}]\n\n{msg.payload}",
+                                session_id=f"a2a-{msg.from_agent}",
+                                source="a2a",
+                            ),
+                            timeout=config.agent_max_turn_s,
                         )
+                    except asyncio.TimeoutError:
+                        error = (
+                            f"agent turn exceeded {config.agent_max_turn_s:.0f}s "
+                            "(outer cap) — aborted"
+                        )
+                        logger.warning(
+                            "%s: a2a hard cap timeout for cid=%.8s from %s",
+                            config.name, msg.correlation_id or "n/a", msg.from_agent,
+                        )
+                    except Exception as exc:
+                        error = f"agent error: {type(exc).__name__}: {exc}"
+                        logger.warning(
+                            "%s: a2a handler error for cid=%.8s — %s",
+                            config.name, msg.correlation_id or "n/a", exc,
+                            exc_info=True,
+                        )
+                    finally:
+                        # CONTRACT: receiver MUST always publish a correlated
+                        # response, even on error/timeout, so the sender's
+                        # pending future / pending HASH is never leaked.
+                        payload = (
+                            response_text
+                            if response_text is not None
+                            else f"[ERROR: {error}]"
+                        )
+                        if response_text is not None:
+                            outcome = "success"
+                        elif error and "exceeded" in error:
+                            outcome = "timeout"
+                        else:
+                            outcome = "error"
                         response = A2AMessage(
                             from_agent=config.id,
                             to_agent=msg.from_agent,
                             type="response",
-                            payload=response_text,
+                            payload=payload,
                             correlation_id=msg.correlation_id,
                         )
-                        await redis_a2a.publish(response)
-                    except Exception as exc:
-                        logger.warning("%s: a2a handler error — %s", config.name, exc)
+                        try:
+                            await redis_a2a.publish(response)
+                        except Exception as pub_exc:
+                            outcome = "publish_failed"
+                            logger.error(
+                                "%s: CRITICAL — failed to publish A2A "
+                                "response for cid=%.8s — %s",
+                                config.name, msg.correlation_id or "n/a", pub_exc,
+                            )
+                        A2A_RESPONSE_PUBLISHED.labels(
+                            agent_id=config.id, outcome=outcome
+                        ).inc()
 
                 async def _inbox_drain_loop() -> None:
                     """Periodic consumer: drains the notification inbox into a
@@ -221,12 +294,33 @@ def create_app(config: AgentConfig) -> FastAPI:
                                 f"[Inbox batch — {len(messages)} pending "
                                 f"notification(s) since last drain]"
                             ]
+                            chain_meta = None
                             for i, m in enumerate(messages, 1):
                                 parts.append(
                                     f"\n--- {i}. From {m.from_agent} "
                                     f"({m.timestamp}) ---\n{m.payload}"
                                 )
+                                # First continuation in batch sets the chain
+                                # context — subsequent async sends inside this
+                                # follow-up turn inherit hop_count from it so
+                                # the loop guard can enforce max_hops across
+                                # turn boundaries.
+                                if (
+                                    chain_meta is None
+                                    and m.parent_correlation_id
+                                    and m.root_correlation_id
+                                ):
+                                    chain_meta = {
+                                        "root_correlation_id": m.root_correlation_id,
+                                        "parent_correlation_id": m.parent_correlation_id,
+                                        "hop_count": int(m.hop_count or 0),
+                                    }
                             prompt = "\n".join(parts)
+                            from agent_runner.comms.chain_context import (
+                                set_chain_context, reset_chain_context,
+                            )
+                            token = set_chain_context(chain_meta) if chain_meta else None
+                            turn_failed = False
                             try:
                                 await agent.query(
                                     prompt,
@@ -234,10 +328,32 @@ def create_app(config: AgentConfig) -> FastAPI:
                                     source="a2a",
                                 )
                             except Exception as exc:
+                                turn_failed = True
                                 logger.warning(
                                     "%s: inbox batch turn failed — %s",
                                     config.name, exc,
                                 )
+                            finally:
+                                if token is not None:
+                                    reset_chain_context(token)
+                            # On failure, requeue continuation envelopes so a
+                            # transient agent.query() error doesn't silently
+                            # drop the receiver's reply. Plain notifications
+                            # have no recovery semantics — they get logged
+                            # and dropped (legacy behaviour preserved).
+                            if turn_failed:
+                                for m in messages:
+                                    is_continuation = bool(
+                                        m.parent_correlation_id
+                                        and m.root_correlation_id
+                                    )
+                                    if not is_continuation:
+                                        continue
+                                    requeued = await inbox.requeue_with_retry(
+                                        m, max_retries=2
+                                    )
+                                    if not requeued:
+                                        await inbox.dead_letter(m)
                         except asyncio.CancelledError:
                             break
                         except Exception as exc:
@@ -254,6 +370,57 @@ def create_app(config: AgentConfig) -> FastAPI:
                 logger.info(
                     "%s: Redis A2A subscriber + inbox drain (every %.0fs) started",
                     config.name, drain_interval,
+                )
+
+                # ----- Restart-safety: drain stale pending requests --------
+                # When a receiver crashes mid-processing, the request envelope
+                # has already left the pub/sub channel but no response was
+                # published. The pending-store HASH still exists at the
+                # SENDER side. To prevent senders from waiting until TTL
+                # expiry (24h), at startup we scan for stale pending entries
+                # addressed to us and emit an explicit error response so the
+                # sender's continuation fires with a clear failure message.
+                async def _drain_stale_pending() -> None:
+                    try:
+                        stale = await pending_store.scan_stale(
+                            agent_id=config.id, older_than_s=300.0
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "%s: stale pending scan failed — %s",
+                            config.name, exc,
+                        )
+                        return
+                    if not stale:
+                        return
+                    logger.warning(
+                        "%s: draining %d stale pending request(s) at startup",
+                        config.name, len(stale),
+                    )
+                    A2A_STALE_PENDING_DRAINED.labels(agent_id=config.id).inc(len(stale))
+                    for entry in stale:
+                        err = A2AMessage(
+                            from_agent=config.id,
+                            to_agent=entry.from_agent,
+                            type="response",
+                            payload=(
+                                f"[ERROR: receiver '{config.id}' restarted "
+                                f"while processing — request dropped at "
+                                f"startup scan. cid={entry.correlation_id[:8]}]"
+                            ),
+                            correlation_id=entry.correlation_id,
+                        )
+                        try:
+                            await redis_a2a.publish(err)
+                        except Exception as pub_exc:
+                            logger.warning(
+                                "%s: failed to publish stale-drain "
+                                "error response for cid=%.8s — %s",
+                                config.name, entry.correlation_id, pub_exc,
+                            )
+
+                state["stale_pending_task"] = asyncio.create_task(
+                    _drain_stale_pending()
                 )
             except Exception as exc:
                 logger.warning("%s: Redis A2A subscriber failed — %s", config.name, exc)
@@ -342,7 +509,8 @@ def create_app(config: AgentConfig) -> FastAPI:
         # Shutdown
         logger.info("%s: shutting down…", config.name)
         for key in ("telegram_task", "scheduler_task", "pipeline_task", "redis_a2a_task",
-                    "inbox_drain_task", "slack_task", "discord_task", "mattermost_task"):
+                    "inbox_drain_task", "stale_pending_task",
+                    "slack_task", "discord_task", "mattermost_task"):
             task = state.get(key)
             if task and not task.done():
                 task.cancel()

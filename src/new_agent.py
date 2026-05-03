@@ -365,7 +365,7 @@ def _render_tools(id_: str, name: str) -> str:
                     "Send a message to another agent and wait for their response. "
                     "Use 'to' to specify the target agent ID (e.g. 'ceo'). "
                     "'message' is the natural language request to send.",
-                    {{"to": str, "message": str}},
+                    {{"to": str, "message": str, "mode": str, "context_hint": str}},
                 )
                 async def send_message(args: dict) -> dict:
                     args = _parse_args(args)
