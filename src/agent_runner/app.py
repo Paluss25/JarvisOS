@@ -70,13 +70,29 @@ def create_app(config: AgentConfig) -> FastAPI:
 
         import os
 
-        # Redis A2A — create first so it can be passed to the MCP factory
+        # Redis A2A — create first so it can be passed to the MCP factory.
+        # Inbox + PendingResponseStore are constructed RIGHT AFTER the
+        # connection succeeds and attached to ``redis_a2a`` as private attrs
+        # (``_inbox`` / ``_pending_store``), so that ``create_send_message_tool``
+        # — which is invoked synchronously inside ``create_agent_client`` /
+        # ``_refresh_mcp_options`` below — can autodiscover them without
+        # requiring every agent factory's signature to be widened.
         redis_a2a: RedisA2A | None = None
         if os.environ.get("REDIS_URL"):
             try:
                 redis_a2a = RedisA2A(config.id)
                 await redis_a2a.connect()
                 logger.info("%s: Redis A2A connected", config.name)
+                # Inbox: per-agent Redis LIST for batched notification + async
+                # continuation delivery. Drain consumer started below in the
+                # subscriber wiring block.
+                _inbox_early = InboxQueue(config.id, redis_a2a.client)
+                # Pending store: per-cid Redis HASH for durable async
+                # request/response correlation across sender restarts.
+                from agent_runner.comms.pending_store import PendingResponseStore
+                _pending_store_early = PendingResponseStore(redis_a2a.client)
+                redis_a2a._inbox = _inbox_early           # type: ignore[attr-defined]
+                redis_a2a._pending_store = _pending_store_early  # type: ignore[attr-defined]
             except Exception as exc:
                 logger.warning("%s: Redis A2A init failed — %s", config.name, exc)
                 redis_a2a = None
@@ -96,12 +112,13 @@ def create_app(config: AgentConfig) -> FastAPI:
         # Wire up inbound A2A handler and start the listen loop
         if redis_a2a is not None:
             try:
-                # Inbox queue for batched notification consumption.
-                # Notifications are stored here and drained periodically by
-                # ``_inbox_drain_loop`` so multiple concurrent senders fold
-                # into a single agent turn instead of N parallel turns.
-                inbox = InboxQueue(config.id, redis_a2a.client)
+                # Reuse the inbox + pending_store already created and attached
+                # to ``redis_a2a`` above (so the MCP send_message tool — built
+                # before this block runs — can autodiscover them).
+                inbox = redis_a2a._inbox  # type: ignore[attr-defined]
+                pending_store = redis_a2a._pending_store  # type: ignore[attr-defined]
                 state["inbox"] = inbox
+                state["pending_store"] = pending_store
 
                 async def _handle_a2a(msg: A2AMessage) -> None:
                     """Callback: process inbound A2A messages.
@@ -262,12 +279,32 @@ def create_app(config: AgentConfig) -> FastAPI:
                                 f"[Inbox batch — {len(messages)} pending "
                                 f"notification(s) since last drain]"
                             ]
+                            chain_meta = None
                             for i, m in enumerate(messages, 1):
                                 parts.append(
                                     f"\n--- {i}. From {m.from_agent} "
                                     f"({m.timestamp}) ---\n{m.payload}"
                                 )
+                                # First continuation in batch sets the chain
+                                # context — subsequent async sends inside this
+                                # follow-up turn inherit hop_count from it so
+                                # the loop guard can enforce max_hops across
+                                # turn boundaries.
+                                if (
+                                    chain_meta is None
+                                    and m.parent_correlation_id
+                                    and m.root_correlation_id
+                                ):
+                                    chain_meta = {
+                                        "root_correlation_id": m.root_correlation_id,
+                                        "parent_correlation_id": m.parent_correlation_id,
+                                        "hop_count": int(m.hop_count or 0),
+                                    }
                             prompt = "\n".join(parts)
+                            from agent_runner.comms.chain_context import (
+                                set_chain_context, reset_chain_context,
+                            )
+                            token = set_chain_context(chain_meta) if chain_meta else None
                             try:
                                 await agent.query(
                                     prompt,
@@ -279,6 +316,9 @@ def create_app(config: AgentConfig) -> FastAPI:
                                     "%s: inbox batch turn failed — %s",
                                     config.name, exc,
                                 )
+                            finally:
+                                if token is not None:
+                                    reset_chain_context(token)
                         except asyncio.CancelledError:
                             break
                         except Exception as exc:

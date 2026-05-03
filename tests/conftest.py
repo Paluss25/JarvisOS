@@ -42,6 +42,7 @@ _UNIT_TEST_FILES = {
     "test_extractor.py",
     "test_coh_extractor.py",
     "test_pending_store.py",
+    "test_send_message_async.py",
 }
 
 _INTEGRATION_TEST_FILES = {

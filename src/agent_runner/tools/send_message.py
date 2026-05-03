@@ -1,24 +1,37 @@
 """send_message MCP tool — generic inter-agent communication via Redis + HTTP fallback.
 
-Two delivery modes:
-- ``wait_response=True``  (default, backward-compatible) → publishes a ``request``
-  envelope, awaits the receiver's correlated ``response``, returns the response
-  text. Used for queries that need a reply ("ping", "lookup", "ask").
-- ``wait_response=False`` → publishes a ``notification`` envelope and returns
-  immediately with the message id. Used for one-way broadcasts (morning briefings,
-  FYI copies, status updates) where the sender does not consume the receiver's
-  reasoning. Eliminates the head-of-line blocking that inflates p95 latency
-  when the receiver runs a long turn.
+Three delivery modes:
+
+- ``mode='sync'`` + ``wait_response=True``  (default, backward-compatible)
+  → publishes a ``request`` envelope, awaits the receiver's correlated
+  ``response``, returns the response text. Blocks the sender's turn for up
+  to ~120s (240–300s for don/dos). Use ONLY for data needed *now* to
+  continue reasoning in the same turn.
+
+- ``mode='async'`` → publishes a ``request`` envelope, persists pending state
+  in Redis (``a2a:pending:<cid>`` HASH), returns INSTANTLY with an
+  ``[Async dispatched cid=...]`` ack. When the receiver eventually replies,
+  the response handler routes the payload as a continuation envelope into
+  the sender's own InboxQueue, triggering a new turn. Use for long tasks
+  (>30s) and anything that doesn't strictly need the answer in this turn.
+
+- ``wait_response=False`` (legacy notification) → publishes a ``notification``
+  envelope. Receiver's drain loop folds it into a batched turn. No
+  correlation, no continuation. Used for FYI copies and morning briefings.
 """
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 
 import httpx
 
+from agent_runner.comms.chain_context import read_chain_context
+from agent_runner.comms.inbox import InboxQueue
 from agent_runner.comms.message import A2AMessage
+from agent_runner.comms.pending_store import PendingEntry, PendingResponseStore
 from agent_runner.comms.redis_pubsub import RedisA2A
 from agent_runner.registry import get_agent_entry
 
@@ -30,6 +43,77 @@ _AGENT_TIMEOUTS: dict[str, float] = {
     "don": 300.0,   # NutritionDirector: thinking mode + multiple nutrition_execute calls
     "dos": 240.0,   # DirectorOfSport: training plan generation + DB writes
 }
+
+# Async chain loop guard. The tool refuses to dispatch a new async send when
+# ``hop_count >= MAX_HOPS``, so an unbounded CEO→CIO→COS→… cascade cannot
+# build up. Override per-deployment via env (e.g. set lower for testing).
+MAX_HOPS = int(os.environ.get("JARVIOS_A2A_MAX_HOPS", "5"))
+
+
+def _coerce_mode(value, default: str = "sync") -> str:
+    """Normalize the ``mode`` arg to one of {'sync', 'async'}."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("sync", "async"):
+            return v
+    return default
+
+
+def _truncate(s: str | None, limit: int) -> str | None:
+    if not s:
+        return None
+    s = s.strip()
+    if not s:
+        return None
+    return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def _build_continuation_envelope(
+    self_id: str, entry: PendingEntry, response: A2AMessage
+) -> A2AMessage:
+    """Build the continuation envelope that gets pushed onto the sender's own
+    inbox when an async response arrives. The drain loop will fold this
+    (along with any other queued items) into a fresh agent turn.
+
+    The envelope is self-contained: original request, recipient, reply text,
+    correlation chain, and (if set) the caller's original context hint. The
+    receiving agent doesn't need any state from the original turn.
+    """
+    parts = [
+        f"[A2A-CONTINUATION] You previously sent an async request "
+        f"(cid={entry.correlation_id[:8]}, "
+        f"root={(entry.root_correlation_id or entry.correlation_id)[:8]}, "
+        f"hop={entry.hop_count}/{entry.max_hops}).",
+        f"Recipient: {entry.to_agent}",
+        f"Original request: {entry.original_message}",
+    ]
+    if entry.context_hint:
+        parts.append(f"Your original context note: {entry.context_hint}")
+    parts.append(f"--- Reply from {response.from_agent} ---")
+    parts.append(response.payload)
+    parts.append("--- End of reply ---")
+    parts.append(
+        "Continue your work using this information. Do NOT re-send the same "
+        "async request. If further work is needed, call the next tool or "
+        "send the next message; otherwise summarise the result."
+    )
+    return A2AMessage(
+        # Logical from = the responder; to = ourselves. We piggyback on the
+        # existing notification path because the inbox drain loop already
+        # batches non-request envelopes into a single follow-up turn.
+        from_agent=response.from_agent,
+        to_agent=self_id,
+        type="notification",
+        payload="\n".join(parts),
+        correlation_id=entry.correlation_id,
+        mode="async",
+        root_correlation_id=entry.root_correlation_id or entry.correlation_id,
+        parent_correlation_id=entry.correlation_id,
+        hop_count=entry.hop_count,
+        max_hops=entry.max_hops,
+    )
 
 
 def _coerce_bool(value, default: bool = True) -> bool:
@@ -49,17 +133,37 @@ def _coerce_bool(value, default: bool = True) -> bool:
     return default
 
 
-def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
-    """Return the send_message async function bound to this agent's Redis transport.
+def create_send_message_tool(
+    agent_id: str,
+    redis_a2a: RedisA2A,
+    pending_store: PendingResponseStore | None = None,
+    inbox: InboxQueue | None = None,
+):
+    """Return the send_message async function bound to this agent's transport.
 
-    The returned function is suitable for registration with the MCP sdk_tool decorator.
-    By default it sends a request and waits for a correlated response. Pass
-    ``wait_response=False`` for fire-and-forget notifications.
+    The returned function is suitable for registration with the MCP sdk_tool
+    decorator. By default it sends a request and waits for a correlated
+    response (legacy sync mode). Pass ``wait_response=False`` for one-way
+    notifications, or ``mode='async'`` for fire-and-continue.
 
     Args:
-        agent_id: This agent's ID (used as from_agent in the envelope).
+        agent_id: This agent's ID (used as ``from_agent`` in the envelope).
         redis_a2a: Shared RedisA2A instance (already connected in lifespan).
+        pending_store: Required to use ``mode='async'``. Persists pending
+            state in Redis HASH so continuations survive sender restarts.
+            If None, falls back to ``redis_a2a._pending_store`` (set by
+            :mod:`agent_runner.app` lifespan) — letting agent factories
+            keep their two-arg signature.
+        inbox: Required to deliver continuation envelopes. Falls back to
+            ``redis_a2a._inbox`` for the same reason.
     """
+    # Auto-discover from the redis_a2a instance if the factory didn't pass
+    # them explicitly (the agent-side factories all use the legacy
+    # two-argument call shape). app.py wires these attrs in lifespan.
+    if pending_store is None:
+        pending_store = getattr(redis_a2a, "_pending_store", None)
+    if inbox is None:
+        inbox = getattr(redis_a2a, "_inbox", None)
     # Pending futures keyed by correlation_id — resolved by the response callback.
     # Each entry stores (future, expected_from) so we can verify the response
     # actually came from the target agent we addressed.
@@ -73,16 +177,65 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
     _COOLDOWN_MIN_FAILS: int = 2
 
     async def _handle_response(msg: A2AMessage) -> None:
-        """Callback registered with redis_a2a — resolves pending request futures."""
-        if msg.type != "response":
+        """Callback registered with redis_a2a — routes responses two ways:
+
+        1. ``mode='async'`` (durable pending HASH claim) → push a continuation
+           envelope into our own inbox so the next drain triggers a new turn
+           with the receiver's reply as context.
+        2. ``mode='sync'`` (in-memory Future) → resolve the awaiter so the
+           current send_message call returns the payload.
+
+        Atomic claim from the pending store guarantees exactly-one
+        continuation per response, even if Redis pub/sub redelivers.
+        """
+        if msg.type != "response" or not msg.correlation_id:
             return
-        entry = _pending.get(msg.correlation_id)
-        if entry is None:
+
+        # ----- Async path: durable pending → continuation envelope -----
+        if pending_store is not None:
+            entry = await pending_store.claim(msg.correlation_id)
+            if entry is not None and entry.mode == "async":
+                if entry.from_agent != agent_id:
+                    # Pending was for someone else; we shouldn't have claimed it.
+                    # Defensive: best-effort restore is racy, so just warn.
+                    logger.warning(
+                        "send_message[%s]: claimed pending cid=%.8s but "
+                        "from_agent=%s ≠ self — leaking continuation",
+                        agent_id, msg.correlation_id, entry.from_agent,
+                    )
+                if inbox is None:
+                    logger.warning(
+                        "send_message[%s]: cid=%.8s response arrived but "
+                        "inbox is None — dropping continuation",
+                        agent_id, msg.correlation_id,
+                    )
+                    return
+                continuation = _build_continuation_envelope(
+                    self_id=agent_id, entry=entry, response=msg
+                )
+                try:
+                    await inbox.push(continuation)
+                    logger.info(
+                        "send_message[%s]: cid=%.8s async response from %s "
+                        "→ pushed continuation envelope (hop=%d, root=%.8s)",
+                        agent_id, msg.correlation_id, msg.from_agent,
+                        entry.hop_count,
+                        entry.root_correlation_id or "n/a",
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "send_message[%s]: cid=%.8s failed to push "
+                        "continuation envelope — %s",
+                        agent_id, msg.correlation_id, exc,
+                    )
+                return
+
+        # ----- Sync path: in-memory Future resolution (legacy) -----
+        fut_entry = _pending.get(msg.correlation_id)
+        if fut_entry is None:
             return
-        fut, expected_from = entry
+        fut, expected_from = fut_entry
         if msg.from_agent != expected_from:
-            # Stray response with a colliding correlation_id from another agent.
-            # Drop it instead of resolving the wrong future.
             logger.warning(
                 "send_message[%s]: response with cid=%.8s from '%s' "
                 "but expected '%s' — discarding",
@@ -98,23 +251,108 @@ def create_send_message_tool(agent_id: str, redis_a2a: RedisA2A):
         """Send a message to another agent.
 
         Args (in dict):
-            to: Target agent ID (e.g. "dos", "ceo")
-            message: Natural language message to send
-            wait_response: If True (default) wait for the agent's reply. Set False
-                for one-way notifications (morning briefings, FYI copies) — returns
-                immediately with the message id, no head-of-line blocking on the
-                receiver's reasoning loop.
+            to: Target agent ID (e.g. "dos", "ceo").
+            message: Natural language message to send.
+            mode: ``'sync'`` (default) blocks the current turn until the target
+                replies (or 120–300s timeout). ``'async'`` returns instantly
+                with an ack; the reply arrives later as a new turn with the
+                full context. Use async for tasks >30s.
+            wait_response: legacy flag. ``False`` sends a one-way notification
+                (no correlation, no continuation). Mutually exclusive with
+                ``mode='async'``.
+            context_hint: optional, max ~500 chars. Persisted with the pending
+                entry and surfaced in the continuation prompt to remind the
+                agent why it sent the request.
         Returns:
-            The target agent's response text (when wait_response=True), or a
-            short ``"[Sent: <id>]"`` ack (when wait_response=False), or an error.
+            On ``mode='async'``: ``"[Async dispatched cid=<8> → <to>]"``.
+            On ``mode='sync'``+``wait_response=True``: the target's response.
+            On ``wait_response=False``: ``"[Sent notification <id> to <to>]"``.
+            On error: a string starting with ``"Error: "``.
         """
         to = (args.get("to") or "").strip()
         message = (args.get("message") or "").strip()
         wait_response = _coerce_bool(args.get("wait_response"), default=True)
+        mode = _coerce_mode(args.get("mode"), default="sync")
         if not to:
             return "Error: 'to' (target agent ID) is required."
         if not message:
             return "Error: 'message' is required."
+
+        # Mutual exclusion: async mode IS request/response, just decoupled
+        # from the sender's turn. wait_response=False is the legacy
+        # notification path with no correlation at all.
+        if mode == "async" and not wait_response:
+            return (
+                "Error: mode='async' is incompatible with wait_response=False. "
+                "Use mode='async' (correlated, continuation-routed) OR "
+                "wait_response=False (one-way notification), not both."
+            )
+
+        # ----- Async fire-and-continue path -----
+        if mode == "async":
+            if pending_store is None or inbox is None:
+                return (
+                    "Error: async mode unavailable — pending_store/inbox "
+                    "not wired in this build. Use mode='sync' or "
+                    "wait_response=False."
+                )
+            chain = read_chain_context()
+            current_hop = chain["hop_count"] if chain else 0
+            if current_hop >= MAX_HOPS:
+                return (
+                    f"Error: async chain hop limit ({MAX_HOPS}) reached "
+                    f"(root={chain['root_correlation_id'][:8] if chain else 'n/a'}). "
+                    "Aborting to prevent runaway cascade. Reply directly "
+                    "instead of dispatching another async send."
+                )
+            correlation_id = str(uuid.uuid4())
+            new_hop = current_hop + 1
+            root_cid = chain["root_correlation_id"] if chain else correlation_id
+            parent_cid = chain["parent_correlation_id"] if chain else None
+            envelope = A2AMessage(
+                from_agent=agent_id, to_agent=to,
+                type="request", payload=message,
+                correlation_id=correlation_id,
+                mode="async",
+                root_correlation_id=root_cid,
+                parent_correlation_id=parent_cid,
+                hop_count=new_hop,
+                max_hops=MAX_HOPS,
+            )
+            entry = PendingEntry(
+                correlation_id=correlation_id,
+                from_agent=agent_id, to_agent=to,
+                original_message=message,
+                sent_at=time.time(),
+                mode="async",
+                root_correlation_id=root_cid,
+                hop_count=new_hop,
+                max_hops=MAX_HOPS,
+                context_hint=_truncate(args.get("context_hint"), 500),
+            )
+            try:
+                await pending_store.put(entry)
+            except Exception as exc:
+                logger.warning(
+                    "send_message[%s→%s]: pending_store.put failed (%s)",
+                    agent_id, to, exc,
+                )
+                return f"Error: async dispatch failed (pending store): {exc}"
+            try:
+                await redis_a2a.publish(envelope)
+            except Exception as exc:
+                # Pending entry stays — sender startup scan or TTL handles it.
+                logger.warning(
+                    "send_message[%s→%s]: async publish failed (%s) — "
+                    "pending entry retained for cleanup",
+                    agent_id, to, exc,
+                )
+                return f"Error: async publish failed: {exc}"
+            return (
+                f"[Async dispatched cid={correlation_id[:8]} → {to}. "
+                "Continue your turn; the reply will arrive as a new turn "
+                "with full context.]"
+            )
 
         msg_type = "request" if wait_response else "notification"
 
