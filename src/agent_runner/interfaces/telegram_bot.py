@@ -1356,6 +1356,19 @@ async def _stream_to_agent(
             except Exception as final_exc:
                 logger.error("telegram: all error notification fallbacks failed — %s", final_exc)
 
+    # Auto-inject the originator's reply-routing into the chain context so
+    # any send_message(mode='async') in this turn persists reply_channel /
+    # reply_chat_id on the PendingEntry without the LLM having to pass them.
+    # The continuation turn then has the data available via read_chain_context()
+    # for send_telegram_message's triple-guard. See:
+    # projects/jarvios-async-feedback-loop/2026-05-03-jarvios-async-feedback-loop.md
+    from agent_runner.comms.chain_context import set_chain_context, reset_chain_context
+    _chain_token = set_chain_context({
+        "reply_channel": "telegram",
+        "reply_chat_id": str(chat_id),
+        "reply_intent": None,  # filled in optionally by the LLM via the arg
+    })
+
     try:
         async for chunk in agent.stream(text, session_id=session_id):
             # Abort fence: a newer message arrived for this chat — stop this stream
@@ -1427,6 +1440,7 @@ async def _stream_to_agent(
     finally:
         _stop_tasks()
         await _drain_tasks()
+        reset_chain_context(_chain_token)
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1789,6 +1803,15 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if not t.done():
                 t.cancel()
 
+    # Same chain-context auto-injection as the text path so async A2A
+    # delegations from a voice turn also persist reply_channel / reply_chat_id.
+    from agent_runner.comms.chain_context import set_chain_context, reset_chain_context
+    _voice_chain_token = set_chain_context({
+        "reply_channel": "telegram",
+        "reply_chat_id": str(chat_id),
+        "reply_intent": None,
+    })
+
     try:
         async for chunk in agent.stream(text, session_id=session_id):
             if _chat_generations.get(chat_id) != my_gen:
@@ -1867,6 +1890,7 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     finally:
         _stop()
         await asyncio.gather(*tasks, return_exceptions=True)
+        reset_chain_context(_voice_chain_token)
 
 
 async def _handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

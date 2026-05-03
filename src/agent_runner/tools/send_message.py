@@ -301,18 +301,22 @@ def create_send_message_tool(
                     "wait_response=False."
                 )
             chain = read_chain_context()
-            current_hop = chain["hop_count"] if chain else 0
+            # Chain may now be a partial dict (e.g. only reply_channel /
+            # reply_chat_id, set at the START of a user-facing turn) — use
+            # ``.get()`` with safe defaults instead of subscript access.
+            current_hop = int(chain.get("hop_count", 0)) if chain else 0
             if current_hop >= MAX_HOPS:
+                root = chain.get("root_correlation_id") if chain else None
                 return (
                     f"Error: async chain hop limit ({MAX_HOPS}) reached "
-                    f"(root={chain['root_correlation_id'][:8] if chain else 'n/a'}). "
+                    f"(root={(root or 'n/a')[:8]}). "
                     "Aborting to prevent runaway cascade. Reply directly "
                     "instead of dispatching another async send."
                 )
             correlation_id = str(uuid.uuid4())
             new_hop = current_hop + 1
-            root_cid = chain["root_correlation_id"] if chain else correlation_id
-            parent_cid = chain["parent_correlation_id"] if chain else None
+            root_cid = (chain.get("root_correlation_id") if chain else None) or correlation_id
+            parent_cid = chain.get("parent_correlation_id") if chain else None
             envelope = A2AMessage(
                 from_agent=agent_id, to_agent=to,
                 type="request", payload=message,
