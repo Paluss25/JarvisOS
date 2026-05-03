@@ -393,7 +393,7 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
             "FYI copies, status broadcasts) — returns immediately without blocking "
             "on the receiver's reasoning. Default true preserves request/response "
             "semantics: the call blocks until the target agent replies.",
-            {"to": str, "message": str, "wait_response": bool},
+            {"to": str, "message": str, "wait_response": bool, "mode": str, "context_hint": str},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)

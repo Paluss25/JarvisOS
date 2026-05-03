@@ -42,6 +42,20 @@ AGENT_BUSY = Gauge(
     ["agent_id"],
 )
 
+# ── A2A async routing metrics (P0.T3 + P4.T1 deferred steps) ─────────────────
+
+A2A_RESPONSE_PUBLISHED = Counter(
+    "jarvios_a2a_response_published_total",
+    "A2A responses published by _handle_a2a, by outcome",
+    ["agent_id", "outcome"],  # outcome: success | timeout | error | publish_failed
+)
+
+A2A_STALE_PENDING_DRAINED = Counter(
+    "jarvios_a2a_stale_pending_drained_total",
+    "Stale pending A2A requests drained at receiver startup with error sentinel",
+    ["agent_id"],
+)
+
 # ── OpenTelemetry setup ──────────────────────────────────────────────────────
 
 _setup_done = False

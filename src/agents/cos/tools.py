@@ -191,7 +191,7 @@ def create_chief_of_staff_mcp_server(workspace_path: Path, redis_a2a=None):
             "Use 'to' to specify the target agent ID (e.g. 'ceo', 'cio'). "
             "'message' is the natural language request to send. "
             "Set wait_response=false for one-way notifications; default true blocks until reply.",
-            {"to": str, "message": str, "wait_response": bool},
+            {"to": str, "message": str, "wait_response": bool, "mode": str, "context_hint": str},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)

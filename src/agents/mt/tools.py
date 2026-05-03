@@ -346,7 +346,7 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
             "send_message",
             "Send a message to another agent and wait for their response. "
             "Set wait_response=false for one-way notifications; default true blocks until reply.",
-            {"to": str, "message": str, "wait_response": bool},
+            {"to": str, "message": str, "wait_response": bool, "mode": str, "context_hint": str},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)

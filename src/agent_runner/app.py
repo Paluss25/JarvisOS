@@ -21,7 +21,12 @@ from agent_runner.memory.daily_logger import DailyLogger
 from agent_runner.memory.session_manager import SessionManager
 from agent_runner.memory.pipeline import run_pipeline
 from agent_runner.memory.pipeline.queue import PipelineItem, PipelineQueue
-from agent_runner.telemetry import configure_logging, setup_telemetry
+from agent_runner.telemetry import (
+    A2A_RESPONSE_PUBLISHED,
+    A2A_STALE_PENDING_DRAINED,
+    configure_logging,
+    setup_telemetry,
+)
 
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -238,6 +243,12 @@ def create_app(config: AgentConfig) -> FastAPI:
                             if response_text is not None
                             else f"[ERROR: {error}]"
                         )
+                        if response_text is not None:
+                            outcome = "success"
+                        elif error and "exceeded" in error:
+                            outcome = "timeout"
+                        else:
+                            outcome = "error"
                         response = A2AMessage(
                             from_agent=config.id,
                             to_agent=msg.from_agent,
@@ -248,11 +259,15 @@ def create_app(config: AgentConfig) -> FastAPI:
                         try:
                             await redis_a2a.publish(response)
                         except Exception as pub_exc:
+                            outcome = "publish_failed"
                             logger.error(
                                 "%s: CRITICAL — failed to publish A2A "
                                 "response for cid=%.8s — %s",
                                 config.name, msg.correlation_id or "n/a", pub_exc,
                             )
+                        A2A_RESPONSE_PUBLISHED.labels(
+                            agent_id=config.id, outcome=outcome
+                        ).inc()
 
                 async def _inbox_drain_loop() -> None:
                     """Periodic consumer: drains the notification inbox into a
@@ -382,6 +397,7 @@ def create_app(config: AgentConfig) -> FastAPI:
                         "%s: draining %d stale pending request(s) at startup",
                         config.name, len(stale),
                     )
+                    A2A_STALE_PENDING_DRAINED.labels(agent_id=config.id).inc(len(stale))
                     for entry in stale:
                         err = A2AMessage(
                             from_agent=config.id,

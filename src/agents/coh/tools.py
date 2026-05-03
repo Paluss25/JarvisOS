@@ -535,7 +535,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             "Use 'to' to specify the target agent ID (e.g. 'dos', 'ceo'). "
             "'message' is the natural language request to send. "
             "Set wait_response=false for one-way notifications (morning briefings, FYI copies, status broadcasts) — returns immediately without blocking on the receiver's reasoning. Default true preserves request/response semantics: the call blocks until the target agent replies.",
-            {"type": "object", "properties": {"to": {"type": "string"}, "message": {"type": "string"}, "wait_response": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "default": True}}, "required": ["to", "message"]},
+            {"type": "object", "properties": {"to": {"type": "string"}, "message": {"type": "string"}, "wait_response": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "default": True}, "mode": {"type": "string", "enum": ["sync", "async"], "default": "sync"}, "context_hint": {"type": "string"}}, "required": ["to", "message"]},
         )
         async def send_message(args: dict) -> dict:
             args = _parse_args(args)
