@@ -57,6 +57,13 @@ services:
       JARVIOS_AGENT_MAX_TURN_S_COH: "780"
       JARVIOS_STREAM_TIMEOUT_DON: "720"
       JARVIOS_AGENT_MAX_TURN_S_DON: "780"
+      # Disable extended thinking for COH/DON — nutrition logging is
+      # high-frequency, low-ambiguity work. Extended thinking adds 1000+
+      # invisible tokens per turn that don't improve a meal-summary; on
+      # 30+ logs per day the saved latency adds up. Per-agent override via
+      # env_prefix (DRHOUSE_/NUTRITION_) so other agents keep thinking on.
+      DRHOUSE_CLAUDE_THINKING: "false"
+      NUTRITION_CLAUDE_THINKING: "false"
     labels:
       # Jarvis API — jarvis.prova9x.com
       - "traefik.enable=true"
