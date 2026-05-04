@@ -50,6 +50,7 @@ _UNIT_TEST_FILES = {
     "test_eia_finance_autoforward.py",
     "test_email_extraction_writes.py",
     "test_send_telegram_message.py",
+    "test_ynab_cli.py",
 }
 
 _INTEGRATION_TEST_FILES = {
