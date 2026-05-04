@@ -94,10 +94,7 @@ def build_mt_config(workspace_root: Path = Path("/app/workspace/mt")) -> AgentCo
         memory_backend="filesystem",
         mcp_server_factory=create_mt_mcp_server,
         a2a_fast_path=mt_fast_path,
-        extra_mcp_servers={
-            "protonmail-email": {"type": "sse", "url": "http://protonmail-mcp:3000/sse"},
-            "gmx-email": {"type": "sse", "url": "http://gmx-mcp:3001/sse"},
-        },
+        extra_mcp_servers={},
         builtin_crons=MT_BUILTIN_CRONS,
         allowed_tools=[
             "Bash", "Read", "Write", "Edit",

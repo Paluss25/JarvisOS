@@ -494,7 +494,7 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "sort_email",
-        "Move an email to the appropriate folder via the account-specific email-mcp /sort endpoint.",
+        "Move an email to the appropriate folder via mailctl.",
         {"email_id": str, "payload_json": str},
     )
     async def sort_email_tool(args: dict) -> dict:

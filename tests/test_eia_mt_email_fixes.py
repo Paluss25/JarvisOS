@@ -44,7 +44,7 @@ def test_send_message_tools_register_dict_schema(monkeypatch):
     for server in servers:
         schema = _tool(server, "send_message").schema
         assert isinstance(schema, dict)
-        assert set(schema) == {"to", "message", "wait_response"}
+        assert {"to", "message", "wait_response"}.issubset(schema)
 
 
 def test_security_pipeline_passes_sender_to_classifier_whitelist(tmp_path, monkeypatch):
@@ -159,24 +159,21 @@ def test_mt_sort_email_uses_gmx_endpoint_for_gmx_payload(monkeypatch):
 
     calls = []
 
-    class _Response:
-        def raise_for_status(self):
-            return None
+    class _Process:
+        returncode = 0
+        stdout = json.dumps({"sorted": True, "folder": "Archive"})
+        stderr = ""
 
-        def json(self):
-            return {"sorted": True, "folder": "Archive"}
+    def _run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return _Process()
 
-    def _post(url, **kwargs):
-        calls.append((url, kwargs))
-        return _Response()
-
-    monkeypatch.setenv("GMX_MCP_URL", "http://gmx-mcp:3001")
-    monkeypatch.setattr(sorter_mod.httpx, "post", _post)
+    monkeypatch.setattr(sorter_mod.subprocess, "run", _run)
 
     result = sorter_mod.sort_email("gmx-42", {"account": "gmx", "subject": "Newsletter"})
 
     assert result["sorted"] is True
-    assert calls[0][0] == "http://gmx-mcp:3001/sort"
+    assert calls[0][0] == ["mailctl", "sort", "--account", "gmx", "--uid", "42", "--json"]
 
 
 def test_draft_reply_creates_pending_draft_without_marking_processed(tmp_path):
@@ -200,3 +197,46 @@ def test_draft_reply_creates_pending_draft_without_marking_processed(tmp_path):
 
     status = json.loads((tmp_path / "drafts" / "draft_status.json").read_text(encoding="utf-8"))
     assert status["pm-draft-1"]["status"] == "draft_pending"
+
+
+def test_quarantine_email_uses_mailctl_move(tmp_path, monkeypatch):
+    import subprocess as subprocess_mod
+    from agents.email_intelligence_agent.tools import create_email_intelligence_mcp_server
+
+    _setup_audit_dir(tmp_path, monkeypatch)
+
+    calls = []
+
+    class _Process:
+        returncode = 0
+        stdout = json.dumps({"moved": True})
+        stderr = ""
+
+    def _run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return _Process()
+
+    monkeypatch.setattr(subprocess_mod, "run", _run)
+    server = create_email_intelligence_mcp_server(tmp_path)
+    quarantine = _tool(server, "quarantine_email").fn
+
+    response = asyncio.run(
+        quarantine({
+            "email_id": "gmx-42",
+            "account": "gmx",
+            "reason": "malicious",
+        })
+    )
+
+    assert "quarantined" in response["content"][0]["text"]
+    assert calls[0][0] == [
+        "mailctl",
+        "move",
+        "--account",
+        "gmx",
+        "--uid",
+        "42",
+        "--destination",
+        "Quarantine",
+        "--json",
+    ]

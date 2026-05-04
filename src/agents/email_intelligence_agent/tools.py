@@ -11,12 +11,13 @@ Core tools (platform-standard — do not remove):
   cron_delete    — Delete a scheduled task
 
 Domain-specific tools:
-  process_email     — Fetch email via MCP and run 9-layer security pipeline
+  process_email     — Process mailctl-fetched email through 9-layer security pipeline
   process_unread    — Process unread emails from the specified account
   get_audit_log     — Return the last N entries from the audit log
   quarantine_email  — Move email to Quarantine folder and write audit entry
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -657,7 +658,7 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "process_email",
         "Run an email through the 9-layer security pipeline. "
-        "Fetch subject and body from the protonmail-email or gmx-email MCP tool first, "
+        "Fetch subject and body with `mailctl read --account <account> --uid <uid> --json` first, "
         "then pass them here. Returns a full EmailIntelligencePayload with classification, "
         "security signals, routing decision, policy decision, and redaction metadata. "
         "'account' must be 'protonmail' or 'gmx'. "
@@ -728,7 +729,7 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "process_unread",
         "Process a batch of emails through the 9-layer security pipeline. "
-        "Use the protonmail-email or gmx-email MCP tools to fetch unread emails first, "
+        "Use `mailctl list` and `mailctl read` to fetch unread emails first, "
         "then pass the result as a JSON array via 'emails_json'. Each item must have: "
         "email_id (str), account ('protonmail'|'gmx'), subject (str), body (str). "
         "Optional sender and received_at fields are propagated. "
@@ -833,7 +834,7 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "quarantine_email",
-        "Move an email to the Quarantine folder via the email-mcp /sort endpoint "
+        "Move an email to the Quarantine folder via mailctl "
         "and write an audit entry. Fails the call if the move does not succeed. "
         "'reason' should describe why the email is being quarantined.",
         {"email_id": str, "account": str, "reason": str},
@@ -846,27 +847,29 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
         if not email_id or not account or not reason:
             return _text("email_id, account, and reason are required.")
 
-        # 1) Perform the move first via email-mcp /sort.
+        # 1) Perform the move first via mailctl.
         # If the move fails, return an error WITHOUT writing a misleading
         # "quarantined" audit entry — only successful moves are recorded.
-        import httpx
-        sort_base = os.environ.get(
-            "EMAIL_SORT_BASE_URL",
-            "http://protonmail-mcp:3000" if account == "protonmail" else "http://gmx-mcp:3001",
-        )
-        move_payload = {
-            "email_id": email_id,
-            "target_folder": "Quarantine",
-            "reason": reason,
-        }
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(f"{sort_base.rstrip('/')}/sort", json=move_payload)
-            if resp.status_code >= 300:
+            import subprocess
+
+            uid = email_id
+            prefix = f"{account.lower()}-"
+            if uid.lower().startswith(prefix):
+                uid = uid[len(prefix):]
+            proc = await asyncio.to_thread(
+                subprocess.run,
+                ["mailctl", "move", "--account", account, "--uid", uid, "--destination", "Quarantine", "--json"],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=20.0,
+            )
+            if proc.returncode != 0:
+                detail = proc.stderr.strip() or proc.stdout.strip() or f"exit_status={proc.returncode}"
                 return {
                     "content": [{"type": "text", "text": (
-                        f"quarantine_email failed: /sort returned HTTP {resp.status_code} — "
-                        f"{resp.text[:200]}"
+                        f"quarantine_email failed: mailctl move returned {detail[:200]}"
                     )}],
                     "is_error": True,
                 }

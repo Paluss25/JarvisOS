@@ -27,6 +27,7 @@ _UNIT_TEST_FILES = {
     "test_dos_daily_fitness_import.py",
     "test_drhouse_router.py",
     "test_eia_digest.py",
+    "test_email_cli_config.py",
     "test_email_sorter.py",
     "test_fallback_model.py",
     "test_fatsecret.py",

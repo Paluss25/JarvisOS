@@ -82,10 +82,7 @@ def build_chief_of_staff_config(workspace_root: Path = Path("/app/workspace/cos"
         env_prefix="CHIEF_OF_STAFF_",
         memory_backend="filesystem",
         mcp_server_factory=create_chief_of_staff_mcp_server,
-        extra_mcp_servers={
-            "protonmail-email": {"type": "sse", "url": "http://protonmail-mcp:3000/sse"},
-            "gmx-email": {"type": "sse", "url": "http://gmx-mcp:3001/sse"},
-        },
+        extra_mcp_servers={},
         builtin_crons=MARK_BUILTIN_CRONS,
         # Agent tool enables sub-agent dispatch (required for delegate workflows)
         allowed_tools=[

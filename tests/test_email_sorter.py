@@ -1,54 +1,52 @@
-"""Unit tests for EmailSorter httpx client."""
+"""Unit tests for mailctl-backed COS EmailSorter."""
+
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-
-import src.agents.cos.email_sorter as _mod
-from src.agents.cos.email_sorter import sort_email_after_routing
+import agents.cos.email_sorter as _mod
+from agents.cos.email_sorter import sort_email_after_routing
 
 
-def _mock_response(status_code: int, body: dict):
-    resp = MagicMock()
-    resp.status_code = status_code
-    resp.json.return_value = body
-    resp.raise_for_status = MagicMock() if status_code < 400 else MagicMock(side_effect=Exception("HTTP error"))
-    return resp
+class _Process:
+    def __init__(self, returncode: int, body: dict | None = None, stderr: str = ""):
+        self.returncode = returncode
+        self.stdout = json.dumps(body or {})
+        self.stderr = stderr
 
 
 def test_sort_returns_sorted_true():
     payload = {
         "email_id": "42",
+        "account": "protonmail",
         "subject": "Fattura n.1",
         "body_redacted": "importo dovuto 100 EUR",
         "classification": {"primary_domain": "finance", "priority": "normal", "sensitivity": "public"},
     }
     expected = {"sorted": True, "folder": "Fatture", "uid": "42"}
 
-    with patch.object(_mod.httpx, "post", return_value=_mock_response(200, expected)) as mock_post:
+    with patch.object(_mod.subprocess, "run", return_value=_Process(0, expected)) as mock_run:
         result = sort_email_after_routing("42", payload)
 
     assert result["sorted"] is True
     assert result["folder"] == "Fatture"
-    call_kwargs = mock_post.call_args
-    sent = call_kwargs[1]["json"] if call_kwargs[1] else call_kwargs[0][1]
-    assert sent["uid"] == "42"
+    assert mock_run.call_args.args[0] == ["mailctl", "sort", "--account", "protonmail", "--uid", "42", "--json"]
 
 
-def test_sort_returns_no_match():
-    payload = {"email_id": "7", "subject": "Hello", "body_redacted": "", "classification": {}}
-    expected = {"sorted": False, "reason": "no rule matched"}
+def test_sort_uses_gmx_and_strips_prefixed_uid():
+    payload = {"email_id": "gmx-7", "account": "gmx", "subject": "Hello", "body_redacted": "", "classification": {}}
+    expected = {"sorted": False, "reason": "no_rule_matched"}
 
-    with patch.object(_mod.httpx, "post", return_value=_mock_response(200, expected)):
-        result = sort_email_after_routing("7", payload)
+    with patch.object(_mod.subprocess, "run", return_value=_Process(0, expected)) as mock_run:
+        result = sort_email_after_routing("gmx-7", payload)
 
     assert result["sorted"] is False
+    assert mock_run.call_args.args[0] == ["mailctl", "sort", "--account", "gmx", "--uid", "7", "--json"]
 
 
-def test_sort_http_failure_does_not_raise():
+def test_sort_cli_failure_does_not_raise():
     payload = {"email_id": "99", "subject": "", "body_redacted": "", "classification": {}}
 
-    with patch.object(_mod.httpx, "post", side_effect=Exception("Connection refused")):
+    with patch.object(_mod.subprocess, "run", return_value=_Process(1, stderr="Connection refused")):
         result = sort_email_after_routing("99", payload)
 
     assert result["sorted"] is False

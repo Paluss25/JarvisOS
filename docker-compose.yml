@@ -27,6 +27,8 @@ services:
     env_file: /home/paluss/docker/.env
     dns:
       - 10.10.200.62
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       LOKI_URL: "http://10.10.200.71:3100"
       RUNBOOKS_PATH: "/app/runbooks"
@@ -64,6 +66,8 @@ services:
       # env_prefix (DRHOUSE_/NUTRITION_) so other agents keep thinking on.
       DRHOUSE_CLAUDE_THINKING: "false"
       NUTRITION_CLAUDE_THINKING: "false"
+      MAILCTL_CONFIG_DIR: "/home/paluss/docker/agents"
+      MAILCTL_SORTING_RULES_PATH: "/app/src/agents/cos/sorting_rules.yaml"
     labels:
       # Jarvis API — jarvis.prova9x.com
       - "traefik.enable=true"
@@ -84,6 +88,7 @@ services:
       - /home/paluss/docker/appdata/jarvios-shared:/app/shared
       - /home/paluss/docker/appdata/jarvios-dot-claude:/root/.claude
       - /home/paluss/docker/.env:/app/.env:ro
+      - /home/paluss/docker/agents:/home/paluss/docker/agents:ro
       - /home/paluss/Brains/HomeLab/operations/runbooks/jarvios:/app/runbooks:rw
       - /home/paluss/docker/compose/jarvisOS/var/audit:/app/var/audit:rw
       - /home/paluss/docker/compose/jarvisOS/memory/schemas:/app/memory/schemas:ro

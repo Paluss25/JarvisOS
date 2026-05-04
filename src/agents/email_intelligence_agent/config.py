@@ -83,8 +83,9 @@ EMAIL_INTELLIGENCE_BUILTIN_CRONS = [
         "schedule": "interval@15m",
         "prompt": (
             "Poll for unread emails on all accounts (protonmail and gmx). "
-            "For each unread email: use the appropriate MCP list_emails / get_email tools "
-            "to fetch the full email dict, then call process_email with that dict. "
+            "Use `mailctl list --account <account> --unread --limit 20 --json` and "
+            "`mailctl read --account <account> --uid <uid> --json` to fetch each full email dict, "
+            "then call process_email with that dict. "
             "Process at most 20 emails per poll. Skip emails already processed today "
             "if their subject matches a recent audit entry."
         ),
@@ -97,6 +98,7 @@ EMAIL_INTELLIGENCE_BUILTIN_CRONS = [
         "schedule": "daily@08:05",
         "prompt": (
             "Morning email briefing. Poll for unread emails on all accounts (process up to 20). "
+            "Use mailctl for mailbox access. "
             "After processing, send a summary to cos via send_message: "
             "how many emails processed, breakdown by domain, any quarantined items, "
             "any high-risk items. Keep summary under 150 words. "
@@ -171,10 +173,7 @@ def build_email_intelligence_config(
         env_prefix="EMAIL_INTELLIGENCE_",
         memory_backend="filesystem",
         mcp_server_factory=create_email_intelligence_mcp_server,
-        extra_mcp_servers={
-            "protonmail-email": {"type": "sse", "url": "http://protonmail-mcp:3000/sse"},
-            "gmx-email": {"type": "sse", "url": "http://gmx-mcp:3001/sse"},
-        },
+        extra_mcp_servers={},
         builtin_crons=EMAIL_INTELLIGENCE_BUILTIN_CRONS,
         a2a_fast_path=_emailintel_a2a_fast_path,
         allowed_tools=[
