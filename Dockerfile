@@ -52,6 +52,10 @@ RUN npm install -g @anthropic-ai/claude-code
 COPY cfo-cli-pkg /tmp/cfo-cli-pkg
 RUN pip install /tmp/cfo-cli-pkg
 
+# Install mailctl email CLI
+COPY vendor/mailctl /tmp/mailctl
+RUN pip install /tmp/mailctl
+
 # Source code
 COPY src/ ./src/
 COPY agents.yaml .
