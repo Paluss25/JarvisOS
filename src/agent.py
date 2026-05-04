@@ -3,7 +3,7 @@
 Creates an Agno Agent wired to:
 - FallbackModel chain loaded from workspace/config/agent-models.yaml
 - PostgreSQL session store (Agno's built-in PgAgentStorage)
-- OpenClaw workspace instructions (SOUL.md, AGENTS.md, USER.md, …)
+- JarvisOS workspace instructions (SOUL.md, AGENTS.md, USER.md, …)
 - Full tool suite: web search, shell, file ops, code execution
 """
 

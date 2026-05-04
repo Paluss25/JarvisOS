@@ -218,7 +218,7 @@ class LLMReasonerAdapter(BaseChiefOfStaffReasoner):
 
     The callable receives the structured email payload and must return either a
     `RoutingDecision` or a plain dict compatible with it. This keeps the repo
-    model-agnostic and easy to plug into LiteLLM/OpenClaw later.
+    model-agnostic and easy to plug into alternate LLM runtimes later.
     """
 
     def __init__(self, infer: Callable[[Dict[str, Any]], Any]) -> None:

@@ -31,6 +31,9 @@ class AgentConfig:
     memory_backend: str = "filesystem"       # "filesystem" or "agentic"
     mcp_server_factory: Callable[..., Any] | None = None
     extra_mcp_servers: dict[str, Any] = field(default_factory=dict)
+    skills: list[str] | None = None          # None = unrestricted, [] = disabled, list = per-agent allowlist
+    skills_watch_enabled: bool = True
+    skills_watch_debounce_s: float = 1.0
     a2a_fast_path: Callable[..., Any] | None = None  # async fn(payload: dict) → dict | None — bypasses LLM for structured A2A actions
     builtin_crons: list[dict] = field(default_factory=list)
     default_image_caption: str = "Analyze this image."
@@ -138,6 +141,44 @@ class AgentConfig:
     @property
     def log_level(self) -> str:
         return self._resolve(self.log_level_env) or "INFO"
+
+    @staticmethod
+    def _parse_skill_list(raw: str) -> list[str] | None:
+        value = raw.strip()
+        if not value:
+            return None
+        if value.lower() in {"none", "disabled", "off", "false"}:
+            return []
+        if value.lower() in {"all", "*"}:
+            return None
+        return [item.strip() for item in value.split(",") if item.strip()]
+
+    @property
+    def skill_allowlist(self) -> list[str] | None:
+        per_agent = os.environ.get(f"JARVIOS_SKILLS_{self.id.upper()}", "")
+        if per_agent.strip():
+            return self._parse_skill_list(per_agent)
+        global_value = os.environ.get("JARVIOS_SKILLS", "")
+        if global_value.strip():
+            return self._parse_skill_list(global_value)
+        return self.skills
+
+    @property
+    def effective_skills_watch_enabled(self) -> bool:
+        value = os.environ.get("JARVIOS_SKILLS_WATCH", "")
+        if value:
+            return value.lower() in {"1", "true", "yes", "on"}
+        return self.skills_watch_enabled
+
+    @property
+    def effective_skills_watch_debounce_s(self) -> float:
+        value = os.environ.get("JARVIOS_SKILLS_WATCH_DEBOUNCE_S", "")
+        if value:
+            try:
+                return float(value)
+            except ValueError:
+                pass
+        return self.skills_watch_debounce_s
 
     @property
     def agent_max_turn_s(self) -> float:
