@@ -207,3 +207,43 @@ def test_months_get_current(monkeypatch):
         result = runner.invoke(app, ["months", "get", "current"])
     assert result.exit_code == 0
     assert expected_month in captured_url["url"]
+
+
+# ---------------------------------------------------------------------------
+# Payee Locations
+# ---------------------------------------------------------------------------
+
+def test_payee_locations_list(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp([{"id": "loc-1", "payee_id": "payee-1"}], "payee_locations")
+    with patch("tools.ynab_cli.httpx.get", return_value=fake):
+        result = runner.invoke(app, ["payee-locations", "list"])
+    assert result.exit_code == 0
+    out = json.loads(result.output)
+    assert out[0]["id"] == "loc-1"
+
+
+def test_payee_locations_get(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"id": "loc-1", "latitude": "45.46"}, "payee_location")
+    with patch("tools.ynab_cli.httpx.get", return_value=fake):
+        result = runner.invoke(app, ["payee-locations", "get", "loc-1"])
+    assert result.exit_code == 0
+    out = json.loads(result.output)
+    assert out["id"] == "loc-1"
+
+
+def test_payee_locations_list_by_payee(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp([{"id": "loc-1"}], "payee_locations")
+    captured_url = {}
+    def fake_get(url, **kwargs):
+        captured_url["url"] = url
+        return fake
+    with patch("tools.ynab_cli.httpx.get", side_effect=fake_get):
+        result = runner.invoke(app, ["payee-locations", "list-by-payee", "payee-99"])
+    assert result.exit_code == 0
+    assert "payees/payee-99/payee_locations" in captured_url["url"]

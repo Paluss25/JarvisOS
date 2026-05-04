@@ -238,6 +238,39 @@ def payees_update(
 
 
 # ---------------------------------------------------------------------------
+# Payee Locations
+# ---------------------------------------------------------------------------
+
+@payee_locations_app.command("list")
+def payee_locations_list(
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List all payee locations across the budget."""
+    data = _get(f"/budgets/{_budget(budget_id)}/payee_locations")
+    _out(data["data"]["payee_locations"])
+
+
+@payee_locations_app.command("get")
+def payee_locations_get(
+    payee_location_id: str = typer.Argument(..., help="Payee location UUID"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Get a single payee location."""
+    data = _get(f"/budgets/{_budget(budget_id)}/payee_locations/{payee_location_id}")
+    _out(data["data"]["payee_location"])
+
+
+@payee_locations_app.command("list-by-payee")
+def payee_locations_list_by_payee(
+    payee_id: str = typer.Argument(..., help="Payee UUID"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List all locations for a specific payee."""
+    data = _get(f"/budgets/{_budget(budget_id)}/payees/{payee_id}/payee_locations")
+    _out(data["data"]["payee_locations"])
+
+
+# ---------------------------------------------------------------------------
 # Months
 # ---------------------------------------------------------------------------
 
