@@ -313,6 +313,8 @@ def test_normalize_payee_amazon_variants():
     assert _normalize_payee("AMAZON ITALY RETAIL") == "Amazon"
     assert _normalize_payee("Amazon.it") == "Amazon"
     assert _normalize_payee("AMAZON PRIME") == "Amazon"
+    assert _normalize_payee("AMAZON IT MARKETPLACE APE") == "Amazon"
+    assert _normalize_payee("AMZN INSTALLMENTS IT") == "Amazon"
     assert _normalize_payee("netflix") == "netflix"  # no normalization
 
 
@@ -322,6 +324,38 @@ def test_normalize_payee_esselunga():
     assert _normalize_payee("ESSELUNGA FILIALE 42") == "Esselunga"
     assert _normalize_payee("Esselunga S.p.A.") == "Esselunga"
     assert _normalize_payee("CONAD") == "CONAD"  # no normalization
+
+
+def test_normalize_payee_extended_brands():
+    from workers.finance.email_extraction import _normalize_payee
+
+    assert _normalize_payee("RYANAIR WEB EURO") == "Ryanair"
+    assert _normalize_payee("DELIVEROOIT") == "Deliveroo"
+    assert _normalize_payee("TRENITALIA   PT WL") == "Trenitalia"
+    assert _normalize_payee("TRENITALIAS") == "Trenitalia"
+    assert _normalize_payee("H M") == "HM"
+    assert _normalize_payee("H&M") == "HM"
+    assert _normalize_payee("ZARA 6437") == "Zara"
+    assert _normalize_payee("ZARA HOME 10668") == "Zara"
+    assert _normalize_payee("DRMAXECOMM") == "DrMax"
+    assert _normalize_payee("DRMAX ECOMM ITALIA") == "DrMax"
+    assert _normalize_payee("WETAXI SRL") == "WeTaxi"
+    assert _normalize_payee("CHECKOUT COM ECOMM MEDIUM EEA") == "Checkout.com"
+    assert _normalize_payee("IKEA ITALIA RETAIL") == "IKEA"
+    assert _normalize_payee("IPER IL CASTELLO") == "Ipercoop"
+    assert _normalize_payee("EU STORE UI COM") == "UbiquityStore"
+    assert _normalize_payee("UBIQUITI STORE EUROPE") == "UbiquityStore"
+
+
+def test_normalize_payee_paypal_passthrough():
+    from workers.finance.email_extraction import _normalize_payee
+
+    # Bare PayPal → PayPal
+    assert _normalize_payee("PAYPAL") == "PayPal"
+    # Pass-through with known merchant → normalize merchant
+    assert _normalize_payee("PAYPAL  TRENITALIAS") == "Trenitalia"
+    # Pass-through with unknown merchant → title-cased suffix
+    assert _normalize_payee("PAYPAL  PRENATALSPA") == "Prenatalspa"
 
 
 @pytest.mark.asyncio

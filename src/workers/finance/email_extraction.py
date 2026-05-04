@@ -43,12 +43,39 @@ _PATTERNS: list[tuple[re.Pattern, str, int, int]] = [
 # Payee normalization: raw extracted payee → canonical YNAB payee name.
 # Keys are case-insensitive prefix/substring patterns; first match wins.
 _PAYEE_NORMALIZATIONS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"amazon\b", re.I), "Amazon"),
+    # Amazon cluster (AMZN INSTALLMENTS, AMAZON IT MARKETPLACE, etc.)
+    (re.compile(r"amzn\b|amazon\b", re.I), "Amazon"),
     (re.compile(r"esselunga\b", re.I), "Esselunga"),
+    (re.compile(r"ryanair\b", re.I), "Ryanair"),
+    (re.compile(r"deliveroo", re.I), "Deliveroo"),
+    (re.compile(r"trenitalia", re.I), "Trenitalia"),
+    # H&M — AMEX strips & so it arrives as "H M"
+    (re.compile(r"\bh\s*&?\s*m\b", re.I), "HM"),
+    (re.compile(r"\bzara\b", re.I), "Zara"),
+    (re.compile(r"drmax", re.I), "DrMax"),
+    (re.compile(r"wetaxi", re.I), "WeTaxi"),
+    (re.compile(r"checkout\s*com", re.I), "Checkout.com"),
+    (re.compile(r"\bikea\b", re.I), "IKEA"),
+    # Iper il Castello and other Ipercoop branches
+    (re.compile(r"\biper\b", re.I), "Ipercoop"),
+    # Ubiquiti Store (appears as "UBIQUITI STORE EUROPE" or "EU STORE UI COM")
+    (re.compile(r"ubiquiti|eu\s+store\s+ui", re.I), "UbiquityStore"),
+    (re.compile(r"\bpaypal\b", re.I), "PayPal"),
 ]
+
+# PayPal pass-through prefix pattern: "PAYPAL  MERCHANT NAME"
+_PAYPAL_PREFIX_RE = re.compile(r"paypal\s{2,}(.+)", re.I)
 
 
 def _normalize_payee(raw: str) -> str:
+    # PayPal pass-through: extract merchant from "PAYPAL  MERCHANT" suffix
+    pp = _PAYPAL_PREFIX_RE.match(raw)
+    if pp:
+        suffix = pp.group(1).strip()
+        for pattern, canonical in _PAYEE_NORMALIZATIONS:
+            if pattern.search(suffix):
+                return canonical
+        return suffix.title()
     for pattern, canonical in _PAYEE_NORMALIZATIONS:
         if pattern.search(raw):
             return canonical
