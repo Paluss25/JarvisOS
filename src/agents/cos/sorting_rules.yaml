@@ -20,7 +20,18 @@ defaults:
   create_folder_if_missing: true
   on_no_match: keep
 
-rules: []
+rules:
+  - name: "American Express"
+    match: all
+    conditions:
+      sender: "*americanexpress.com*"
+    folder: "Folders/Banca/Amex"
+
+  - name: "Fineco"
+    match: all
+    conditions:
+      sender: "*finecobank.com*"
+    folder: "Folders/Banca/Fineco"
 # Example rules (uncomment and edit as needed):
 #
 #   - name: "Amazon ordini"
