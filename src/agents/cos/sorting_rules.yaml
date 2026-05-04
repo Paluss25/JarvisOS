@@ -38,6 +38,30 @@ rules:
     conditions:
       sender: "*paypal.it*"
     folder: "Folders/Banca/Paypal"
+
+  - name: "Illimity"
+    match: all
+    conditions:
+      sender: "*illimity.com*"
+    folder: "Folders/Banca/Illimity"
+
+  - name: "Mediobanca"
+    match: all
+    conditions:
+      sender: "*mediobancapremier.com*"
+    folder: "Folders/Banca/Mediobanca"
+
+  - name: "Mediobanca typo"
+    match: all
+    conditions:
+      sender: "*mediobancapremiuer.com*"
+    folder: "Folders/Banca/Mediobanca"
+
+  - name: "Revolut"
+    match: all
+    conditions:
+      sender: "*revolut.com*"
+    folder: "Folders/Banca/Revolut"
 # Example rules (uncomment and edit as needed):
 #
 #   - name: "Amazon ordini"
