@@ -5,7 +5,7 @@ Sub-agents mounted:
   POST /btc-fiscal/analyze      — BTC balance + fiscal report
   POST /fiscal-730/analyze      — Italian Modello 730 / Quadro W
   POST /categorization/analyze  — Transaction category assignment
-  POST /email-extraction/analyze — Extract transactions from email text
+  POST /email-transaction-extraction/analyze — Extract transactions from email text
   POST /reconciliation/analyze  — YNAB vs bank statement match
   POST /merchant/analyze        — Merchant name normalization
 """
@@ -32,7 +32,7 @@ app.include_router(ynab.router, prefix="/ynab")
 app.include_router(btc_fiscal.router, prefix="/btc-fiscal")
 app.include_router(fiscal_730.router, prefix="/fiscal-730")
 app.include_router(categorization.router, prefix="/categorization")
-app.include_router(email_extraction.router, prefix="/email-extraction")
+app.include_router(email_extraction.router, prefix="/email-transaction-extraction")
 app.include_router(reconciliation.router, prefix="/reconciliation")
 app.include_router(merchant.router, prefix="/merchant")
 

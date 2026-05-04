@@ -213,7 +213,7 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
         # Default + allowlisted sub-agent names per runtime — strict slug allowlist
         # to prevent path/query injection via the sub_agent argument.
         sub_agent_allowlist = {
-            "finance":  {"finance-analyzer"},
+            "finance":  {"finance-analyzer", "email-transaction-extraction"},
             "cost":     {"cost-analyzer"},
             "market":   {"market-analyzer"},
             "strategy": {"investment-research", "macro-scenario", "correlation-engine",
