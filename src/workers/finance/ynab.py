@@ -94,29 +94,26 @@ def _transaction_payload(tx: dict) -> dict:
 
 
 async def _sync_transactions_to_ledger(txns: list[dict]) -> dict:
+    from workers.shared import cfo_sidecar
+
     attempted = 0
     succeeded = 0
     failed_ids: list[str] = []
 
     try:
-        headers = _ledger_headers()
+        cfo_sidecar.auth_headers()
     except ValueError:
         return {"attempted": 0, "succeeded": 0, "failed": 0, "failed_ids": []}
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        for tx in txns:
-            if tx.get("deleted"):
-                continue
-            attempted += 1
-            response = await client.post(
-                f"{_sidecar_url()}/ledger/events",
-                json=_transaction_payload(tx),
-                headers=headers,
-            )
-            if response.is_success:
-                succeeded += 1
-            else:
-                failed_ids.append(tx["id"])
+    for tx in txns:
+        if tx.get("deleted"):
+            continue
+        attempted += 1
+        try:
+            await cfo_sidecar.post_ledger_event(_transaction_payload(tx))
+            succeeded += 1
+        except Exception:
+            failed_ids.append(tx["id"])
 
     return {
         "attempted": attempted,

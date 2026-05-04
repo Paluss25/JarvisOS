@@ -246,3 +246,15 @@ async def create_signal(
         )
         response.raise_for_status()
         return response.json()
+
+
+async def post_ledger_event(payload: dict, *, timeout: float = _TIMEOUT) -> dict:
+    """POST a single ledger event to the cfo-data-service sidecar."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{sidecar_url()}/ledger/events",
+            json=payload,
+            headers=auth_headers(),
+        )
+        response.raise_for_status()
+        return response.json() if response.content else {}
