@@ -289,6 +289,86 @@ async def test_analyze_subject_must_match_skips_ynab(monkeypatch):
     ledger_call.assert_not_called()
 
 
+# ---------------------------------------------------------------------------
+# AMEX pattern + payee normalization
+# ---------------------------------------------------------------------------
+
+def test_regex_amex_pattern_extracts_merchant_and_amount():
+    """AMEX alert format: '21 apr 2026 AMAZON ITALY RETAIL €28,19'."""
+    from workers.finance.email_extraction import _PATTERNS, _parse_amount
+
+    amex_pattern, direction, amount_idx, payee_idx = _PATTERNS[3]  # 4th pattern
+    text = "21 apr 2026 AMAZON ITALY RETAIL €28,19"
+    match = amex_pattern.search(text)
+    assert match is not None, "AMEX pattern did not match"
+    groups = match.groups()
+    assert _parse_amount(groups[amount_idx]) == pytest.approx(28.19)
+    assert groups[payee_idx].strip() == "AMAZON ITALY RETAIL"
+    assert direction == "outflow"
+
+
+def test_normalize_payee_amazon_variants():
+    from workers.finance.email_extraction import _normalize_payee
+
+    assert _normalize_payee("AMAZON ITALY RETAIL") == "Amazon"
+    assert _normalize_payee("Amazon.it") == "Amazon"
+    assert _normalize_payee("AMAZON PRIME") == "Amazon"
+    assert _normalize_payee("netflix") == "netflix"  # no normalization
+
+
+def test_normalize_payee_esselunga():
+    from workers.finance.email_extraction import _normalize_payee
+
+    assert _normalize_payee("ESSELUNGA FILIALE 42") == "Esselunga"
+    assert _normalize_payee("Esselunga S.p.A.") == "Esselunga"
+    assert _normalize_payee("CONAD") == "CONAD"  # no normalization
+
+
+@pytest.mark.asyncio
+async def test_analyze_amex_email_extracts_amazon_payee(monkeypatch):
+    """End-to-end: AMEX email body → payee='Amazon', amount=28.19."""
+    monkeypatch.setenv("YNAB_API_KEY", "ynab-test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    monkeypatch.setenv("CFO_CLI_TOKEN", "test-token")
+    monkeypatch.setenv("CFO_SIDECAR_URL", "http://test-sidecar:8000")
+
+    from workers.finance import email_extraction
+
+    email_body = (
+        "Conferma Operazione\n"
+        "21 apr 2026 AMAZON ITALY RETAIL €28,19\n"
+        "Il pagamento è stato addebitato sulla tua Carta."
+    )
+
+    envelope = email_extraction.TaskEnvelope(
+        goal="ingest_transaction",
+        scope={
+            "email_text": email_body,
+            "email_id": "amex-274",
+            "received_at": "2026-04-21T10:00:00+00:00",
+            "subject": "Conferma Operazione",
+            "ynab_account_id": "2609b853-bc94-4e26-bd97-6e1b81d17ead",
+            "ynab_account_source": "static",
+        },
+    )
+
+    ynab_call = AsyncMock(return_value={"transaction_id": "tx-amex-amazon"})
+    ledger_call = AsyncMock(return_value={"id": 99})
+
+    with patch.object(email_extraction, "_post_ynab_transaction", ynab_call), \
+         patch.object(email_extraction.cfo_sidecar, "post_ledger_event", ledger_call):
+        result = await email_extraction.analyze(envelope)
+
+    assert result["transaction_count"] == 1
+    tx = result["transactions"][0]
+    assert tx["payee"] == "Amazon"
+    assert tx["amount"] == pytest.approx(28.19)
+    assert tx["direction"] == "outflow"
+    assert result["ynab_inserted"] == 1
+    ynab_args = ynab_call.call_args
+    assert ynab_args.kwargs["ynab_account_id"] == "2609b853-bc94-4e26-bd97-6e1b81d17ead"
+
+
 @pytest.mark.asyncio
 async def test_analyze_no_writes_when_no_email_id(monkeypatch):
     """Without email_id we cannot dedupe — skip writes and just return extraction."""

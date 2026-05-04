@@ -24,16 +24,35 @@ _YNAB_BASE = "https://api.ynab.com/v1"
 _YNAB_TIMEOUT = 15.0
 
 # Italian bank email patterns
-_PATTERNS: list[tuple[re.Pattern, str]] = [
-    # "Pagamento di 45,90 EUR a Amazon"
-    (re.compile(r"(?:pagamento|addebito|prelievo)\s+(?:di\s+)?([\d,.]+)\s*(EUR|€)\s+(?:a|da|presso)\s+(.+?)(?:\.|$)", re.I), "outflow"),
-    # "Accredito di 1.500,00 EUR da Stipendio"
-    (re.compile(r"accredito\s+(?:di\s+)?([\d,.]+)\s*(EUR|€)\s+da\s+(.+?)(?:\.|$)", re.I), "inflow"),
-    # "Hai speso 23.50€ da COOP"
-    (re.compile(r"(?:hai speso|spesa di)\s*([\d,.]+)\s*(?:EUR|€)\s+(?:da|presso|a)\s+(.+?)(?:\.|$)", re.I), "outflow"),
-    # Generic: "€ 99,99 - Netflix"
-    (re.compile(r"(?:EUR|€)\s*([\d,.]+)\s*[-–]\s*(.+?)(?:\.|$)", re.I), "unknown"),
+_MONTHS_IT = r"(?:gen|feb|mar|apr|mag|giu|lug|ago|set|ott|nov|dic|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+
+# Each entry: (pattern, direction, amount_group_index, payee_group_index)
+_PATTERNS: list[tuple[re.Pattern, str, int, int]] = [
+    # "Pagamento di 45,90 EUR a Amazon"  → groups: (amount, currency, payee)
+    (re.compile(r"(?:pagamento|addebito|prelievo)\s+(?:di\s+)?([\d,.]+)\s*(EUR|€)\s+(?:a|da|presso)\s+(.+?)(?:\.|$)", re.I), "outflow", 0, 2),
+    # "Accredito di 1.500,00 EUR da Stipendio"  → groups: (amount, currency, payee)
+    (re.compile(r"accredito\s+(?:di\s+)?([\d,.]+)\s*(EUR|€)\s+da\s+(.+?)(?:\.|$)", re.I), "inflow", 0, 2),
+    # "Hai speso 23.50€ da COOP"  → groups: (amount, payee)
+    (re.compile(r"(?:hai speso|spesa di)\s*([\d,.]+)\s*(?:EUR|€)\s+(?:da|presso|a)\s+(.+?)(?:\.|$)", re.I), "outflow", 0, 1),
+    # AMEX/Nexi alert: "21 apr 2026 AMAZON ITALY RETAIL €28,19"  → groups: (merchant, amount)
+    (re.compile(rf"\d{{1,2}}\s+{_MONTHS_IT}\s+\d{{4}}\s+([A-Z][A-Z0-9 .&'*/-]{{2,}}?)\s+€\s*([\d,.]+)", re.I), "outflow", 1, 0),
+    # Generic: "€ 99,99 - Netflix"  → groups: (amount, payee)
+    (re.compile(r"(?:EUR|€)\s*([\d,.]+)\s*[-–]\s*(.+?)(?:\.|$)", re.I), "unknown", 0, 1),
 ]
+
+# Payee normalization: raw extracted payee → canonical YNAB payee name.
+# Keys are case-insensitive prefix/substring patterns; first match wins.
+_PAYEE_NORMALIZATIONS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"amazon\b", re.I), "Amazon"),
+    (re.compile(r"esselunga\b", re.I), "Esselunga"),
+]
+
+
+def _normalize_payee(raw: str) -> str:
+    for pattern, canonical in _PAYEE_NORMALIZATIONS:
+        if pattern.search(raw):
+            return canonical
+    return raw
 
 _SYSTEM = (
     "You are a financial data extractor. Given an email text, extract all financial transactions. "
@@ -235,12 +254,12 @@ async def analyze(task: TaskEnvelope) -> dict:
 
     # Try regex patterns first
     transactions: list[dict] = []
-    for pattern, direction in _PATTERNS:
+    for pattern, direction, amount_idx, payee_idx in _PATTERNS:
         for match in pattern.finditer(email_text):
             groups = match.groups()
-            if len(groups) >= 2:
-                amount_str = groups[0]
-                payee = groups[-1].strip()
+            if len(groups) > max(amount_idx, payee_idx):
+                amount_str = groups[amount_idx]
+                payee = _normalize_payee(groups[payee_idx].strip())
                 transactions.append({
                     "payee": payee,
                     "amount": _parse_amount(amount_str),
