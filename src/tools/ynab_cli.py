@@ -498,5 +498,102 @@ def transactions_update_multiple(
     _out(data["data"])
 
 
+# ---------------------------------------------------------------------------
+# Scheduled Transactions
+# ---------------------------------------------------------------------------
+
+_FREQUENCIES = "never|daily|weekly|everyOtherWeek|twiceAMonth|every4Weeks|monthly|everyOtherMonth|every3Months|every4Months|twiceAYear|yearly"
+
+
+@scheduled_app.command("list")
+def scheduled_list(
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List all scheduled transactions."""
+    data = _get(f"/budgets/{_budget(budget_id)}/scheduled_transactions")
+    _out(data["data"]["scheduled_transactions"])
+
+
+@scheduled_app.command("get")
+def scheduled_get(
+    scheduled_id: str = typer.Argument(..., help="Scheduled transaction UUID"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Get a single scheduled transaction."""
+    data = _get(f"/budgets/{_budget(budget_id)}/scheduled_transactions/{scheduled_id}")
+    _out(data["data"]["scheduled_transaction"])
+
+
+@scheduled_app.command("create")
+def scheduled_create(
+    account_id: str = typer.Option(..., "--account-id"),
+    date_: str = typer.Option(..., "--date", help="First occurrence YYYY-MM-DD"),
+    frequency: str = typer.Option(..., "--frequency", help=_FREQUENCIES),
+    amount: float = typer.Option(..., "--amount", help="Positive EUR amount"),
+    direction: str = typer.Option("outflow", "--direction", help="outflow|inflow"),
+    payee: str = typer.Option("", "--payee"),
+    payee_id: str = typer.Option("", "--payee-id"),
+    memo: str = typer.Option("", "--memo"),
+    category_id: str = typer.Option("", "--category-id"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Create a new scheduled (recurring) transaction."""
+    tx: dict = {
+        "account_id": account_id,
+        "date": date_,
+        "amount": _milliunits(amount, direction),
+        "frequency": frequency,
+    }
+    if payee_id:
+        tx["payee_id"] = payee_id
+    elif payee:
+        tx["payee_name"] = payee[:50]
+    if memo:
+        tx["memo"] = memo[:200]
+    if category_id:
+        tx["category_id"] = category_id
+    data = _post(f"/budgets/{_budget(budget_id)}/scheduled_transactions", {"scheduled_transaction": tx})
+    _out(data["data"]["scheduled_transaction"])
+
+
+@scheduled_app.command("update")
+def scheduled_update(
+    scheduled_id: str = typer.Argument(..., help="Scheduled transaction UUID"),
+    amount: float | None = typer.Option(None, "--amount"),
+    direction: str = typer.Option("outflow", "--direction"),
+    payee: str = typer.Option("", "--payee"),
+    memo: str = typer.Option("", "--memo"),
+    category_id: str = typer.Option("", "--category-id"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Update fields on a scheduled transaction (PUT — replaces the scheduled transaction)."""
+    tx: dict = {}
+    if amount is not None:
+        tx["amount"] = _milliunits(amount, direction)
+    if payee:
+        tx["payee_name"] = payee[:50]
+    if memo:
+        tx["memo"] = memo[:200]
+    if category_id:
+        tx["category_id"] = category_id
+    if not tx:
+        _die("No fields to update — provide at least one of --amount, --payee, --memo, --category-id")
+    data = _put(
+        f"/budgets/{_budget(budget_id)}/scheduled_transactions/{scheduled_id}",
+        {"scheduled_transaction": tx},
+    )
+    _out(data["data"]["scheduled_transaction"])
+
+
+@scheduled_app.command("delete")
+def scheduled_delete(
+    scheduled_id: str = typer.Argument(..., help="Scheduled transaction UUID"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Delete a scheduled transaction."""
+    data = _delete(f"/budgets/{_budget(budget_id)}/scheduled_transactions/{scheduled_id}")
+    _out(data["data"]["scheduled_transaction"])
+
+
 if __name__ == "__main__":
     app()

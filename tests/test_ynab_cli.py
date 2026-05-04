@@ -495,3 +495,57 @@ def test_transactions_update_multiple(monkeypatch, tmp_path):
         result = runner.invoke(app, ["transactions", "update-multiple", "--file", str(f)])
     assert result.exit_code == 0
     assert len(captured["body"]["transactions"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Scheduled Transactions
+# ---------------------------------------------------------------------------
+
+def test_scheduled_list(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp([{"id": "sched-1", "frequency": "monthly"}], "scheduled_transactions")
+    with patch("tools.ynab_cli.httpx.get", return_value=fake):
+        result = runner.invoke(app, ["scheduled", "list"])
+    assert result.exit_code == 0
+    out = json.loads(result.output)
+    assert out[0]["id"] == "sched-1"
+
+
+def test_scheduled_create(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"id": "sched-new", "frequency": "monthly"}, "scheduled_transaction")
+    captured = {}
+    def fake_post(url, json=None, **kwargs):
+        captured["body"] = json
+        return fake
+    with patch("tools.ynab_cli.httpx.post", side_effect=fake_post):
+        result = runner.invoke(app, [
+            "scheduled", "create",
+            "--account-id", "acct-1",
+            "--date", "2026-06-01",
+            "--frequency", "monthly",
+            "--amount", "500.00",
+            "--direction", "outflow",
+            "--payee", "Affitto",
+        ])
+    assert result.exit_code == 0
+    tx = captured["body"]["scheduled_transaction"]
+    assert tx["amount"] == -500000
+    assert tx["frequency"] == "monthly"
+    assert tx["payee_name"] == "Affitto"
+
+
+def test_scheduled_delete(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"id": "sched-1", "deleted": True}, "scheduled_transaction")
+    captured_url = {}
+    def fake_delete(url, **kwargs):
+        captured_url["url"] = url
+        return fake
+    with patch("tools.ynab_cli.httpx.delete", side_effect=fake_delete):
+        result = runner.invoke(app, ["scheduled", "delete", "sched-1"])
+    assert result.exit_code == 0
+    assert "sched-1" in captured_url["url"]
