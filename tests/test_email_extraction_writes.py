@@ -333,8 +333,8 @@ def test_normalize_payee_extended_brands():
     assert _normalize_payee("DELIVEROOIT") == "Deliveroo"
     assert _normalize_payee("TRENITALIA   PT WL") == "Trenitalia"
     assert _normalize_payee("TRENITALIAS") == "Trenitalia"
-    assert _normalize_payee("H M") == "HM"
-    assert _normalize_payee("H&M") == "HM"
+    assert _normalize_payee("H M") == "H&M"
+    assert _normalize_payee("H&M") == "H&M"
     assert _normalize_payee("ZARA 6437") == "Zara"
     assert _normalize_payee("ZARA HOME 10668") == "Zara"
     assert _normalize_payee("DRMAXECOMM") == "DrMax"
@@ -356,6 +356,50 @@ def test_normalize_payee_paypal_passthrough():
     assert _normalize_payee("PAYPAL  TRENITALIAS") == "Trenitalia"
     # Pass-through with unknown merchant → title-cased suffix
     assert _normalize_payee("PAYPAL  PRENATALSPA") == "Prenatalspa"
+
+
+def test_normalize_payee_paypal_brands():
+    from workers.finance.email_extraction import _normalize_payee
+
+    assert _normalize_payee("Apple Inc.") == "Apple"
+    assert _normalize_payee("ITUNES COM BILL") == "Apple"
+    assert _normalize_payee("ZWIFT INC") == "Zwift"
+    assert _normalize_payee("SKY ITALIA SRL") == "Sky Italia"
+    assert _normalize_payee("ADOBE SYSTEMS SOFTWA") == "Adobe"
+    assert _normalize_payee("ITALOTRENO") == "ItaloTreno"
+    assert _normalize_payee("INTERFLORA ITALIA") == "Interflora"
+    assert _normalize_payee("PLEX INC") == "Plex"
+    assert _normalize_payee("MICROSOFT IRELAND") == "Microsoft"
+    assert _normalize_payee("GLOVO SPAIN") == "Glovo"
+    assert _normalize_payee("TIM SPA") == "TIM"
+    assert _normalize_payee("DAZN GROUP") == "DAZN"
+    assert _normalize_payee("EASYPARK AB") == "EasyPark"
+    assert _normalize_payee("UDEMY INC.") == "Udemy"
+    assert _normalize_payee("ZALANDO SE") == "Zalando"
+    assert _normalize_payee("STRAVA INC") == "Strava"
+    assert _normalize_payee("LOOKING FOR PARKING") == "Looking4Parking"
+    assert _normalize_payee("PROTON AG") == "Proton"
+    assert _normalize_payee("GROUPON GOODS") == "Groupon"
+    assert _normalize_payee("SKYPE COMMUNICATIONS") == "Skype"
+    assert _normalize_payee("CLOUDFLARE INC") == "CloudFlare"
+    assert _normalize_payee("UBER TRIP") == "Uber"
+    assert _normalize_payee("BOOKING BV") == "Booking.com"
+    assert _normalize_payee("VERY MOBILE SRL") == "Very Mobile"
+
+
+def test_normalize_payee_favore_di_strip():
+    from workers.finance.email_extraction import _normalize_payee
+
+    # Plain "favore di" prefix stripped before normalization
+    assert _normalize_payee("favore di EasyPark Italia Srl") == "EasyPark"
+    assert _normalize_payee("favore di Adobe Systems Softwa") == "Adobe"
+    assert _normalize_payee("favore di Sconosciuto Srl") == "Sconosciuto Srl"
+
+    # Full PayPal subject prefix stripped
+    assert _normalize_payee("pagamento a favore di Apple Inc.") == "Apple"
+
+    # PayPal pass-through + favore di
+    assert _normalize_payee("PAYPAL  favore di Adobe Systems") == "Adobe"
 
 
 @pytest.mark.asyncio

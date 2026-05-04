@@ -50,7 +50,7 @@ _PAYEE_NORMALIZATIONS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"deliveroo", re.I), "Deliveroo"),
     (re.compile(r"trenitalia", re.I), "Trenitalia"),
     # H&M — AMEX strips & so it arrives as "H M"
-    (re.compile(r"\bh\s*&?\s*m\b", re.I), "HM"),
+    (re.compile(r"\bh\s*&?\s*m\b", re.I), "H&M"),
     (re.compile(r"\bzara\b", re.I), "Zara"),
     (re.compile(r"drmax", re.I), "DrMax"),
     (re.compile(r"wetaxi", re.I), "WeTaxi"),
@@ -61,21 +61,49 @@ _PAYEE_NORMALIZATIONS: list[tuple[re.Pattern, str]] = [
     # Ubiquiti Store (appears as "UBIQUITI STORE EUROPE" or "EU STORE UI COM")
     (re.compile(r"ubiquiti|eu\s+store\s+ui", re.I), "UbiquityStore"),
     (re.compile(r"\bpaypal\b", re.I), "PayPal"),
+    # PayPal-sourced merchants
+    (re.compile(r"apple|itunes", re.I), "Apple"),
+    (re.compile(r"\bzwift\b", re.I), "Zwift"),
+    (re.compile(r"sky\s+italia|sky\.it", re.I), "Sky Italia"),
+    (re.compile(r"\badobe\b", re.I), "Adobe"),
+    (re.compile(r"italo\s*treno|italotreno|italo\s+(?:treno|nuovo|trasport)", re.I), "ItaloTreno"),
+    (re.compile(r"interflora", re.I), "Interflora"),
+    (re.compile(r"\bplex\b", re.I), "Plex"),
+    (re.compile(r"microsoft", re.I), "Microsoft"),
+    (re.compile(r"glovo", re.I), "Glovo"),
+    (re.compile(r"\btim\b", re.I), "TIM"),
+    (re.compile(r"\bdazn\b", re.I), "DAZN"),
+    (re.compile(r"easypark", re.I), "EasyPark"),
+    (re.compile(r"\budemy\b", re.I), "Udemy"),
+    (re.compile(r"zalando", re.I), "Zalando"),
+    (re.compile(r"\bstrava\b", re.I), "Strava"),
+    (re.compile(r"looking.*parking|looking4park", re.I), "Looking4Parking"),
+    (re.compile(r"proton\s+(?:tech|ag|mail)", re.I), "Proton"),
+    (re.compile(r"groupon", re.I), "Groupon"),
+    (re.compile(r"\bskype\b", re.I), "Skype"),
+    (re.compile(r"cloudflare", re.I), "CloudFlare"),
+    (re.compile(r"\buber\b", re.I), "Uber"),
+    (re.compile(r"booking\.com|booking\s+bv", re.I), "Booking.com"),
+    (re.compile(r"very\s+mobile", re.I), "Very Mobile"),
 ]
 
 # PayPal pass-through prefix pattern: "PAYPAL  MERCHANT NAME"
 _PAYPAL_PREFIX_RE = re.compile(r"paypal\s{2,}(.+)", re.I)
+
+# PayPal subject prefix "pagamento a favore di" / "favore di" → strip before normalization
+_FAVORE_DI_RE = re.compile(r"(?:pagamento\s+a\s+)?favore\s+di\s+", re.I)
 
 
 def _normalize_payee(raw: str) -> str:
     # PayPal pass-through: extract merchant from "PAYPAL  MERCHANT" suffix
     pp = _PAYPAL_PREFIX_RE.match(raw)
     if pp:
-        suffix = pp.group(1).strip()
+        suffix = _FAVORE_DI_RE.sub("", pp.group(1).strip()).strip()
         for pattern, canonical in _PAYEE_NORMALIZATIONS:
             if pattern.search(suffix):
                 return canonical
         return suffix.title()
+    raw = _FAVORE_DI_RE.sub("", raw).strip()
     for pattern, canonical in _PAYEE_NORMALIZATIONS:
         if pattern.search(raw):
             return canonical
