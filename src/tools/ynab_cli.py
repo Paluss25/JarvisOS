@@ -424,5 +424,79 @@ def transactions_create_bulk(
     _out(data["data"])
 
 
+@transactions_app.command("list-by-category")
+def transactions_list_by_category(
+    category_id: str = typer.Argument(..., help="Category UUID"),
+    since: str = typer.Option("", "--since", help="Filter from YYYY-MM-DD"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List transactions for a specific category."""
+    params: dict = {}
+    if since:
+        params["since_date"] = since
+    data = _get(
+        f"/budgets/{_budget(budget_id)}/categories/{category_id}/transactions",
+        params or None,
+    )
+    _out(data["data"]["transactions"])
+
+
+@transactions_app.command("list-by-payee")
+def transactions_list_by_payee(
+    payee_id: str = typer.Argument(..., help="Payee UUID"),
+    since: str = typer.Option("", "--since", help="Filter from YYYY-MM-DD"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List transactions for a specific payee."""
+    params: dict = {}
+    if since:
+        params["since_date"] = since
+    data = _get(
+        f"/budgets/{_budget(budget_id)}/payees/{payee_id}/transactions",
+        params or None,
+    )
+    _out(data["data"]["transactions"])
+
+
+@transactions_app.command("list-by-month")
+def transactions_list_by_month(
+    month: str = typer.Argument(..., help="YYYY-MM-DD (first of month)"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List transactions for a specific budget month."""
+    data = _get(f"/budgets/{_budget(budget_id)}/months/{month}/transactions")
+    _out(data["data"]["transactions"])
+
+
+@transactions_app.command("import")
+def transactions_import(
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Trigger import of transactions from linked bank accounts."""
+    data = _post(f"/budgets/{_budget(budget_id)}/transactions/import", {})
+    _out(data["data"])
+
+
+@transactions_app.command("update-multiple")
+def transactions_update_multiple(
+    file_path: str = typer.Option(..., "--file", help="Path to JSON file with array of transaction update objects"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Bulk-update multiple transactions from a JSON file (PATCH)."""
+    import pathlib
+    try:
+        raw = pathlib.Path(file_path).read_text(encoding="utf-8")
+    except OSError as exc:
+        _die(f"Cannot read file {file_path}: {exc}")
+    try:
+        txns = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        _die(f"Invalid JSON in {file_path}: {exc}")
+    if not isinstance(txns, list):
+        _die("--file must contain a JSON array of transaction update objects")
+    data = _patch(f"/budgets/{_budget(budget_id)}/transactions", {"transactions": txns})
+    _out(data["data"])
+
+
 if __name__ == "__main__":
     app()

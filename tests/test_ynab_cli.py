@@ -423,3 +423,75 @@ def test_transactions_create_bulk_invalid_json(monkeypatch, tmp_path):
     f.write_text("not json")
     result = runner.invoke(app, ["transactions", "create-bulk", "--file", str(f)])
     assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Transactions — list-by-category / list-by-payee / list-by-month / import / update-multiple
+# ---------------------------------------------------------------------------
+
+def test_transactions_list_by_category(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp([{"id": "tx-cat-1"}], "transactions")
+    captured_url = {}
+    def fake_get(url, **kwargs):
+        captured_url["url"] = url
+        return fake
+    with patch("tools.ynab_cli.httpx.get", side_effect=fake_get):
+        result = runner.invoke(app, ["transactions", "list-by-category", "cat-1"])
+    assert result.exit_code == 0
+    assert "categories/cat-1/transactions" in captured_url["url"]
+
+
+def test_transactions_list_by_payee(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp([{"id": "tx-payee-1"}], "transactions")
+    captured_url = {}
+    def fake_get(url, **kwargs):
+        captured_url["url"] = url
+        return fake
+    with patch("tools.ynab_cli.httpx.get", side_effect=fake_get):
+        result = runner.invoke(app, ["transactions", "list-by-payee", "payee-1"])
+    assert result.exit_code == 0
+    assert "payees/payee-1/transactions" in captured_url["url"]
+
+
+def test_transactions_list_by_month(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp([{"id": "tx-month-1"}], "transactions")
+    captured_url = {}
+    def fake_get(url, **kwargs):
+        captured_url["url"] = url
+        return fake
+    with patch("tools.ynab_cli.httpx.get", side_effect=fake_get):
+        result = runner.invoke(app, ["transactions", "list-by-month", "2026-05-01"])
+    assert result.exit_code == 0
+    assert "months/2026-05-01/transactions" in captured_url["url"]
+
+
+def test_transactions_import(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"transaction_ids": ["tx-imported-1"]})
+    with patch("tools.ynab_cli.httpx.post", return_value=fake):
+        result = runner.invoke(app, ["transactions", "import"])
+    assert result.exit_code == 0
+
+
+def test_transactions_update_multiple(monkeypatch, tmp_path):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    txns = [{"id": "tx-1", "cleared": "cleared"}, {"id": "tx-2", "memo": "updated"}]
+    f = tmp_path / "updates.json"
+    f.write_text(json.dumps(txns))
+    fake = _fake_resp({"transactions": txns})
+    captured = {}
+    def fake_patch(url, json=None, **kwargs):
+        captured["body"] = json
+        return fake
+    with patch("tools.ynab_cli.httpx.patch", side_effect=fake_patch):
+        result = runner.invoke(app, ["transactions", "update-multiple", "--file", str(f)])
+    assert result.exit_code == 0
+    assert len(captured["body"]["transactions"]) == 2
