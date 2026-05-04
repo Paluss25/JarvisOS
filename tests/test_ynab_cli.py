@@ -146,6 +146,25 @@ def test_categories_update_month(monkeypatch):
     assert result.exit_code == 0
     assert captured["body"]["category"]["budgeted"] == 200000
     assert "2026-05-01" in captured["url"]
+    assert "cat-1" in captured["url"]
+    assert "/months/" in captured["url"]
+    assert "/categories/" in captured["url"]
+
+
+def test_categories_get(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"id": "cat-1", "name": "Groceries"}, "category")
+    captured_url = {}
+    def fake_get(url, **kwargs):
+        captured_url["url"] = url
+        return fake
+    with patch("tools.ynab_cli.httpx.get", side_effect=fake_get):
+        result = runner.invoke(app, ["categories", "get", "cat-1"])
+    assert result.exit_code == 0
+    assert "cat-1" in captured_url["url"]
+    out = json.loads(result.output)
+    assert out["id"] == "cat-1"
 
 
 def test_payees_list(monkeypatch):
@@ -157,6 +176,22 @@ def test_payees_list(monkeypatch):
     assert result.exit_code == 0
     out = json.loads(result.output)
     assert out[0]["name"] == "Amazon"
+
+
+def test_payees_update(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"id": "payee-1", "name": "Esselunga"}, "payee")
+    captured = {}
+    def fake_patch(url, json=None, **kwargs):
+        captured["url"] = url
+        captured["body"] = json
+        return fake
+    with patch("tools.ynab_cli.httpx.patch", side_effect=fake_patch):
+        result = runner.invoke(app, ["payees", "update", "payee-1", "--name", "Esselunga"])
+    assert result.exit_code == 0
+    assert "payee-1" in captured["url"]
+    assert captured["body"]["payee"]["name"] == "Esselunga"
 
 
 def test_months_get_current(monkeypatch):
