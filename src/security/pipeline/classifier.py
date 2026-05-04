@@ -17,6 +17,11 @@ class ClassificationResult:
     risk_level: str          # "none" | "low" | "medium" | "high" | "critical"
     priority: str            # "low" | "normal" | "high" | "urgent"
     confidence: float        # 0.0–1.0
+    # EIA→CFO auto-ingest routing fields (populated only when sender matched in whitelist)
+    ynab_account_id: Optional[str] = None
+    subject_must_match: Optional[str] = None
+    ynab_account_source: str = "static"
+    body_account_map: Optional[Dict[str, str]] = None
 
 
 class Classifier:
@@ -144,6 +149,10 @@ class Classifier:
                     risk_level=_risk_map_wl[sensitivity],
                     priority=priority_wl,
                     confidence=forced_confidence,
+                    ynab_account_id=override.get("ynab_account_id"),
+                    subject_must_match=override.get("subject_must_match"),
+                    ynab_account_source=str(override.get("ynab_account_source") or "static"),
+                    body_account_map=override.get("body_account_map"),
                 )
 
         # ------------------------------------------------------------------

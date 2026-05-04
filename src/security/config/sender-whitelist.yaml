@@ -7,24 +7,121 @@
 #   email_overrides:  exact match on the full sender address
 #   domain_overrides: suffix match on the sender domain (@company.com)
 #
-# Each entry fields:
-#   domain:     primary_domain to force (finance | legal | security | hr | ops | marketing)
+# Standard fields:
+#   domain:     primary_domain to force (finance | legal | security | hr | ops | marketing | general)
 #   confidence: injected confidence score, 0.0–1.0 (default: 1.0)
 #   note:       human-readable reason (optional, ignored by code)
+#
+# Extended fields for EIA→CFO auto-ingest (used by email_extraction worker):
+#   ynab_account_id:      YNAB account UUID to post the transaction to.
+#                         null = skip YNAB write for this sender.
+#   subject_must_match:   regex applied to subject before routing to YNAB.
+#                         If set and subject does NOT match, YNAB write is skipped.
+#   ynab_account_source:  "static" (default) or "body_extract".
+#                         "body_extract" = parse "Hai pagato X con PROVIDER" from body
+#                         and resolve via body_account_map below.
+#   body_account_map:     map of provider name (case-insensitive) → YNAB account UUID.
+#                         Used only when ynab_account_source: body_extract.
 
 email_overrides:
-  # "noreply@bancaintesa.it":
-  #   domain: finance
-  #   confidence: 1.0
-  #   note: "Intesa Sanpaolo account statements"
+
+  # --- Mediobanca Premier ---
+  # Only route to YNAB when subject mentions mortgage payments or transfers.
+  # Document-availability notifications ("Nuovi documenti disponibili") are skipped.
+  "no-reply@mediobancapremier.com":
+    domain: finance
+    confidence: 1.0
+    ynab_account_id: "e586d58c-bcac-48c6-848c-b219e00e0ea4"
+    subject_must_match: "mutuo|rata|addebito|bonifico|pagamento|trasferimento|scadenza"
+    note: "Mediobanca Premier — mortgage payments and wire transfers only"
+
+  # --- PayPal ---
+  # Payment method is encoded in the body: "Hai pagato X con FINECO".
+  # Resolved dynamically; no static ynab_account_id.
+  "assistenza@paypal.it":
+    domain: finance
+    confidence: 1.0
+    ynab_account_id: null
+    ynab_account_source: body_extract
+    body_account_map:
+      "FINECO":            "6a5f6142-31c7-43e9-bf0c-ebd8bd27a37a"
+      "FINECO GOLD":       "d51958c6-1bc8-442b-8586-e155a7e55671"
+      "AMEX":              "2609b853-bc94-4e26-bd97-6e1b81d17ead"
+      "AMERICAN EXPRESS":  "2609b853-bc94-4e26-bd97-6e1b81d17ead"
+      "SATISPAY":          "b90599f6-17a5-4c93-bc7a-bf174adcde63"
+      "REVOLUT":           "85e8e74e-f3d3-46f8-80a5-1a24438d6040"
+      "MEDIOBANCA":        "e586d58c-bcac-48c6-848c-b219e00e0ea4"
+    note: "PayPal — extract payment method from body text"
+
+  # --- Amazon: suppress finance misclassification ---
+  # Payment provider (AMEX/Fineco) sends its own notification — Amazon emails would duplicate.
+  "shipment-tracking@amazon.it":
+    domain: general
+    confidence: 1.0
+    ynab_account_id: null
+    note: "Amazon shipping tracker — not a transaction, skip YNAB"
+
+  "conferma-spedizione@amazon.it":
+    domain: general
+    confidence: 1.0
+    ynab_account_id: null
+    note: "Amazon shipping confirmation — not a transaction, skip YNAB"
+
+  "conferma-ordine@amazon.it":
+    domain: general
+    confidence: 1.0
+    ynab_account_id: null
+    note: "Amazon order confirmation — payment provider will notify separately"
+
+  # --- SEA Milano e-Shop ---
+  "infoeshop@seamilano.eu":
+    domain: general
+    confidence: 1.0
+    ynab_account_id: null
+    note: "SEA Milano invoice — payment provider notifies separately, skip YNAB"
+
 
 domain_overrides:
-  # "@unicredit.it":
-  #   domain: finance
-  #   confidence: 1.0
-  #   note: "UniCredit bank notifications"
-  #
-  # "@commercialista.it":
-  #   domain: finance
-  #   confidence: 1.0
-  #   note: "Accountant firm"
+
+  # --- FinecoBank ---
+  "@finecobank.com":
+    domain: finance
+    confidence: 1.0
+    ynab_account_id: "6a5f6142-31c7-43e9-bf0c-ebd8bd27a37a"
+    note: "Fineco — wire transfers (in/out) and account notifications"
+
+  # --- American Express ---
+  "@welcome.americanexpress.com":
+    domain: finance
+    confidence: 1.0
+    ynab_account_id: "2609b853-bc94-4e26-bd97-6e1b81d17ead"
+    note: "American Express — Conferma Operazione transaction emails"
+
+  # --- Bitpanda ---
+  "@bitpanda.com":
+    domain: finance
+    confidence: 1.0
+    ynab_account_id: "30b3d00a-ec7b-49da-871b-817ece20a472"
+    note: "Bitpanda — trade and recurring savings plan confirmations"
+
+  # --- Nexi (Fineco card processor) ---
+  "@nexi.it":
+    domain: finance
+    confidence: 1.0
+    ynab_account_id: "d51958c6-1bc8-442b-8586-e155a7e55671"
+    note: "Nexi = Fineco card processor → FINECO GOLD account"
+
+  # --- Revolut ---
+  # Transaction notifications for purchases made via Revolut account.
+  "@revolut.com":
+    domain: finance
+    confidence: 1.0
+    ynab_account_id: "85e8e74e-f3d3-46f8-80a5-1a24438d6040"
+    note: "Revolut — payment and account notifications"
+
+  # --- Satispay ---
+  "@satispay.com":
+    domain: finance
+    confidence: 1.0
+    ynab_account_id: "b90599f6-17a5-4c93-bc7a-bf174adcde63"
+    note: "Satispay — payment notifications"

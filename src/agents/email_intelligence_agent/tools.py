@@ -227,6 +227,10 @@ def _run_security_pipeline(
             "risk_level": classification.risk_level,
             "priority": classification.priority,
             "confidence": classification.confidence,
+            "ynab_account_id": classification.ynab_account_id,
+            "subject_must_match": classification.subject_must_match,
+            "ynab_account_source": classification.ynab_account_source,
+            "body_account_map": classification.body_account_map,
         },
         "security_signals": {
             "prompt_injection_risk": isolation.risk_level,

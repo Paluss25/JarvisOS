@@ -45,6 +45,9 @@ _UNIT_TEST_FILES = {
     "test_send_message_async.py",
     "test_inbox_retry.py",
     "test_a2a_restart_safety.py",
+    "test_classifier_whitelist_ynab.py",
+    "test_eia_finance_autoforward.py",
+    "test_email_extraction_writes.py",
 }
 
 _INTEGRATION_TEST_FILES = {
