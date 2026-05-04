@@ -1,6 +1,5 @@
 """Tests for YNAB CLI — src/tools/ynab_cli.py."""
 import json
-import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -18,14 +17,12 @@ runner = CliRunner()
 
 def _fake_resp(data, key=None, status_code=200):
     """Build a fake httpx.Response with is_success based on status_code."""
+    body = {"data": {key: data}} if key else {"data": data}
     resp = MagicMock()
     resp.is_success = status_code < 400
     resp.status_code = status_code
-    resp.text = json.dumps(data)
-    if key:
-        resp.json.return_value = {"data": {key: data}}
-    else:
-        resp.json.return_value = {"data": data}
+    resp.text = json.dumps(body)
+    resp.json.return_value = body
     return resp
 
 
