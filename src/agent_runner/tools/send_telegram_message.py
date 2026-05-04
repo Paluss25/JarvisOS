@@ -55,9 +55,23 @@ def create_send_telegram_message_tool(config: AgentConfig, redis_a2a):
         # PendingEntry). To distinguish that from a real continuation drain,
         # require ``parent_correlation_id`` — only the inbox drain loop
         # sets it (from the continuation envelope's parent_correlation_id).
+        #
+        # ContextVar fallback: claude_agent_sdk's tool-dispatch task is
+        # spawned at agent.connect() time, before the drain loop's
+        # set_chain_context call. So read_chain_context() returns None
+        # here. The drain ALSO stashes chain_meta on redis_a2a for the
+        # turn duration — fall back to that.
         chain = read_chain_context()
+        if chain is None or not chain.get("parent_correlation_id"):
+            stashed = getattr(redis_a2a, "_active_chain_context", None)
+            if stashed and stashed.get("parent_correlation_id"):
+                chain = stashed
         parent_cid = chain.get("parent_correlation_id") if chain else None
         if not parent_cid:
+            logger.info(
+                "send_telegram_message[%s] REFUSED guard#1 — no "
+                "parent_correlation_id (chain=%r)", config.id, chain,
+            )
             return (
                 "Error: send_telegram_message refused — not in an A2A "
                 "continuation turn (no parent_correlation_id in chain). "
@@ -71,6 +85,11 @@ def create_send_telegram_message_tool(config: AgentConfig, redis_a2a):
         reply_channel = chain.get("reply_channel")
         reply_chat_id = chain.get("reply_chat_id")
         if reply_channel != "telegram" or not reply_chat_id:
+            logger.info(
+                "send_telegram_message[%s] REFUSED guard#2 — "
+                "reply_channel=%r reply_chat_id=%r",
+                config.id, reply_channel, reply_chat_id,
+            )
             return (
                 "Error: send_telegram_message refused — continuation has "
                 f"no Telegram origin (reply_channel={reply_channel!r}, "
@@ -86,6 +105,11 @@ def create_send_telegram_message_tool(config: AgentConfig, redis_a2a):
                 "is not set — cannot validate target chat id."
             )
         if str(reply_chat_id) != str(allowed_chat_id):
+            logger.info(
+                "send_telegram_message[%s] REFUSED guard#3 — "
+                "reply_chat_id=%r vs allowed=%r",
+                config.id, reply_chat_id, allowed_chat_id,
+            )
             return (
                 "Error: send_telegram_message refused — chat id from "
                 f"continuation ({reply_chat_id!r}) does not match this "
@@ -130,6 +154,11 @@ def create_send_telegram_message_tool(config: AgentConfig, redis_a2a):
                         chat_id=int(reply_chat_id),
                         text=text,
                         parse_mode=ParseMode.MARKDOWN,
+                    )
+                    logger.info(
+                        "send_telegram_message[%s] SENT chat=%s len=%d "
+                        "markdown cid=%.8s",
+                        config.id, reply_chat_id, len(text), parent_cid or "n/a",
                     )
                     return (
                         f"[Telegram message sent to chat {reply_chat_id} "

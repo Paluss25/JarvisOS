@@ -342,6 +342,14 @@ def create_app(config: AgentConfig) -> FastAPI:
                                 set_chain_context, reset_chain_context,
                             )
                             token = set_chain_context(chain_meta) if chain_meta else None
+                            # Stash on redis_a2a as a fallback — claude_agent_sdk's
+                            # tool-dispatch task is spawned at agent.connect()
+                            # time so ContextVars set here don't reach
+                            # send_telegram_message. The stash is read by the
+                            # tool when read_chain_context() returns None or a
+                            # context without parent_correlation_id.
+                            if chain_meta is not None and redis_a2a is not None:
+                                redis_a2a._active_chain_context = chain_meta  # type: ignore[attr-defined]
                             turn_failed = False
                             try:
                                 await agent.query(
@@ -358,6 +366,11 @@ def create_app(config: AgentConfig) -> FastAPI:
                             finally:
                                 if token is not None:
                                     reset_chain_context(token)
+                                if redis_a2a is not None:
+                                    try:
+                                        delattr(redis_a2a, "_active_chain_context")
+                                    except AttributeError:
+                                        pass
                             # On failure, requeue continuation envelopes so a
                             # transient agent.query() error doesn't silently
                             # drop the receiver's reply. Plain notifications
