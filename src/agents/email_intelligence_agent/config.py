@@ -20,26 +20,44 @@ async def _emailintel_a2a_fast_path(payload: dict) -> dict | None:
             _run_security_pipeline,
             _compute_action_hint,
             _write_to_digest,
+            _dispatch_to_cfo_worker,
         )
+        email_id = payload.get("email_id", "")
+        body = payload.get("body", "(empty body)")
+        subject = payload.get("subject", "(no subject)")
+        received_at = payload.get("received_at", "")
         result = await asyncio.to_thread(
             _run_security_pipeline,
-            email_id=payload.get("email_id", ""),
+            email_id=email_id,
             account=payload.get("account", ""),
-            subject=payload.get("subject", "(no subject)"),
-            body=payload.get("body", "(empty body)"),
+            subject=subject,
+            body=body,
             attachments=payload.get("attachments", []),
             sender=payload.get("sender", ""),
-            received_at=payload.get("received_at", ""),
+            received_at=received_at,
         )
         if not result.get("blocked") and result.get("policy", {}).get("allow"):
             digest_path = Path(os.environ.get("MT_DIGEST_PATH", "/app/shared/mt_digest.json"))
+            action_hint = _compute_action_hint(result)
             try:
                 _write_to_digest(
-                    {**result, "mt_action_hint": _compute_action_hint(result)},
+                    {**result, "mt_action_hint": action_hint},
                     digest_path,
                 )
             except Exception as digest_exc:
                 logger.warning("emailintel fast_path: digest write failed — %s", digest_exc)
+            if action_hint == "forward_to_cfo":
+                clf = result.get("classification", {})
+                asyncio.ensure_future(_dispatch_to_cfo_worker(
+                    email_id=email_id,
+                    received_at=received_at,
+                    subject=subject,
+                    email_text=body,
+                    ynab_account_id=clf.get("ynab_account_id"),
+                    ynab_account_source=clf.get("ynab_account_source", "static"),
+                    subject_must_match=clf.get("subject_must_match"),
+                    body_account_map=clf.get("body_account_map"),
+                ))
         logger.info("emailintel fast_path: processed email_id=%s", payload.get("email_id"))
         return result
     except Exception as exc:

@@ -24,6 +24,8 @@ import uuid
 import fcntl
 from pathlib import Path
 
+import httpx
+
 from security.pipeline.ingest_gate import IngestGate
 from security.pipeline.content_isolator import ContentIsolator
 from security.pipeline.classifier import Classifier
@@ -276,6 +278,12 @@ def _compute_action_hint(payload: dict) -> str:
     sender = str(payload.get("sender", "")).lower()
     text = f"{subject} {body}"
 
+    # Finance emails with whitelist YNAB routing → auto-dispatch to CFO worker
+    ynab_account_id = classification.get("ynab_account_id")
+    ynab_account_source = classification.get("ynab_account_source", "static")
+    if domain == "finance" and (ynab_account_id is not None or ynab_account_source == "body_extract"):
+        return "forward_to_cfo"
+
     action_keywords = (
         "fattura", "invoice", "scadenza", "deadline", "urgente", "urgent",
         "action required", "da fare", "ricorda", "reminder", "todo",
@@ -311,6 +319,55 @@ def _compute_action_hint(payload: dict) -> str:
         return "draft_reply"
 
     return "forward_to_cos"
+
+
+async def _dispatch_to_cfo_worker(
+    *,
+    email_id: str,
+    received_at: str,
+    subject: str,
+    email_text: str,
+    ynab_account_id: str | None,
+    ynab_account_source: str,
+    subject_must_match: str | None,
+    body_account_map: dict | None,
+) -> None:
+    """Fire-and-forget: POST email extraction task to the CFO finance worker."""
+    enabled = os.environ.get("EIA_FINANCE_AUTOFORWARD_ENABLED", "true").strip().lower()
+    if enabled not in {"1", "true", "yes"}:
+        return
+
+    base_url = os.environ.get("CFO_FINANCE_WORKER_URL", "http://cfo-finance-workers:8000").rstrip("/")
+    token = os.environ.get("CFO_CLI_TOKEN", "")
+    timeout = float(os.environ.get("EIA_FINANCE_AUTOFORWARD_TIMEOUT_S", "20"))
+
+    scope: dict = {
+        "email_text": email_text,
+        "email_id": email_id,
+        "received_at": received_at,
+        "subject": subject,
+        "ynab_account_id": ynab_account_id,
+        "ynab_account_source": ynab_account_source,
+    }
+    if subject_must_match:
+        scope["subject_must_match"] = subject_must_match
+    if body_account_map:
+        scope["body_account_map"] = body_account_map
+
+    payload = {"goal": "ingest_transaction", "scope": scope}
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{base_url}/email-transaction-extraction/analyze",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            logger.info("_dispatch_to_cfo_worker: email_id=%s result=%s", email_id, resp.json())
+    except Exception as exc:
+        logger.warning("_dispatch_to_cfo_worker: email_id=%s failed — %s", email_id, exc)
 
 
 def _digest_key(entry: dict) -> str:
@@ -642,13 +699,27 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
             )
             if not payload.get("blocked") and payload.get("policy", {}).get("allow"):
                 digest_path = Path(os.environ.get("MT_DIGEST_PATH", "/app/shared/mt_digest.json"))
+                action_hint = _compute_action_hint(payload)
                 try:
                     _write_to_digest(
-                        {**payload, "mt_action_hint": _compute_action_hint(payload)},
+                        {**payload, "mt_action_hint": action_hint},
                         digest_path,
                     )
                 except Exception as digest_exc:
                     logger.warning("process_email: digest write failed — %s", digest_exc)
+                if action_hint == "forward_to_cfo":
+                    clf = payload.get("classification", {})
+                    import asyncio
+                    asyncio.ensure_future(_dispatch_to_cfo_worker(
+                        email_id=email_id,
+                        received_at=received_at or "",
+                        subject=subject or "",
+                        email_text=body or "",
+                        ynab_account_id=clf.get("ynab_account_id"),
+                        ynab_account_source=clf.get("ynab_account_source", "static"),
+                        subject_must_match=clf.get("subject_must_match"),
+                        body_account_map=clf.get("body_account_map"),
+                    ))
             return _text(json.dumps(payload))
         except Exception as exc:
             logger.error("process_email: failed — %s", exc)
@@ -703,9 +774,10 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
                 )
                 # MT digest handoff parity with process_email
                 if not payload.get("blocked") and payload.get("policy", {}).get("allow"):
+                    action_hint = _compute_action_hint(payload)
                     try:
                         _write_to_digest(
-                            {**payload, "mt_action_hint": _compute_action_hint(payload)},
+                            {**payload, "mt_action_hint": action_hint},
                             digest_path,
                         )
                     except Exception as digest_exc:
@@ -713,6 +785,19 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
                             "process_unread: digest write failed for %s — %s",
                             email_id, digest_exc,
                         )
+                    if action_hint == "forward_to_cfo":
+                        clf = payload.get("classification", {})
+                        import asyncio
+                        asyncio.ensure_future(_dispatch_to_cfo_worker(
+                            email_id=email_id,
+                            received_at=received_at or "",
+                            subject=subject or "",
+                            email_text=body or "",
+                            ynab_account_id=clf.get("ynab_account_id"),
+                            ynab_account_source=clf.get("ynab_account_source", "static"),
+                            subject_must_match=clf.get("subject_must_match"),
+                            body_account_map=clf.get("body_account_map"),
+                        ))
                 results.append({
                     "email_id": email_id,
                     "decision_type": payload.get("policy", {}).get("decision"),
