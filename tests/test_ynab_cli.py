@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from tools.ynab_cli import app, _milliunits
 
-runner = CliRunner()
+runner = CliRunner()  # stderr mixed into output by default in this Click/Typer version
 
 
 def _fake_resp(data, key=None, status_code=200):
