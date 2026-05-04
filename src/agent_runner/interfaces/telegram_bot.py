@@ -1360,14 +1360,25 @@ async def _stream_to_agent(
     # any send_message(mode='async') in this turn persists reply_channel /
     # reply_chat_id on the PendingEntry without the LLM having to pass them.
     # The continuation turn then has the data available via read_chain_context()
-    # for send_telegram_message's triple-guard. See:
-    # projects/jarvios-async-feedback-loop/2026-05-03-jarvios-async-feedback-loop.md
+    # for send_telegram_message's triple-guard.
+    #
+    # ContextVar fallback: claude_agent_sdk's tool-dispatch task may be
+    # spawned at agent.connect() time, before this contextvar is set, so the
+    # tool call cannot read it. As a robust complement we ALSO stash the
+    # active chat_id directly on the redis_a2a instance — send_message reads
+    # both. Single-active-turn per agent (concurrent_updates=False) means
+    # no race. Cleared in the finally block so cron/heartbeat turns aren't
+    # mis-tagged as Telegram-originated.
+    # See: projects/jarvios-async-feedback-loop/2026-05-03-jarvios-async-feedback-loop.md
     from agent_runner.comms.chain_context import set_chain_context, reset_chain_context
     _chain_token = set_chain_context({
         "reply_channel": "telegram",
         "reply_chat_id": str(chat_id),
         "reply_intent": None,  # filled in optionally by the LLM via the arg
     })
+    _redis_a2a = context.bot_data.get("redis_a2a")
+    if _redis_a2a is not None:
+        _redis_a2a._active_telegram_chat_id = str(chat_id)  # type: ignore[attr-defined]
 
     try:
         async for chunk in agent.stream(text, session_id=session_id):
@@ -1441,6 +1452,11 @@ async def _stream_to_agent(
         _stop_tasks()
         await _drain_tasks()
         reset_chain_context(_chain_token)
+        if _redis_a2a is not None:
+            try:
+                delattr(_redis_a2a, "_active_telegram_chat_id")
+            except AttributeError:
+                pass
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1803,7 +1819,7 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if not t.done():
                 t.cancel()
 
-    # Same chain-context auto-injection as the text path so async A2A
+    # Same chain-context + redis_a2a stash as the text path so async A2A
     # delegations from a voice turn also persist reply_channel / reply_chat_id.
     from agent_runner.comms.chain_context import set_chain_context, reset_chain_context
     _voice_chain_token = set_chain_context({
@@ -1811,6 +1827,9 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "reply_chat_id": str(chat_id),
         "reply_intent": None,
     })
+    _redis_a2a_voice = context.bot_data.get("redis_a2a")
+    if _redis_a2a_voice is not None:
+        _redis_a2a_voice._active_telegram_chat_id = str(chat_id)  # type: ignore[attr-defined]
 
     try:
         async for chunk in agent.stream(text, session_id=session_id):
@@ -1891,6 +1910,11 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         _stop()
         await asyncio.gather(*tasks, return_exceptions=True)
         reset_chain_context(_voice_chain_token)
+        if _redis_a2a_voice is not None:
+            try:
+                delattr(_redis_a2a_voice, "_active_telegram_chat_id")
+            except AttributeError:
+                pass
 
 
 async def _handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

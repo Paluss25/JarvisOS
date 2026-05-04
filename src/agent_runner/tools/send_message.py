@@ -346,13 +346,34 @@ def create_send_message_tool(
             reply_channel = _arg_or_chain("reply_channel", "reply_channel")
             reply_chat_id = _arg_or_chain("reply_chat_id", "reply_chat_id")
             reply_intent = _arg_or_chain("reply_intent", "reply_intent")
+            # Telegram-turn fallback: if neither LLM args nor chain context
+            # provided reply_channel, but the originating turn IS a Telegram
+            # turn (telegram_bot._stream_to_agent stashed
+            # ``redis_a2a._active_telegram_chat_id``), auto-tag the
+            # delegation as Telegram-routed. This is needed because:
+            #   1) The LLM often forgets to pass reply_channel + reply_chat_id
+            #      despite SOUL.md instructions.
+            #   2) ContextVar from _stream_to_agent doesn't reach here —
+            #      claude_agent_sdk's tool-dispatch task is spawned at
+            #      agent.connect() time, before the per-turn chain context
+            #      is set, so read_chain_context() returns None.
+            # Stash-based fallback uses a turn-scoped attribute on the
+            # shared redis_a2a instance that is set/cleared by the Telegram
+            # handler. concurrent_updates=False guarantees no race.
+            _active_chat_id = getattr(redis_a2a, "_active_telegram_chat_id", None)
+            if not reply_channel and _active_chat_id:
+                reply_channel = "telegram"
+                if not reply_chat_id:
+                    reply_chat_id = _active_chat_id
+                logger.debug(
+                    "send_message[%s→%s]: auto-tagged Telegram-originated "
+                    "async dispatch (chat_id=%s)",
+                    agent_id, to, _active_chat_id,
+                )
             # Auto-resolve reply_chat_id from agent config when the LLM set
             # reply_channel='telegram' but didn't pass a chat_id. Each agent
             # has exactly one Telegram chat (its allowed_chat_id), so this
             # is unambiguous and removes the LLM's burden of remembering it.
-            # ContextVar from _stream_to_agent doesn't reach here because the
-            # SDK's tool-dispatch task is spawned at agent.connect() time
-            # (before the per-turn chain context is set).
             if reply_channel == "telegram" and not reply_chat_id:
                 _cfg = getattr(redis_a2a, "_config", None)
                 if _cfg is not None and _cfg.telegram_chat_id_env:
