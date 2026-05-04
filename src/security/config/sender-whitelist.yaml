@@ -95,7 +95,8 @@ domain_overrides:
     domain: finance
     confidence: 1.0
     ynab_account_id: "2609b853-bc94-4e26-bd97-6e1b81d17ead"
-    note: "American Express — Conferma Operazione transaction emails"
+    subject_must_match: "conferma operazione"
+    note: "American Express — only process transaction confirmation emails, skip all other notifications"
 
   # --- Bitpanda ---
   "@bitpanda.com":
