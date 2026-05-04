@@ -32,6 +32,12 @@ rules:
     conditions:
       sender: "*finecobank.com*"
     folder: "Folders/Banca/Fineco"
+
+  - name: "Paypal"
+    match: all
+    conditions:
+      sender: "*paypal.it*"
+    folder: "Folders/Banca/Paypal"
 # Example rules (uncomment and edit as needed):
 #
 #   - name: "Amazon ordini"
