@@ -92,6 +92,138 @@ rules:
     conditions:
       sender: "*amazon.com*"
     folder: "Folders/AcquistiOnLine/Amazon"
+
+  - name: "Apple"
+    match: all
+    conditions:
+      sender: "*apple.com*"
+    folder: "Folders/AcquistiOnLine/Apple"
+
+  - name: "Apple ITunes"
+    match: all
+    conditions:
+      sender: "*itunes.com*"
+    folder: "Folders/AcquistiOnLine/Apple"
+
+  - name: "Ebay IT"
+    match: all
+    conditions:
+      sender: "*ebay.it*"
+    folder: "Folders/AcquistiOnLine/Ebay"
+
+  - name: "Ebay COM"
+    match: all
+    conditions:
+      sender: "*ebay.com*"
+    folder: "Folders/AcquistiOnLine/Ebay"
+
+  - name: "Esselunga"
+    match: all
+    conditions:
+      sender: "*esselunga.it*"
+    folder: "Folders/AcquistiOnLine/Spesa"
+
+  - name: "Wasabi"
+    match: all
+    conditions:
+      sender: "*wasabi.com*"
+    folder: "Folders/AcquistiOnLine/Storage"
+
+  - name: "Netflix"
+    match: all
+    conditions:
+      sender: "*netflix.com*"
+    folder: "Folders/AbbonamentiOnline/Netflix"
+
+  - name: "Anthropic"
+    match: all
+    conditions:
+      sender: "*anthropic.com*"
+    folder: "Folders/AcquistiOnLine/AI"
+
+  - name: "OpenAI"
+    match: all
+    conditions:
+      sender: "*openai.com*"
+    folder: "Folders/AcquistiOnLine/AI"
+
+  - name: "xAI"
+    match: all
+    conditions:
+      sender: "*x.ai*"
+    folder: "Folders/AcquistiOnLine/AI"
+
+  - name: "Fastweb"
+    match: all
+    conditions:
+      sender: "*fastweb.it*"
+    folder: "Folders/Casa/LineaTelefonica"
+
+  - name: "Verisure"
+    match: all
+    conditions:
+      sender: "*verisure.it*"
+    folder: "Folders/Casa/Verisure"
+
+  - name: "Acqualatina"
+    match: all
+    conditions:
+      sender: "*acqualatina.it*"
+    folder: "Folders/Casa"
+
+  - name: "Sorgenia"
+    match: all
+    conditions:
+      sender: "*sorgenia.it*"
+    folder: "Folders/Casa"
+
+  - name: "Ryanair"
+    match: all
+    conditions:
+      sender: "*ryanair.com*"
+    folder: "Folders/AcquistiOnLine/Aerei"
+
+  - name: "Ryanair Mail IT"
+    match: all
+    conditions:
+      sender: "*ryanairemail.it*"
+    folder: "Folders/AcquistiOnLine/Aerei"
+
+  - name: "ADR Mobility"
+    match: all
+    conditions:
+      sender: "*adrmobility.it*"
+    folder: "Folders/AcquistiOnLine/Parcheggio"
+
+  - name: "ADR"
+    match: all
+    conditions:
+      sender: "*adr.it*"
+    folder: "Folders/AcquistiOnLine/Parcheggio"
+
+  - name: "Sprea"
+    match: all
+    conditions:
+      sender: "*sprea.it*"
+    folder: "Folders/SpreaEditori"
+
+  - name: "Infoclip"
+    match: all
+    conditions:
+      sender: "*infoclip.it*"
+    folder: "Folders/SpreaEditori"
+
+  - name: "Enjoy"
+    match: all
+    conditions:
+      sender: "*enjoy.eni.com*"
+    folder: "Folders/Enjoy"
+
+  - name: "LinkedIn"
+    match: all
+    conditions:
+      sender: "*linkedin.com*"
+    folder: "Folders/Social"
 # Example rules (uncomment and edit as needed):
 #
 #   - name: "Amazon ordini"
