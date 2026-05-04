@@ -62,6 +62,24 @@ rules:
     conditions:
       sender: "*revolut.com*"
     folder: "Folders/Banca/Revolut"
+
+  - name: "Nexo"
+    match: all
+    conditions:
+      sender: "*nexo.com*"
+    folder: "Folders/Crypto"
+
+  - name: "Bitpanda"
+    match: all
+    conditions:
+      sender: "*bitpanda.com*"
+    folder: "Folders/Crypto"
+
+  - name: "Villaggio Bitcoin"
+    match: all
+    conditions:
+      sender: "*villaggiobitcoin.it*"
+    folder: "Folders/Crypto"
 # Example rules (uncomment and edit as needed):
 #
 #   - name: "Amazon ordini"
