@@ -161,5 +161,106 @@ def accounts_create(
     _out(data["data"]["account"])
 
 
+# ---------------------------------------------------------------------------
+# Categories
+# ---------------------------------------------------------------------------
+
+@categories_app.command("list")
+def categories_list(
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List all category groups with their categories."""
+    data = _get(f"/budgets/{_budget(budget_id)}/categories")
+    _out(data["data"]["category_groups"])
+
+
+@categories_app.command("get")
+def categories_get(
+    category_id: str = typer.Argument(..., help="Category UUID"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Get a single category."""
+    data = _get(f"/budgets/{_budget(budget_id)}/categories/{category_id}")
+    _out(data["data"]["category"])
+
+
+@categories_app.command("update-month")
+def categories_update_month(
+    category_id: str = typer.Argument(..., help="Category UUID"),
+    budgeted: float = typer.Option(..., "--budgeted", help="Budgeted amount in EUR"),
+    month: str = typer.Option("current", "--month", help="YYYY-MM-DD (first of month) or 'current'"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Set the budgeted amount for a category in a given month."""
+    if month == "current":
+        month = date.today().replace(day=1).isoformat()
+    body = {"category": {"budgeted": int(round(budgeted * 1000))}}
+    data = _patch(
+        f"/budgets/{_budget(budget_id)}/months/{month}/categories/{category_id}",
+        body,
+    )
+    _out(data["data"]["category"])
+
+
+# ---------------------------------------------------------------------------
+# Payees
+# ---------------------------------------------------------------------------
+
+@payees_app.command("list")
+def payees_list(
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List all payees."""
+    data = _get(f"/budgets/{_budget(budget_id)}/payees")
+    _out(data["data"]["payees"])
+
+
+@payees_app.command("get")
+def payees_get(
+    payee_id: str = typer.Argument(..., help="Payee UUID"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Get a single payee."""
+    data = _get(f"/budgets/{_budget(budget_id)}/payees/{payee_id}")
+    _out(data["data"]["payee"])
+
+
+@payees_app.command("update")
+def payees_update(
+    payee_id: str = typer.Argument(..., help="Payee UUID"),
+    name: str = typer.Option(..., "--name", help="New canonical payee name"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Rename a payee."""
+    body = {"payee": {"name": name}}
+    data = _patch(f"/budgets/{_budget(budget_id)}/payees/{payee_id}", body)
+    _out(data["data"]["payee"])
+
+
+# ---------------------------------------------------------------------------
+# Months
+# ---------------------------------------------------------------------------
+
+@months_app.command("list")
+def months_list(
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List all budget months."""
+    data = _get(f"/budgets/{_budget(budget_id)}/months")
+    _out(data["data"]["months"])
+
+
+@months_app.command("get")
+def months_get(
+    month: str = typer.Argument("current", help="YYYY-MM-DD (first of month) or 'current'"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Get full detail for a budget month (categories + activity)."""
+    if month == "current":
+        month = date.today().replace(day=1).isoformat()
+    data = _get(f"/budgets/{_budget(budget_id)}/months/{month}")
+    _out(data["data"]["month"])
+
+
 if __name__ == "__main__":
     app()
