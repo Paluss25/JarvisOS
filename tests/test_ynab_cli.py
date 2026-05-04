@@ -247,3 +247,81 @@ def test_payee_locations_list_by_payee(monkeypatch):
         result = runner.invoke(app, ["payee-locations", "list-by-payee", "payee-99"])
     assert result.exit_code == 0
     assert "payees/payee-99/payee_locations" in captured_url["url"]
+
+
+# ---------------------------------------------------------------------------
+# Transactions — list / get / update / delete
+# ---------------------------------------------------------------------------
+
+def test_transactions_list_all(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp([{"id": "tx-1", "amount": -45900}], "transactions")
+    with patch("tools.ynab_cli.httpx.get", return_value=fake):
+        result = runner.invoke(app, ["transactions", "list"])
+    assert result.exit_code == 0
+    out = json.loads(result.output)
+    assert out[0]["id"] == "tx-1"
+
+
+def test_transactions_list_since(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp([], "transactions")
+    captured = {}
+    def fake_get(url, params=None, **kwargs):
+        captured["params"] = params
+        return fake
+    with patch("tools.ynab_cli.httpx.get", side_effect=fake_get):
+        result = runner.invoke(app, ["transactions", "list", "--since", "2026-05-01"])
+    assert result.exit_code == 0
+    assert captured["params"]["since_date"] == "2026-05-01"
+
+
+def test_transactions_list_by_account(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp([], "transactions")
+    captured_url = {}
+    def fake_get(url, **kwargs):
+        captured_url["url"] = url
+        return fake
+    with patch("tools.ynab_cli.httpx.get", side_effect=fake_get):
+        result = runner.invoke(app, ["transactions", "list", "--account-id", "acct-1"])
+    assert result.exit_code == 0
+    assert "accounts/acct-1/transactions" in captured_url["url"]
+
+
+def test_transactions_update(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"id": "tx-1", "cleared": "cleared"}, "transaction")
+    captured = {}
+    def fake_put(url, json=None, **kwargs):
+        captured["body"] = json
+        return fake
+    with patch("tools.ynab_cli.httpx.put", side_effect=fake_put):
+        result = runner.invoke(app, ["transactions", "update", "tx-1", "--cleared", "cleared"])
+    assert result.exit_code == 0
+    assert captured["body"]["transaction"]["cleared"] == "cleared"
+
+
+def test_transactions_update_no_fields(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    result = runner.invoke(app, ["transactions", "update", "tx-1"])
+    assert result.exit_code == 1
+
+
+def test_transactions_delete(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"id": "tx-1", "deleted": True}, "transaction")
+    captured_url = {}
+    def fake_delete(url, **kwargs):
+        captured_url["url"] = url
+        return fake
+    with patch("tools.ynab_cli.httpx.delete", side_effect=fake_delete):
+        result = runner.invoke(app, ["transactions", "delete", "tx-1"])
+    assert result.exit_code == 0
+    assert "tx-1" in captured_url["url"]

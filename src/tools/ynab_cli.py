@@ -295,5 +295,76 @@ def months_get(
     _out(data["data"]["month"])
 
 
+# ---------------------------------------------------------------------------
+# Transactions
+# ---------------------------------------------------------------------------
+
+@transactions_app.command("list")
+def transactions_list(
+    since: str = typer.Option("", "--since", help="Filter from YYYY-MM-DD"),
+    account_id: str = typer.Option("", "--account-id", help="Limit to one account"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List transactions, optionally filtered by date or account."""
+    params: dict = {}
+    if since:
+        params["since_date"] = since
+    bid = _budget(budget_id)
+    if account_id:
+        path = f"/budgets/{bid}/accounts/{account_id}/transactions"
+    else:
+        path = f"/budgets/{bid}/transactions"
+    data = _get(path, params or None)
+    _out(data["data"]["transactions"])
+
+
+@transactions_app.command("get")
+def transactions_get(
+    tx_id: str = typer.Argument(..., help="Transaction UUID"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Get a single transaction by ID."""
+    data = _get(f"/budgets/{_budget(budget_id)}/transactions/{tx_id}")
+    _out(data["data"]["transaction"])
+
+
+@transactions_app.command("update")
+def transactions_update(
+    tx_id: str = typer.Argument(..., help="Transaction UUID"),
+    payee: str = typer.Option("", "--payee", help="New payee name"),
+    memo: str = typer.Option("", "--memo"),
+    cleared: str = typer.Option("", "--cleared", help="cleared|uncleared|reconciled"),
+    approved: bool | None = typer.Option(None, "--approved/--no-approved"),
+    category_id: str = typer.Option("", "--category-id"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Update fields on an existing transaction (PUT — replaces the transaction)."""
+    tx: dict = {}
+    if payee:
+        tx["payee_name"] = payee[:50]
+    if memo:
+        tx["memo"] = memo[:200]
+    if cleared:
+        tx["cleared"] = cleared
+    if approved is not None:
+        tx["approved"] = approved
+    if category_id:
+        tx["category_id"] = category_id
+    if not tx:
+        _die("No fields to update — provide at least one of --payee, --memo, --cleared, --approved, --category-id")
+    data = _put(f"/budgets/{_budget(budget_id)}/transactions/{tx_id}", {"transaction": tx})
+    _out(data["data"]["transaction"])
+
+
+@transactions_app.command("delete")
+def transactions_delete(
+    tx_id: str = typer.Argument(..., help="Transaction UUID"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Delete a transaction (permanent)."""
+    data = _delete(f"/budgets/{_budget(budget_id)}/transactions/{tx_id}")
+    _out(data["data"]["transaction"])
+
+
 if __name__ == "__main__":
     app()
