@@ -94,11 +94,30 @@ def _build_continuation_envelope(
     parts.append(f"--- Reply from {response.from_agent} ---")
     parts.append(response.payload)
     parts.append("--- End of reply ---")
-    parts.append(
-        "Continue your work using this information. Do NOT re-send the same "
-        "async request. If further work is needed, call the next tool or "
-        "send the next message; otherwise summarise the result."
-    )
+    if entry.reply_channel == "telegram" and entry.reply_chat_id:
+        # Originator-authored feedback loop: the user is on Telegram waiting
+        # for a follow-up. The LLM MUST close the loop with
+        # send_telegram_message before doing anything else. Without this
+        # explicit instruction the LLM tends to log to daily_log and stop,
+        # leaving the user with no Telegram update.
+        parts.append(
+            f"⚠️ FEEDBACK LOOP — REQUIRED ACTION ⚠️\n"
+            f"This continuation originated from a Telegram conversation "
+            f"(reply_channel='telegram', reply_chat_id={entry.reply_chat_id}, "
+            f"intent='{entry.reply_intent or 'n/a'}'). "
+            f"The user is waiting for your follow-up message. "
+            f"You MUST call ``send_telegram_message(text=<user-friendly "
+            f"summary in Italian>)`` NOW, before any daily_log or further "
+            f"reasoning, to close the loop. The tool's triple-guard will "
+            f"verify routing automatically — just pass 'text'. After the "
+            f"send succeeds, you may then optionally daily_log the closure."
+        )
+    else:
+        parts.append(
+            "Continue your work using this information. Do NOT re-send the same "
+            "async request. If further work is needed, call the next tool or "
+            "send the next message; otherwise summarise the result."
+        )
     return A2AMessage(
         # Logical from = the responder; to = ourselves. We piggyback on the
         # existing notification path because the inbox drain loop already
@@ -113,6 +132,10 @@ def _build_continuation_envelope(
         parent_correlation_id=entry.correlation_id,
         hop_count=entry.hop_count,
         max_hops=entry.max_hops,
+        # Reply-routing for the originator-authored feedback loop.
+        reply_channel=entry.reply_channel,
+        reply_chat_id=entry.reply_chat_id,
+        reply_intent=entry.reply_intent,
     )
 
 
@@ -297,18 +320,22 @@ def create_send_message_tool(
                     "wait_response=False."
                 )
             chain = read_chain_context()
-            current_hop = chain["hop_count"] if chain else 0
+            # Chain may now be a partial dict (e.g. only reply_channel /
+            # reply_chat_id, set at the START of a user-facing turn) — use
+            # ``.get()`` with safe defaults instead of subscript access.
+            current_hop = int(chain.get("hop_count", 0)) if chain else 0
             if current_hop >= MAX_HOPS:
+                root = chain.get("root_correlation_id") if chain else None
                 return (
                     f"Error: async chain hop limit ({MAX_HOPS}) reached "
-                    f"(root={chain['root_correlation_id'][:8] if chain else 'n/a'}). "
+                    f"(root={(root or 'n/a')[:8]}). "
                     "Aborting to prevent runaway cascade. Reply directly "
                     "instead of dispatching another async send."
                 )
             correlation_id = str(uuid.uuid4())
             new_hop = current_hop + 1
-            root_cid = chain["root_correlation_id"] if chain else correlation_id
-            parent_cid = chain["parent_correlation_id"] if chain else None
+            root_cid = (chain.get("root_correlation_id") if chain else None) or correlation_id
+            parent_cid = chain.get("parent_correlation_id") if chain else None
             envelope = A2AMessage(
                 from_agent=agent_id, to_agent=to,
                 type="request", payload=message,
@@ -319,6 +346,67 @@ def create_send_message_tool(
                 hop_count=new_hop,
                 max_hops=MAX_HOPS,
             )
+            # Reply-routing fields. Inherit from the chain context (a nested
+            # async send started from a continuation turn keeps the original
+            # user's reply channel) unless the caller explicitly overrides
+            # them in args. Empty strings collapse to None.
+            def _arg_or_chain(arg_name: str, chain_key: str) -> str | None:
+                v = args.get(arg_name)
+                if isinstance(v, str):
+                    v = v.strip() or None
+                if v is not None:
+                    return v
+                if chain is None:
+                    return None
+                cv = chain.get(chain_key)
+                if isinstance(cv, str):
+                    return cv or None
+                return cv
+            reply_channel = _arg_or_chain("reply_channel", "reply_channel")
+            reply_chat_id = _arg_or_chain("reply_chat_id", "reply_chat_id")
+            reply_intent = _arg_or_chain("reply_intent", "reply_intent")
+            # Telegram-turn fallback: if neither LLM args nor chain context
+            # provided reply_channel, but the originating turn IS a Telegram
+            # turn (telegram_bot._stream_to_agent stashed
+            # ``redis_a2a._active_telegram_chat_id``), auto-tag the
+            # delegation as Telegram-routed. This is needed because:
+            #   1) The LLM often forgets to pass reply_channel + reply_chat_id
+            #      despite SOUL.md instructions.
+            #   2) ContextVar from _stream_to_agent doesn't reach here —
+            #      claude_agent_sdk's tool-dispatch task is spawned at
+            #      agent.connect() time, before the per-turn chain context
+            #      is set, so read_chain_context() returns None.
+            # Stash-based fallback uses a turn-scoped attribute on the
+            # shared redis_a2a instance that is set/cleared by the Telegram
+            # handler. concurrent_updates=False guarantees no race.
+            _active_chat_id = getattr(redis_a2a, "_active_telegram_chat_id", None)
+            if not reply_channel and _active_chat_id:
+                reply_channel = "telegram"
+                if not reply_chat_id:
+                    reply_chat_id = _active_chat_id
+                logger.info(
+                    "send_message[%s→%s]: auto-tagged Telegram-originated "
+                    "async dispatch (chat_id=%s, cid=%.8s)",
+                    agent_id, to, _active_chat_id, correlation_id,
+                )
+            # Auto-resolve reply_chat_id from agent config when the LLM set
+            # reply_channel='telegram' but didn't pass a chat_id. Each agent
+            # has exactly one Telegram chat (its allowed_chat_id), so this
+            # is unambiguous and removes the LLM's burden of remembering it.
+            if reply_channel == "telegram" and not reply_chat_id:
+                _cfg = getattr(redis_a2a, "_config", None)
+                if _cfg is not None and _cfg.telegram_chat_id_env:
+                    _resolved = _cfg._resolve(_cfg.telegram_chat_id_env)
+                    if _resolved:
+                        reply_chat_id = _resolved
+                        logger.debug(
+                            "send_message[%s→%s]: auto-resolved reply_chat_id "
+                            "from config (telegram_chat_id_env=%s)",
+                            agent_id, to, _cfg.telegram_chat_id_env,
+                        )
+            envelope.reply_channel = reply_channel
+            envelope.reply_chat_id = reply_chat_id
+            envelope.reply_intent = reply_intent
             entry = PendingEntry(
                 correlation_id=correlation_id,
                 from_agent=agent_id, to_agent=to,
@@ -329,6 +417,9 @@ def create_send_message_tool(
                 hop_count=new_hop,
                 max_hops=MAX_HOPS,
                 context_hint=_truncate(args.get("context_hint"), 500),
+                reply_channel=reply_channel,
+                reply_chat_id=str(reply_chat_id) if reply_chat_id is not None else None,
+                reply_intent=reply_intent,
             )
             try:
                 await pending_store.put(entry)

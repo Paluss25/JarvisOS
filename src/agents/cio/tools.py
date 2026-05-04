@@ -911,6 +911,9 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
                     "wait_response": {"type": "boolean", "default": True},
                     "mode": {"type": "string", "enum": ["sync", "async"], "default": "sync", "description": "sync (default) blocks until reply. async returns instantly; reply arrives as a continuation envelope in a new turn — use for delegated long tasks (>30s)."},
                     "context_hint": {"type": "string", "description": "Optional note (≤500 chars) attached to the pending entry and surfaced in the continuation prompt when async reply arrives."},
+                    "reply_channel": {"type": "string", "enum": ["telegram", "slack", "mattermost", "cron"], "description": "Where the user originally wrote — set this when delegating async work that started from a user channel so the originator can close the loop on the same channel via send_telegram_message."},
+                    "reply_chat_id": {"type": "string", "description": "External channel chat id (Telegram chat id as string). Pass when reply_channel='telegram'."},
+                    "reply_intent": {"type": "string", "description": "Short label describing the delegation, e.g. 'tennis_event_inserted'. Helps the continuation turn pick the right user-facing summary."},
                 },
                 "required": ["to", "message"],
             },
@@ -1553,6 +1556,31 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
     ]
     if send_message is not None:
         all_tools.append(send_message)
+    # ----- send_telegram_message (originator-authored Telegram feedback) -----
+    # Registered only when redis_a2a is wired and this agent has a Telegram
+    # token configured (so headless agents like DON skip it gracefully).
+    _stm_config = getattr(redis_a2a, "_config", None) if redis_a2a is not None else None
+    if _stm_config is not None and _stm_config.telegram_token_env:
+        from agent_runner.tools.send_telegram_message import create_send_telegram_message_tool
+        _send_telegram_fn = create_send_telegram_message_tool(_stm_config, redis_a2a)
+
+        @sdk_tool(
+            "send_telegram_message",
+            "Push a Telegram message to the user's chat OUTSIDE of an active stream. "
+            "Call ONLY from a continuation turn after an [A2A-CONTINUATION] envelope "
+            "drains. Triple-guarded: (1) refuses unless inside a continuation, "
+            "(2) refuses if reply_channel != 'telegram', (3) refuses if reply_chat_id "
+            "!= your allowed_chat_id. Idempotent: a 2nd call for the same "
+            "parent_correlation_id is a no-op (24h TTL). Pass 'text' = user-facing "
+            "summary in Italian, max ~4000 chars.",
+            {"text": str},
+        )
+        async def send_telegram_message(args: dict) -> dict:
+            args = _parse_args(args)
+            return _text(await _send_telegram_fn(args))
+
+        all_tools.append(send_telegram_message)
+
     from agent_runner.tools.memory_box import create_query_memory_tool
     _query_memory = create_query_memory_tool("cio")
     if _query_memory is not None:

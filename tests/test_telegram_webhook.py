@@ -107,19 +107,26 @@ async def test_proxy_returns_404_for_unknown_agent():
 # P2.T1 — _make_webhook_handler
 # ---------------------------------------------------------------------------
 
+def _ptb_mock():
+    """Build a PTB Application mock with an awaitable update_queue.put."""
+    ptb = MagicMock()
+    ptb.bot = MagicMock()
+    ptb.update_queue = MagicMock()
+    ptb.update_queue.put = AsyncMock()
+    return ptb
+
+
 @pytest.mark.asyncio
-async def test_handler_calls_process_update_on_valid_request():
-    """Handler must call ptb_app.process_update() with the parsed Update."""
+async def test_handler_enqueues_update_on_valid_request():
+    """Handler must enqueue the parsed Update onto ptb_app.update_queue."""
     import httpx
     from fastapi import FastAPI
     from agent_runner.interfaces.telegram_bot import _make_webhook_handler
     from telegram import Update
 
-    ptb = MagicMock()
-    ptb.bot = MagicMock()
-    ptb.process_update = AsyncMock()
-
+    ptb = _ptb_mock()
     fake_update = MagicMock(spec=Update)
+    fake_update.update_id = 1
 
     with patch("agent_runner.interfaces.telegram_bot.Update") as mock_cls:
         mock_cls.de_json.return_value = fake_update
@@ -128,13 +135,37 @@ async def test_handler_calls_process_update_on_valid_request():
         app.add_api_route("/telegram/webhook", handler, methods=["POST"])
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post(
-                "/telegram/webhook",
-                json={"update_id": 1},
-            )
+            resp = await client.post("/telegram/webhook", json={"update_id": 1})
 
     assert resp.status_code == 200
-    ptb.process_update.assert_awaited_once_with(fake_update)
+    ptb.update_queue.put.assert_awaited_once_with(fake_update)
+
+
+@pytest.mark.asyncio
+async def test_handler_dedupes_repeat_update_id():
+    """Same update_id seen twice must enqueue once."""
+    import httpx
+    from fastapi import FastAPI
+    from agent_runner.interfaces.telegram_bot import _make_webhook_handler
+    from telegram import Update
+
+    ptb = _ptb_mock()
+    fake_update = MagicMock(spec=Update)
+    fake_update.update_id = 42
+
+    with patch("agent_runner.interfaces.telegram_bot.Update") as mock_cls:
+        mock_cls.de_json.return_value = fake_update
+        handler = _make_webhook_handler(ptb, webhook_secret="")
+        app = FastAPI()
+        app.add_api_route("/telegram/webhook", handler, methods=["POST"])
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            r1 = await client.post("/telegram/webhook", json={"update_id": 42})
+            r2 = await client.post("/telegram/webhook", json={"update_id": 42})
+
+    assert r1.status_code == 200 and r2.status_code == 200
+    # First enqueued; second deduped (no extra put).
+    assert ptb.update_queue.put.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -144,8 +175,7 @@ async def test_handler_rejects_wrong_secret():
     from fastapi import FastAPI
     from agent_runner.interfaces.telegram_bot import _make_webhook_handler
 
-    ptb = MagicMock()
-    ptb.process_update = AsyncMock()
+    ptb = _ptb_mock()
 
     handler = _make_webhook_handler(ptb, webhook_secret="correct_secret")
     app = FastAPI()
@@ -159,7 +189,7 @@ async def test_handler_rejects_wrong_secret():
         )
 
     assert resp.status_code == 403
-    ptb.process_update.assert_not_awaited()
+    ptb.update_queue.put.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -169,12 +199,12 @@ async def test_handler_skips_secret_check_when_secret_empty():
     from fastapi import FastAPI
     from agent_runner.interfaces.telegram_bot import _make_webhook_handler
 
-    ptb = MagicMock()
-    ptb.bot = MagicMock()
-    ptb.process_update = AsyncMock()
+    ptb = _ptb_mock()
+    fake_update = MagicMock()
+    fake_update.update_id = 99
 
     with patch("agent_runner.interfaces.telegram_bot.Update") as mock_cls:
-        mock_cls.de_json.return_value = MagicMock()
+        mock_cls.de_json.return_value = fake_update
         handler = _make_webhook_handler(ptb, webhook_secret="")
         app = FastAPI()
         app.add_api_route("/telegram/webhook", handler, methods=["POST"])
@@ -182,32 +212,33 @@ async def test_handler_skips_secret_check_when_secret_empty():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/telegram/webhook",
-                json={"update_id": 1},
+                json={"update_id": 99},
                 # No secret header at all
             )
 
     assert resp.status_code == 200
-    ptb.process_update.assert_awaited_once()
+    ptb.update_queue.put.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_handler_returns_200_even_when_process_update_raises():
-    """Handler must swallow process_update exceptions and return 200 to Telegram."""
+async def test_handler_returns_200_even_when_enqueue_raises():
+    """Handler must swallow update_queue.put exceptions and return 200 to Telegram."""
     import httpx
     from fastapi import FastAPI
     from agent_runner.interfaces.telegram_bot import _make_webhook_handler
 
-    ptb = MagicMock()
-    ptb.bot = MagicMock()
-    ptb.process_update = AsyncMock(side_effect=RuntimeError("boom"))
+    ptb = _ptb_mock()
+    ptb.update_queue.put = AsyncMock(side_effect=RuntimeError("boom"))
+    fake_update = MagicMock()
+    fake_update.update_id = 7
 
     with patch("agent_runner.interfaces.telegram_bot.Update") as mock_cls:
-        mock_cls.de_json.return_value = MagicMock()
+        mock_cls.de_json.return_value = fake_update
         handler = _make_webhook_handler(ptb, webhook_secret="")
         app = FastAPI()
         app.add_api_route("/telegram/webhook", handler, methods=["POST"])
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post("/telegram/webhook", json={"update_id": 1})
+            resp = await client.post("/telegram/webhook", json={"update_id": 7})
 
     assert resp.status_code == 200

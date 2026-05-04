@@ -1356,6 +1356,30 @@ async def _stream_to_agent(
             except Exception as final_exc:
                 logger.error("telegram: all error notification fallbacks failed — %s", final_exc)
 
+    # Auto-inject the originator's reply-routing into the chain context so
+    # any send_message(mode='async') in this turn persists reply_channel /
+    # reply_chat_id on the PendingEntry without the LLM having to pass them.
+    # The continuation turn then has the data available via read_chain_context()
+    # for send_telegram_message's triple-guard.
+    #
+    # ContextVar fallback: claude_agent_sdk's tool-dispatch task may be
+    # spawned at agent.connect() time, before this contextvar is set, so the
+    # tool call cannot read it. As a robust complement we ALSO stash the
+    # active chat_id directly on the redis_a2a instance — send_message reads
+    # both. Single-active-turn per agent (concurrent_updates=False) means
+    # no race. Cleared in the finally block so cron/heartbeat turns aren't
+    # mis-tagged as Telegram-originated.
+    # See: projects/jarvios-async-feedback-loop/2026-05-03-jarvios-async-feedback-loop.md
+    from agent_runner.comms.chain_context import set_chain_context, reset_chain_context
+    _chain_token = set_chain_context({
+        "reply_channel": "telegram",
+        "reply_chat_id": str(chat_id),
+        "reply_intent": None,  # filled in optionally by the LLM via the arg
+    })
+    _redis_a2a = context.bot_data.get("redis_a2a")
+    if _redis_a2a is not None:
+        _redis_a2a._active_telegram_chat_id = str(chat_id)  # type: ignore[attr-defined]
+
     try:
         async for chunk in agent.stream(text, session_id=session_id):
             # Abort fence: a newer message arrived for this chat — stop this stream
@@ -1427,6 +1451,12 @@ async def _stream_to_agent(
     finally:
         _stop_tasks()
         await _drain_tasks()
+        reset_chain_context(_chain_token)
+        if _redis_a2a is not None:
+            try:
+                delattr(_redis_a2a, "_active_telegram_chat_id")
+            except AttributeError:
+                pass
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1789,6 +1819,18 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if not t.done():
                 t.cancel()
 
+    # Same chain-context + redis_a2a stash as the text path so async A2A
+    # delegations from a voice turn also persist reply_channel / reply_chat_id.
+    from agent_runner.comms.chain_context import set_chain_context, reset_chain_context
+    _voice_chain_token = set_chain_context({
+        "reply_channel": "telegram",
+        "reply_chat_id": str(chat_id),
+        "reply_intent": None,
+    })
+    _redis_a2a_voice = context.bot_data.get("redis_a2a")
+    if _redis_a2a_voice is not None:
+        _redis_a2a_voice._active_telegram_chat_id = str(chat_id)  # type: ignore[attr-defined]
+
     try:
         async for chunk in agent.stream(text, session_id=session_id):
             if _chat_generations.get(chat_id) != my_gen:
@@ -1867,6 +1909,12 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     finally:
         _stop()
         await asyncio.gather(*tasks, return_exceptions=True)
+        reset_chain_context(_voice_chain_token)
+        if _redis_a2a_voice is not None:
+            try:
+                delattr(_redis_a2a_voice, "_active_telegram_chat_id")
+            except AttributeError:
+                pass
 
 
 async def _handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2140,13 +2188,36 @@ async def start_polling(agent: Any, session_manager: Any, config: Any, redis_a2a
 # ---------------------------------------------------------------------------
 
 def _make_webhook_handler(ptb_app: Any, webhook_secret: str):
-    """Return a FastAPI route handler that processes incoming Telegram webhook updates.
+    """Return a FastAPI route handler that enqueues incoming Telegram updates.
 
-    Extracted so it can be unit-tested independently of the full startup lifecycle.
-    Always returns 200 OK — exceptions from process_update are caught and logged
-    so Telegram does not retry the same update in a loop.
+    Decoupled from PTB handler execution: parses + validates + drops duplicates,
+    then ``await update_queue.put(update)`` and returns 200 immediately. PTB's
+    internal update-processor (started by ``app.start()``) drains the queue in
+    its own coroutine, preserving per-chat ordering with concurrent_updates=False.
+
+    This eliminates the original failure mode where slow LLM streams (sync A2A
+    >30s) caused the webhook ACK to time out, triggering retries / dup re-fires
+    that bumped ``_chat_generations`` and aborted the in-flight stream's
+    Telegram delivery.
+
+    Update-ID dedupe: bounded in-memory set guards against upstream retries
+    (Telegram or proxy) creating generation-bump races on the same chat.
     """
     from fastapi import HTTPException, Request, Response
+
+    # Bounded ring of recently-seen update ids. Keys: int update_id, value: None.
+    # Size cap prevents unbounded growth; eviction is FIFO via ``OrderedDict``.
+    from collections import OrderedDict
+    _seen_update_ids: "OrderedDict[int, None]" = OrderedDict()
+    _SEEN_CAP = 4096
+
+    def _is_duplicate(update_id: int) -> bool:
+        if update_id in _seen_update_ids:
+            return True
+        _seen_update_ids[update_id] = None
+        if len(_seen_update_ids) > _SEEN_CAP:
+            _seen_update_ids.popitem(last=False)  # FIFO eviction
+        return False
 
     async def _handler(request: Request) -> Response:
         secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
@@ -2155,11 +2226,21 @@ def _make_webhook_handler(ptb_app: Any, webhook_secret: str):
         try:
             data = await request.json()
             update = Update.de_json(data, ptb_app.bot)
-            await ptb_app.process_update(update)
+            if update is None:
+                # Malformed payload — log and ack so Telegram doesn't retry.
+                logger.warning("telegram: webhook received malformed update payload")
+                return Response()
+            if update.update_id is not None and _is_duplicate(update.update_id):
+                logger.info(
+                    "telegram: webhook deduped duplicate update_id=%d",
+                    update.update_id,
+                )
+                return Response()
+            await ptb_app.update_queue.put(update)
         except HTTPException:
             raise
         except Exception as exc:
-            logger.exception("telegram: webhook process_update failed — %s", exc)
+            logger.exception("telegram: webhook enqueue failed — %s", exc)
         return Response()
 
     return _handler

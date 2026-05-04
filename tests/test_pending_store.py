@@ -169,3 +169,33 @@ async def test_optional_fields_round_trip_with_values(store):
     assert claimed.sender_user_id == "user-42"
     assert claimed.context_hint == "some hint with unicode é à 😀"
     assert claimed.root_correlation_id == "root-cid"
+
+
+@pytest.mark.asyncio
+async def test_reply_routing_fields_round_trip(store):
+    """Codex review fix #1: structured reply-routing metadata on PendingEntry."""
+    e = _entry(
+        cid="reply-routing",
+        reply_channel="telegram",
+        reply_chat_id="7218812451",
+        reply_intent="tennis_event_inserted",
+    )
+    await store.put(e)
+    claimed = await store.claim(e.correlation_id)
+    assert claimed is not None
+    assert claimed.reply_channel == "telegram"
+    assert claimed.reply_chat_id == "7218812451"
+    assert claimed.reply_intent == "tennis_event_inserted"
+
+
+@pytest.mark.asyncio
+async def test_reply_routing_fields_default_to_none(store):
+    """Backward-compat: an entry created without the new fields must round-trip
+    cleanly, returning None for each (not '' or 'None')."""
+    e = _entry(cid="legacy-no-reply-fields")
+    await store.put(e)
+    claimed = await store.claim(e.correlation_id)
+    assert claimed is not None
+    assert claimed.reply_channel is None
+    assert claimed.reply_chat_id is None
+    assert claimed.reply_intent is None

@@ -21,3 +21,9 @@ class A2AMessage:
     parent_correlation_id: str | None = None    # cid that triggered this message (None for the root)
     hop_count: int = 0                          # incremented per async send; bounded by max_hops
     max_hops: int = 5                           # tool rejects new async sends when hop_count >= max_hops
+    # Reply-routing metadata: copied verbatim from the originator's PendingEntry
+    # onto the continuation envelope so the drain loop can hydrate chain_context.
+    # See projects/jarvios-async-feedback-loop/2026-05-03-jarvios-async-feedback-loop.md
+    reply_channel: str | None = None            # "telegram" | "slack" | "mattermost" | "cron" | None
+    reply_chat_id: str | None = None            # external channel id (Telegram chat id as string)
+    reply_intent: str | None = None             # short label, e.g. "tennis_event_inserted"
