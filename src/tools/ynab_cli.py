@@ -105,5 +105,61 @@ def _milliunits(amount: float, direction: str) -> int:
     return -base if direction == "outflow" else base
 
 
+# ---------------------------------------------------------------------------
+# Budgets
+# ---------------------------------------------------------------------------
+
+@budgets_app.command("list")
+def budgets_list():
+    """List all budgets."""
+    data = _get("/budgets")
+    _out(data["data"]["budgets"])
+
+
+@budgets_app.command("get")
+def budgets_get(
+    budget_id: str = typer.Option("", "--budget-id", help="Budget ID or 'last-used'"),
+):
+    """Get a budget's full detail."""
+    data = _get(f"/budgets/{_budget(budget_id)}")
+    _out(data["data"]["budget"])
+
+
+# ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+
+@accounts_app.command("list")
+def accounts_list(
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """List all accounts for a budget."""
+    data = _get(f"/budgets/{_budget(budget_id)}/accounts")
+    _out(data["data"]["accounts"])
+
+
+@accounts_app.command("get")
+def accounts_get(
+    account_id: str = typer.Argument(..., help="Account UUID"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Get a single account."""
+    data = _get(f"/budgets/{_budget(budget_id)}/accounts/{account_id}")
+    _out(data["data"]["account"])
+
+
+@accounts_app.command("create")
+def accounts_create(
+    name: str = typer.Option(..., "--name", help="Account name"),
+    type_: str = typer.Option(..., "--type", help="checking|savings|creditCard|cash|lineOfCredit|mortgage|autoLoan|studentLoan|personalLoan|medicalDebt|otherDebt|otherAsset|otherLiability"),
+    balance: float = typer.Option(0.0, "--balance", help="Opening balance in EUR"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Create a new account."""
+    body = {"account": {"name": name, "type": type_, "balance": int(round(balance * 1000))}}
+    data = _post(f"/budgets/{_budget(budget_id)}/accounts", body)
+    _out(data["data"]["account"])
+
+
 if __name__ == "__main__":
     app()
