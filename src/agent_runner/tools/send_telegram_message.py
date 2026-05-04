@@ -49,14 +49,22 @@ def create_send_telegram_message_tool(config: AgentConfig, redis_a2a):
             text = text[: _TEXT_HARD_LIMIT - 1] + "…"
 
         # ----- Guard 1: must be inside a continuation turn ----------------
+        # The original Telegram turn ALSO sets a partial chain context
+        # (reply_channel + reply_chat_id only, populated by _stream_to_agent
+        # so that send_message(mode='async') can persist them on the
+        # PendingEntry). To distinguish that from a real continuation drain,
+        # require ``parent_correlation_id`` — only the inbox drain loop
+        # sets it (from the continuation envelope's parent_correlation_id).
         chain = read_chain_context()
-        if chain is None:
+        parent_cid = chain.get("parent_correlation_id") if chain else None
+        if not parent_cid:
             return (
                 "Error: send_telegram_message refused — not in an A2A "
-                "continuation turn. This tool is only callable from the "
-                "follow-up turn that fires when an [A2A-CONTINUATION] "
-                "envelope drains. NEVER call it from an active Telegram "
-                "stream (would double-post)."
+                "continuation turn (no parent_correlation_id in chain). "
+                "This tool is only callable from the follow-up turn that "
+                "fires when an [A2A-CONTINUATION] envelope drains. From "
+                "the original Telegram stream, just reply normally — the "
+                "stream's own placeholder edit delivers your text."
             )
 
         # ----- Guard 2: continuation must originate from Telegram --------
@@ -86,7 +94,7 @@ def create_send_telegram_message_tool(config: AgentConfig, redis_a2a):
             )
 
         # ----- Idempotency lock ------------------------------------------
-        parent_cid = chain.get("parent_correlation_id")
+        # parent_cid is guaranteed non-None here (guard #1 enforces it).
         idem_key = f"a2a:feedback-sent:{parent_cid}"
         try:
             claimed = await redis_a2a.client.set(

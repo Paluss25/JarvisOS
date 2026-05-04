@@ -110,6 +110,26 @@ async def test_refuses_without_chain_context(tool):
     MockBot.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_refuses_with_partial_chain_no_parent_cid(tool):
+    """The original Telegram turn sets reply_channel/reply_chat_id (so
+    send_message persists them on PendingEntry) but NOT parent_correlation_id.
+    The tool must refuse — only the continuation drain has parent_cid."""
+    token = set_chain_context({
+        "reply_channel": "telegram",
+        "reply_chat_id": ALLOWED_CHAT_ID,
+        "reply_intent": None,
+        # NOTE: no parent_correlation_id — this is the original turn case.
+    })
+    try:
+        with patch("agent_runner.tools.send_telegram_message.Bot") as MockBot:
+            out = await tool({"text": "hello"})
+    finally:
+        reset_chain_context(token)
+    assert "not in an A2A continuation turn" in out
+    MockBot.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Refusal #2: wrong reply_channel
 # ---------------------------------------------------------------------------
