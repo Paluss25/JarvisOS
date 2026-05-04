@@ -94,11 +94,30 @@ def _build_continuation_envelope(
     parts.append(f"--- Reply from {response.from_agent} ---")
     parts.append(response.payload)
     parts.append("--- End of reply ---")
-    parts.append(
-        "Continue your work using this information. Do NOT re-send the same "
-        "async request. If further work is needed, call the next tool or "
-        "send the next message; otherwise summarise the result."
-    )
+    if entry.reply_channel == "telegram" and entry.reply_chat_id:
+        # Originator-authored feedback loop: the user is on Telegram waiting
+        # for a follow-up. The LLM MUST close the loop with
+        # send_telegram_message before doing anything else. Without this
+        # explicit instruction the LLM tends to log to daily_log and stop,
+        # leaving the user with no Telegram update.
+        parts.append(
+            f"⚠️ FEEDBACK LOOP — REQUIRED ACTION ⚠️\n"
+            f"This continuation originated from a Telegram conversation "
+            f"(reply_channel='telegram', reply_chat_id={entry.reply_chat_id}, "
+            f"intent='{entry.reply_intent or 'n/a'}'). "
+            f"The user is waiting for your follow-up message. "
+            f"You MUST call ``send_telegram_message(text=<user-friendly "
+            f"summary in Italian>)`` NOW, before any daily_log or further "
+            f"reasoning, to close the loop. The tool's triple-guard will "
+            f"verify routing automatically — just pass 'text'. After the "
+            f"send succeeds, you may then optionally daily_log the closure."
+        )
+    else:
+        parts.append(
+            "Continue your work using this information. Do NOT re-send the same "
+            "async request. If further work is needed, call the next tool or "
+            "send the next message; otherwise summarise the result."
+        )
     return A2AMessage(
         # Logical from = the responder; to = ourselves. We piggyback on the
         # existing notification path because the inbox drain loop already
@@ -365,10 +384,10 @@ def create_send_message_tool(
                 reply_channel = "telegram"
                 if not reply_chat_id:
                     reply_chat_id = _active_chat_id
-                logger.debug(
+                logger.info(
                     "send_message[%s→%s]: auto-tagged Telegram-originated "
-                    "async dispatch (chat_id=%s)",
-                    agent_id, to, _active_chat_id,
+                    "async dispatch (chat_id=%s, cid=%.8s)",
+                    agent_id, to, _active_chat_id, correlation_id,
                 )
             # Auto-resolve reply_chat_id from agent config when the LLM set
             # reply_channel='telegram' but didn't pass a chat_id. Each agent
