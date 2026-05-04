@@ -80,6 +80,18 @@ rules:
     conditions:
       sender: "*villaggiobitcoin.it*"
     folder: "Folders/Crypto"
+
+  - name: "Amazon IT"
+    match: all
+    conditions:
+      sender: "*amazon.it*"
+    folder: "Folders/AcquistiOnLine/Amazon"
+
+  - name: "Amazon COM"
+    match: all
+    conditions:
+      sender: "*amazon.com*"
+    folder: "Folders/AcquistiOnLine/Amazon"
 # Example rules (uncomment and edit as needed):
 #
 #   - name: "Amazon ordini"
