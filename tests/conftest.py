@@ -37,6 +37,7 @@ _UNIT_TEST_FILES = {
     "test_model_factory.py",
     "test_model_routing_guard.py",
     "test_permission_layer.py",
+    "test_plane_client.py",
     "test_redaction_engine.py",
     "test_telegram_webhook.py",
     "test_extractor.py",
