@@ -341,3 +341,85 @@ def test_transactions_delete(monkeypatch):
         result = runner.invoke(app, ["transactions", "delete", "tx-1"])
     assert result.exit_code == 0
     assert "tx-1" in captured_url["url"]
+
+
+# ---------------------------------------------------------------------------
+# Transactions — create / create-bulk
+# ---------------------------------------------------------------------------
+
+def test_transactions_create_outflow(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"id": "tx-new", "amount": -45900}, "transaction")
+    captured = {}
+    def fake_post(url, json=None, **kwargs):
+        captured["body"] = json
+        return fake
+    with patch("tools.ynab_cli.httpx.post", side_effect=fake_post):
+        result = runner.invoke(app, [
+            "transactions", "create",
+            "--account-id", "acct-1",
+            "--date", "2026-05-04",
+            "--amount", "45.90",
+            "--direction", "outflow",
+            "--payee", "Amazon",
+        ])
+    assert result.exit_code == 0
+    tx = captured["body"]["transaction"]
+    assert tx["amount"] == -45900
+    assert tx["payee_name"] == "Amazon"
+    assert tx["cleared"] == "uncleared"
+    assert tx["approved"] is False
+
+
+def test_transactions_create_inflow_with_import_id(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"id": "tx-sal"}, "transaction")
+    captured = {}
+    def fake_post(url, json=None, **kwargs):
+        captured["body"] = json
+        return fake
+    with patch("tools.ynab_cli.httpx.post", side_effect=fake_post):
+        result = runner.invoke(app, [
+            "transactions", "create",
+            "--account-id", "acct-1",
+            "--date", "2026-05-01",
+            "--amount", "1500.00",
+            "--direction", "inflow",
+            "--payee", "Stipendio",
+            "--import-id", "SAL-2026-05",
+        ])
+    assert result.exit_code == 0
+    tx = captured["body"]["transaction"]
+    assert tx["amount"] == 1500000
+    assert tx["import_id"] == "SAL-2026-05"
+
+
+def test_transactions_create_bulk(monkeypatch, tmp_path):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    txns = [
+        {"account_id": "acct-1", "date": "2026-05-04", "amount": -10000},
+        {"account_id": "acct-1", "date": "2026-05-04", "amount": -5000},
+    ]
+    f = tmp_path / "txns.json"
+    f.write_text(json.dumps(txns))
+    fake = _fake_resp({"transaction_ids": ["tx-1", "tx-2"]})
+    captured = {}
+    def fake_post(url, json=None, **kwargs):
+        captured["body"] = json
+        return fake
+    with patch("tools.ynab_cli.httpx.post", side_effect=fake_post):
+        result = runner.invoke(app, ["transactions", "create-bulk", "--file", str(f)])
+    assert result.exit_code == 0
+    assert len(captured["body"]["transactions"]) == 2
+
+
+def test_transactions_create_bulk_invalid_json(monkeypatch, tmp_path):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    f = tmp_path / "bad.json"
+    f.write_text("not json")
+    result = runner.invoke(app, ["transactions", "create-bulk", "--file", str(f)])
+    assert result.exit_code == 1

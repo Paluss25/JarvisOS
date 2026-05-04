@@ -366,5 +366,63 @@ def transactions_delete(
     _out(data["data"]["transaction"])
 
 
+@transactions_app.command("create")
+def transactions_create(
+    account_id: str = typer.Option(..., "--account-id", help="Account UUID"),
+    date_: str = typer.Option(..., "--date", help="YYYY-MM-DD"),
+    amount: float = typer.Option(..., "--amount", help="Positive EUR amount"),
+    direction: str = typer.Option("outflow", "--direction", help="outflow|inflow"),
+    payee: str = typer.Option("", "--payee", help="Payee name (max 50 chars)"),
+    payee_id: str = typer.Option("", "--payee-id", help="Existing payee UUID (takes priority over --payee)"),
+    memo: str = typer.Option("", "--memo", help="Memo (max 200 chars)"),
+    category_id: str = typer.Option("", "--category-id"),
+    import_id: str = typer.Option("", "--import-id", help="Dedupe key (max 36 chars)"),
+    cleared: str = typer.Option("uncleared", "--cleared", help="cleared|uncleared|reconciled"),
+    approved: bool = typer.Option(False, "--approved/--no-approved"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Create a single transaction."""
+    tx: dict = {
+        "account_id": account_id,
+        "date": date_,
+        "amount": _milliunits(amount, direction),
+        "cleared": cleared,
+        "approved": approved,
+    }
+    if payee_id:
+        tx["payee_id"] = payee_id
+    elif payee:
+        tx["payee_name"] = payee[:50]
+    if memo:
+        tx["memo"] = memo[:200]
+    if category_id:
+        tx["category_id"] = category_id
+    if import_id:
+        tx["import_id"] = import_id[:36]
+    data = _post(f"/budgets/{_budget(budget_id)}/transactions", {"transaction": tx})
+    _out(data["data"]["transaction"])
+
+
+@transactions_app.command("create-bulk")
+def transactions_create_bulk(
+    file_path: str = typer.Option(..., "--file", help="Path to JSON file containing array of transaction objects"),
+    budget_id: str = typer.Option("", "--budget-id"),
+):
+    """Create multiple transactions from a JSON file. Each object must match the YNAB transaction schema."""
+    import pathlib
+    try:
+        raw = pathlib.Path(file_path).read_text(encoding="utf-8")
+    except OSError as exc:
+        _die(f"Cannot read file {file_path}: {exc}")
+    try:
+        txns = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        _die(f"Invalid JSON in {file_path}: {exc}")
+    if not isinstance(txns, list):
+        _die("--file must contain a JSON array of transaction objects")
+    data = _post(f"/budgets/{_budget(budget_id)}/transactions", {"transactions": txns})
+    _out(data["data"])
+
+
 if __name__ == "__main__":
     app()
