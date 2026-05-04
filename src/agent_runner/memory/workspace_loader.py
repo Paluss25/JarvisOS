@@ -23,6 +23,7 @@ _DAILY_MAX_CHARS = 8_000
 _YESTERDAY_MAX_CHARS = 4_000
 _MEMORY_MAX_CHARS = 10_000
 _DREAMS_MAX_CHARS = 6_000
+_SKILLS_MAX_CHARS = 12_000
 
 
 def _read(path: Path) -> str:
@@ -52,6 +53,72 @@ def _read_head(path: Path, max_chars: int) -> str:
         logger.debug("workspace_loader: truncating %s (%d→%d chars)", path.name, len(content), max_chars)
         return content[:max_chars]
     return content
+
+
+def _skill_search_roots(root: Path) -> list[Path]:
+    """Return AgentSkills-compatible locations for this agent workspace."""
+    candidates = [
+        root.parent / "skills",
+        root.parent / ".agents" / "skills",
+        root / ".agents" / "skills",
+        root / "skills",
+    ]
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(path)
+    return unique
+
+
+def _extract_frontmatter_value(frontmatter: str, key: str) -> str:
+    prefix = f"{key}:"
+    for line in frontmatter.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix):].strip().strip("\"'")
+    return ""
+
+
+def _format_skill(path: Path) -> str:
+    content = _read(path)
+    if not content:
+        return ""
+
+    name = path.parent.name
+    description = ""
+    body = content
+    if content.startswith("---\n"):
+        parts = content.split("---", 2)
+        if len(parts) == 3:
+            frontmatter = parts[1]
+            body = parts[2].strip()
+            name = _extract_frontmatter_value(frontmatter, "name") or name
+            description = _extract_frontmatter_value(frontmatter, "description")
+
+    header = f"### {name}"
+    if description:
+        header = f"{header}\n\n{description}"
+    return f"{header}\n\n{body}".strip()
+
+
+def _read_skills(root: Path) -> str:
+    """Load AgentSkills/OpenClaw-compatible SKILL.md files for prompt injection."""
+    sections: list[str] = []
+    loaded_names: set[str] = set()
+    for skills_root in _skill_search_roots(root):
+        if not skills_root.exists():
+            continue
+        for skill_md in sorted(skills_root.glob("*/SKILL.md")):
+            skill_name = skill_md.parent.name
+            if skill_name in loaded_names:
+                continue
+            rendered = _format_skill(skill_md)
+            if rendered:
+                sections.append(rendered)
+                loaded_names.add(skill_name)
+    return "\n\n---\n\n".join(sections)[:_SKILLS_MAX_CHARS]
 
 
 def load_workspace_context(workspace_path: str | Path) -> dict:
@@ -90,6 +157,7 @@ def load_workspace_context(workspace_path: str | Path) -> dict:
         "daily":     _read_tail(root / "memory" / f"{date.today().isoformat()}.md", _DAILY_MAX_CHARS),
         "yesterday": _read_tail(root / "memory" / f"{(date.today() - timedelta(days=1)).isoformat()}.md", _YESTERDAY_MAX_CHARS),
         "architecture": _read(root / "ARCHITECTURE.md"),
+        "skills": _read_skills(root),
     }
 
     loaded = [k for k, v in ctx.items() if v]

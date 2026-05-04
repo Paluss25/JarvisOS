@@ -1,0 +1,21 @@
+{
+  "name": "@homelab/html-text-cli",
+  "version": "0.1.0",
+  "description": "CLI for extracting readable Markdown/text from HTML files and pages using Readability plus Turndown.",
+  "type": "module",
+  "bin": {
+    "html-text": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/cli.js"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "jsdom": "^26.0.0",
+    "turndown": "^7.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

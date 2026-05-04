@@ -550,6 +550,7 @@ def _build_system_prompt(ctx: dict) -> str:
         ("daily", "Today's Memory Log"),
         ("yesterday", "Yesterday's Memory Log"),
         ("tools_md", "Tool Conventions"),
+        ("skills", "Skills"),
         ("heartbeat", "Scheduled Tasks"),
         ("architecture", "Technical Architecture"),
     ]

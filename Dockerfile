@@ -48,6 +48,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Install Claude CLI
 RUN npm install -g @anthropic-ai/claude-code
 
+# Install shared HTML extraction CLI for all agents
+COPY html-text-cli /tmp/html-text-cli
+RUN npm install -g /tmp/html-text-cli
+
 # Install minimal cfo-cli package
 COPY cfo-cli-pkg /tmp/cfo-cli-pkg
 RUN pip install /tmp/cfo-cli-pkg

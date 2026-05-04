@@ -15,6 +15,7 @@ import pytest
 
 _UNIT_TEST_FILES = {
     "test_agent_runner_config.py",
+    "test_agent_skills_loader.py",
     "test_audit_writer.py",
     "test_base_agent_client.py",
     "test_classifier.py",
