@@ -292,6 +292,22 @@ def test_transactions_list_by_account(monkeypatch):
     assert "accounts/acct-1/transactions" in captured_url["url"]
 
 
+def test_transactions_get(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+    fake = _fake_resp({"id": "tx-1", "amount": -45900}, "transaction")
+    captured_url = {}
+    def fake_get(url, **kwargs):
+        captured_url["url"] = url
+        return fake
+    with patch("tools.ynab_cli.httpx.get", side_effect=fake_get):
+        result = runner.invoke(app, ["transactions", "get", "tx-1"])
+    assert result.exit_code == 0
+    assert "tx-1" in captured_url["url"]
+    out = json.loads(result.output)
+    assert out["id"] == "tx-1"
+
+
 def test_transactions_update(monkeypatch):
     monkeypatch.setenv("YNAB_API_KEY", "test-key")
     monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
