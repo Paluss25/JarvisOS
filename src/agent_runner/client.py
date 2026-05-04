@@ -8,6 +8,7 @@ streaming mode by default.
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 
 from claude_agent_sdk import (
@@ -48,11 +49,20 @@ class BaseAgentClient:
         await client.disconnect()
     """
 
-    def __init__(self, config: AgentConfig, system_prompt: str, options: ClaudeAgentOptions, redis_a2a=None) -> None:
+    def __init__(
+        self,
+        config: AgentConfig,
+        system_prompt: str,
+        options: ClaudeAgentOptions,
+        redis_a2a=None,
+        skills_signature: str = "",
+    ) -> None:
         self.config = config
         self.name = config.name
         self._system_prompt = system_prompt
         self._options = options
+        self._skills_signature = skills_signature
+        self._skills_last_check = 0.0
         # Validate timeout layering: outer A2A cap must leave room for the
         # inner SDK stream timeout + margin so the receiver can always publish
         # a sentinel response on hard-cap exit.
@@ -100,6 +110,54 @@ class BaseAgentClient:
 
     # -- Lifecycle ----------------------------------------------------------
 
+    def _update_options(self, update: dict) -> None:
+        try:
+            updated = self._options.model_copy(update=update)
+            if all(getattr(updated, key, None) == value for key, value in update.items()):
+                self._options = updated
+                return
+        except AttributeError:
+            pass
+        for key, value in update.items():
+            setattr(self._options, key, value)
+
+    def _refresh_skill_snapshot_options(self, force: bool = False) -> bool:
+        if not self.config.effective_skills_watch_enabled:
+            return False
+        now = time.monotonic()
+        debounce = max(0.0, self.config.effective_skills_watch_debounce_s)
+        if not force and now - self._skills_last_check < debounce:
+            return False
+        self._skills_last_check = now
+        try:
+            from agent_runner.memory.workspace_loader import load_workspace_context
+
+            ctx = load_workspace_context(
+                self.config.workspace_path,
+                skills_allowlist=self.config.skill_allowlist,
+            )
+            signature = ctx.get("skills_signature", "")
+            if signature == self._skills_signature:
+                return False
+            system_prompt = _build_system_prompt(ctx)
+            self._system_prompt = system_prompt
+            self._skills_signature = signature
+            self._update_options({"system_prompt": system_prompt})
+            logger.info("agent[%s]: refreshed skills snapshot", self.config.id)
+            return True
+        except Exception as exc:
+            logger.warning("agent[%s]: skills snapshot refresh failed — %s", self.config.id, exc)
+            return False
+
+    async def _refresh_skill_subprocess_if_needed(self) -> None:
+        changed = self._refresh_skill_snapshot_options()
+        if not changed or not self._sdk:
+            return
+        await self._sdk.disconnect()
+        self._sdk = ClaudeSDKClient(options=self._options)
+        await self._sdk.connect()
+        logger.info("agent[%s]: reconnected after skills snapshot refresh", self.config.id)
+
     def _refresh_mcp_options(self) -> None:
         """Rebuild the in-process MCP server before each (re)connect.
 
@@ -128,14 +186,10 @@ class BaseAgentClient:
         mcp_servers = {f"{self.config.id}-tools": new_server}
         if self.config.extra_mcp_servers:
             mcp_servers.update(self.config.extra_mcp_servers)
-        try:
-            self._options = self._options.model_copy(
-                update={"mcp_servers": mcp_servers}
-            )
-        except AttributeError:
-            self._options.mcp_servers = mcp_servers
+        self._update_options({"mcp_servers": mcp_servers})
 
     async def connect(self) -> None:
+        self._refresh_skill_snapshot_options(force=True)
         self._refresh_mcp_options()
         self._sdk = ClaudeSDKClient(options=self._options)
         await self._sdk.connect()
@@ -332,6 +386,7 @@ class BaseAgentClient:
                 # Fix Issue 2: guard the retry path with a null-check and wrap the
                 # second query() call in its own try/except.
                 async with self._lock:
+                    await self._refresh_skill_subprocess_if_needed()
                     try:
                         await self._sdk.query(message, session_id=session_id or "default")
                     except Exception as exc:
@@ -396,6 +451,7 @@ class BaseAgentClient:
         # yields — an early break / cancellation by the caller would otherwise
         # permanently hold the lock and deadlock future query() calls.
         async with self._lock:
+            await self._refresh_skill_subprocess_if_needed()
             try:
                 await self._sdk.query(message, session_id=session_id or "default")
             except Exception as exc:
@@ -456,6 +512,7 @@ class BaseAgentClient:
             raise RuntimeError(f"{self.name} not connected")
         # Fix Issue 1 (stream_image): same pattern — lock only covers dispatch.
         async with self._lock:
+            await self._refresh_skill_subprocess_if_needed()
             try:
                 await self._sdk.query(_prompt_stream(), session_id=session_id or "default")
             except Exception as exc:
@@ -484,7 +541,7 @@ def create_agent_client(config: AgentConfig, redis_a2a=None) -> "BaseAgentClient
     from agent_runner.memory.workspace_loader import load_workspace_context
 
     workspace_path = config.workspace_path
-    ctx = load_workspace_context(workspace_path)
+    ctx = load_workspace_context(workspace_path, skills_allowlist=config.skill_allowlist)
     system_prompt = _build_system_prompt(ctx)
 
     # MCP servers
@@ -535,6 +592,7 @@ def create_agent_client(config: AgentConfig, redis_a2a=None) -> "BaseAgentClient
         system_prompt=system_prompt,
         options=options,
         redis_a2a=redis_a2a,
+        skills_signature=ctx.get("skills_signature", ""),
     )
 
 

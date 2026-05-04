@@ -5,8 +5,14 @@ Missing optional files are returned as empty strings (never raise).
 """
 
 import logging
+import hashlib
+import os
+import shutil
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -73,12 +79,56 @@ def _skill_search_roots(root: Path) -> list[Path]:
     return unique
 
 
-def _extract_frontmatter_value(frontmatter: str, key: str) -> str:
-    prefix = f"{key}:"
-    for line in frontmatter.splitlines():
-        if line.startswith(prefix):
-            return line[len(prefix):].strip().strip("\"'")
-    return ""
+def _parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
+    if not content.startswith("---\n"):
+        return {}, content
+    parts = content.split("---", 2)
+    if len(parts) != 3:
+        return {}, content
+    raw_meta = yaml.safe_load(parts[1]) or {}
+    meta = raw_meta if isinstance(raw_meta, dict) else {}
+    return meta, parts[2].strip()
+
+
+def _metadata_requires(meta: dict[str, Any]) -> dict[str, Any]:
+    metadata = meta.get("metadata")
+    if not isinstance(metadata, dict):
+        return {}
+    direct = metadata.get("requires")
+    if isinstance(direct, dict):
+        return direct
+    for value in metadata.values():
+        if isinstance(value, dict) and isinstance(value.get("requires"), dict):
+            return value["requires"]
+    return {}
+
+
+def _list_value(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []
+
+
+def _requirements_available(meta: dict[str, Any]) -> bool:
+    requires = _metadata_requires(meta)
+    bins = _list_value(requires.get("bins"))
+    if bins and not all(shutil.which(name) for name in bins):
+        return False
+    any_bins = _list_value(requires.get("anyBins"))
+    if any_bins and not any(shutil.which(name) for name in any_bins):
+        return False
+    env = _list_value(requires.get("env"))
+    if env and not all(os.environ.get(name) for name in env):
+        return False
+    # Structured config requirements are intentionally not inferred; the user
+    # or deploy config should allowlist such skills only after provisioning.
+    if requires.get("config"):
+        return False
+    return True
 
 
 def _format_skill(path: Path) -> str:
@@ -89,13 +139,13 @@ def _format_skill(path: Path) -> str:
     name = path.parent.name
     description = ""
     body = content
-    if content.startswith("---\n"):
-        parts = content.split("---", 2)
-        if len(parts) == 3:
-            frontmatter = parts[1]
-            body = parts[2].strip()
-            name = _extract_frontmatter_value(frontmatter, "name") or name
-            description = _extract_frontmatter_value(frontmatter, "description")
+    meta, parsed_body = _parse_frontmatter(content)
+    if meta:
+        if not _requirements_available(meta):
+            return ""
+        body = parsed_body
+        name = str(meta.get("name", "")).strip() or name
+        description = str(meta.get("description", "")).strip()
 
     header = f"### {name}"
     if description:
@@ -103,25 +153,64 @@ def _format_skill(path: Path) -> str:
     return f"{header}\n\n{body}".strip()
 
 
-def _read_skills(root: Path) -> str:
-    """Load AgentSkills/OpenClaw-compatible SKILL.md files for prompt injection."""
-    sections: list[str] = []
-    loaded_names: set[str] = set()
+def _iter_skill_files(root: Path) -> list[Path]:
+    files: list[Path] = []
     for skills_root in _skill_search_roots(root):
         if not skills_root.exists():
             continue
         for skill_md in sorted(skills_root.glob("*/SKILL.md")):
-            skill_name = skill_md.parent.name
-            if skill_name in loaded_names:
-                continue
-            rendered = _format_skill(skill_md)
-            if rendered:
-                sections.append(rendered)
-                loaded_names.add(skill_name)
+            files.append(skill_md)
+    return files
+
+
+def _skill_name(path: Path) -> str:
+    content = _read(path)
+    meta, _body = _parse_frontmatter(content)
+    return str(meta.get("name", "")).strip() or path.parent.name
+
+
+def _selected_skill_files(root: Path, skills_allowlist: list[str] | None) -> list[Path]:
+    allowed = None if skills_allowlist is None else set(skills_allowlist)
+    selected: dict[str, Path] = {}
+    for skill_md in _iter_skill_files(root):
+        name = _skill_name(skill_md)
+        if allowed is not None and name not in allowed:
+            continue
+        # Search roots are ordered from shared to agent-local. Later matches
+        # override earlier shared skills with the same logical name.
+        selected[name] = skill_md
+    return [selected[name] for name in sorted(selected)]
+
+
+def _read_skills(root: Path, skills_allowlist: list[str] | None = None) -> str:
+    """Load AgentSkills-compatible SKILL.md files for prompt injection."""
+    sections: list[str] = []
+    for skill_md in _selected_skill_files(root, skills_allowlist):
+        rendered = _format_skill(skill_md)
+        if rendered:
+            sections.append(rendered)
     return "\n\n---\n\n".join(sections)[:_SKILLS_MAX_CHARS]
 
 
-def load_workspace_context(workspace_path: str | Path) -> dict:
+def skills_snapshot_signature(workspace_path: str | Path, skills_allowlist: list[str] | None = None) -> str:
+    root = Path(workspace_path)
+    hasher = hashlib.sha256()
+    for skill_md in _selected_skill_files(root, skills_allowlist):
+        try:
+            stat = skill_md.stat()
+        except OSError:
+            continue
+        hasher.update(str(skill_md.resolve()).encode("utf-8"))
+        hasher.update(str(stat.st_mtime_ns).encode("ascii"))
+        hasher.update(str(stat.st_size).encode("ascii"))
+        try:
+            hasher.update(skill_md.read_bytes())
+        except OSError:
+            continue
+    return hasher.hexdigest()
+
+
+def load_workspace_context(workspace_path: str | Path, skills_allowlist: list[str] | None = None) -> dict:
     """Load all workspace MD files into a dict for agent instructions.
 
     Returns:
@@ -157,7 +246,8 @@ def load_workspace_context(workspace_path: str | Path) -> dict:
         "daily":     _read_tail(root / "memory" / f"{date.today().isoformat()}.md", _DAILY_MAX_CHARS),
         "yesterday": _read_tail(root / "memory" / f"{(date.today() - timedelta(days=1)).isoformat()}.md", _YESTERDAY_MAX_CHARS),
         "architecture": _read(root / "ARCHITECTURE.md"),
-        "skills": _read_skills(root),
+        "skills": _read_skills(root, skills_allowlist),
+        "skills_signature": skills_snapshot_signature(root, skills_allowlist),
     }
 
     loaded = [k for k, v in ctx.items() if v]
