@@ -23,6 +23,18 @@ CIO_OPERATION_KEYWORDS = {
     "skill",
     "tool",
 }
+CISO_SECURITY_KEYWORDS = {
+    "alert",
+    "auth",
+    "compliance",
+    "incident",
+    "policy",
+    "scan",
+    "security",
+    "threat",
+    "vulnerability",
+}
+CISO_FINDING_KEYWORDS = {"alert", "auth", "policy", "threat", "vulnerability"}
 
 
 async def _get_current_user(
@@ -112,6 +124,44 @@ def build_cio_summary(events: list[dict]) -> dict:
     }
 
 
+def is_ciso_security_event(event: dict) -> bool:
+    if event.get("agent_id") != "ciso":
+        return False
+
+    payload = event.get("payload") or {}
+    event_type = event.get("event_type") or ""
+    kind = payload.get("kind")
+    category = payload.get("category")
+    return (
+        any(keyword in event_type for keyword in CISO_SECURITY_KEYWORDS)
+        or kind in CISO_SECURITY_KEYWORDS
+        or category in CISO_SECURITY_KEYWORDS
+    )
+
+
+def _is_open_ciso_finding(event: dict) -> bool:
+    payload = event.get("payload") or {}
+    status = payload.get("status")
+    if status in {"closed", "resolved", "accepted"}:
+        return False
+    return _event_matches(event, *CISO_FINDING_KEYWORDS) or payload.get("category") in CISO_FINDING_KEYWORDS
+
+
+def build_ciso_summary(events: list[dict]) -> dict:
+    security_events = [event for event in events if is_ciso_security_event(event)]
+    return {
+        "event_count": len(security_events),
+        "alert_events": sum(1 for event in security_events if _event_matches(event, "alert")),
+        "incident_events": sum(1 for event in security_events if _event_matches(event, "incident")),
+        "vulnerability_events": sum(1 for event in security_events if _event_matches(event, "vulnerability")),
+        "auth_events": sum(1 for event in security_events if _event_matches(event, "auth")),
+        "policy_events": sum(1 for event in security_events if _event_matches(event, "policy", "compliance")),
+        "scan_events": sum(1 for event in security_events if _event_matches(event, "scan")),
+        "critical_events": sum(1 for event in security_events if event.get("severity") == "critical"),
+        "open_findings": sum(1 for event in security_events if _is_open_ciso_finding(event)),
+    }
+
+
 @router.get("/cfo")
 async def get_cfo_cockpit(_user=Depends(_get_current_user)):
     pool = await get_pool()
@@ -173,5 +223,38 @@ async def get_cio_cockpit(_user=Depends(_get_current_user)):
             normalize_log_event(event)
             for event in operational_events
             if _event_matches(event, "tool", "skill")
+        ],
+    }
+
+
+@router.get("/ciso")
+async def get_ciso_cockpit(_user=Depends(_get_current_user)):
+    pool = await get_pool()
+    event_rows = await pool.fetch(
+        """
+        SELECT id, ts, event_type, severity, agent_id, task_id, session_id,
+               trace_id, span_id, source, payload
+        FROM platform_events
+        WHERE agent_id = $1
+        ORDER BY ts DESC
+        LIMIT 100
+        """,
+        "ciso",
+    )
+
+    raw_events = [dict(row) for row in event_rows]
+    security_events = [event for event in raw_events if is_ciso_security_event(event)]
+    return {
+        "summary": build_ciso_summary(raw_events),
+        "events": [normalize_log_event(event) for event in security_events],
+        "alerts": [
+            normalize_log_event(event)
+            for event in security_events
+            if _event_matches(event, "alert", "threat") or event.get("severity") == "critical"
+        ],
+        "findings": [
+            normalize_log_event(event)
+            for event in security_events
+            if _is_open_ciso_finding(event)
         ],
     }
