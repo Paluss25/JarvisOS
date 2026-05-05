@@ -577,3 +577,119 @@
     justify-items: start;
   }
 }
+
+.task-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.task-toolbar select,
+.task-toolbar button,
+.task-create-panel input,
+.task-create-panel textarea,
+.task-create-panel select,
+.task-create-panel button {
+  min-height: 34px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  color: var(--jo-text);
+  padding: 0 10px;
+}
+
+.task-create-panel {
+  display: grid;
+  gap: 10px;
+  max-width: 720px;
+}
+
+.task-create-panel textarea {
+  min-height: 86px;
+  padding-top: 8px;
+}
+
+.task-create-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.task-board {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(240px, 1fr));
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 12px;
+}
+
+.task-column {
+  min-height: 420px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--jo-surface), transparent 20%);
+}
+
+.task-column header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--jo-border);
+  padding: 10px;
+  color: var(--jo-muted);
+  font-size: 13px;
+}
+
+.task-column header strong {
+  color: var(--jo-text);
+}
+
+.task-column-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.task-card {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  padding: 10px;
+  color: var(--jo-text);
+  text-decoration: none;
+}
+
+.task-card:hover {
+  border-color: color-mix(in srgb, var(--jo-trace), transparent 35%);
+}
+
+.task-card-head,
+.task-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.task-card strong {
+  color: var(--jo-text);
+  font-size: 14px;
+}
+
+.task-card p {
+  margin: 0;
+  color: var(--jo-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+@media (max-width: 960px) {
+  .task-create-grid {
+    grid-template-columns: 1fr;
+  }
+}

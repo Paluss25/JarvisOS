@@ -4,7 +4,7 @@ import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 import AgentsPage from './pages/AgentsPage'
 import AgentDetailPage from './pages/AgentDetailPage'
-import MissionControlPage from './pages/MissionControlPage'
+import TaskBoardPage from './pages/TaskBoardPage'
 import TaskDetailPage from './pages/TaskDetailPage'
 import TraceDetailPage from './pages/TraceDetailPage'
 import TraceExplorerPage from './pages/TraceExplorerPage'
@@ -28,7 +28,9 @@ export default function App() {
             <Route path="/agents" element={<AgentsPage />} />
             <Route path="/agents/:id" element={<AgentDetailPage />} />
             <Route path="/agents/:id/cockpit" element={<CockpitPage />} />
-            <Route path="/missions" element={<MissionControlPage />} />
+            <Route path="/tasks" element={<TaskBoardPage />} />
+            <Route path="/tasks/:id" element={<TaskDetailPage />} />
+            <Route path="/missions" element={<Navigate to="/tasks" replace />} />
             <Route path="/missions/:id" element={<TaskDetailPage />} />
             <Route path="/traces" element={<TraceExplorerPage />} />
             <Route path="/traces/:traceId" element={<TraceDetailPage />} />

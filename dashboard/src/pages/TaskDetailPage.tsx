@@ -36,15 +36,15 @@ export default function TaskDetailPage() {
 
   return (
     <div className="p-6 max-w-3xl">
-      <Link to="/missions" className="text-sm text-gray-400 hover:text-white mb-4 inline-block">
-        &larr; Mission Control
+      <Link to="/tasks" className="text-sm text-gray-400 hover:text-white mb-4 inline-block">
+        &larr; Task Board
       </Link>
       <h1 className="text-2xl font-bold mb-1">{task.title}</h1>
       <p className="text-gray-400 text-sm mb-6">{task.description}</p>
 
       <dl className="grid grid-cols-2 gap-3 mb-6">
         <Field label="ID" value={task.id} />
-        <Field label="State" value={task.state} />
+        <Field label="Status" value={task.status} />
         <Field label="Priority" value={String(task.priority)} />
         <Field label="Assigned Agent" value={task.assigned_agent} />
         <Field label="Parent" value={task.parent_id} />

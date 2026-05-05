@@ -4,13 +4,20 @@ export interface Task {
   id: string
   title: string
   description: string
+  status: string
   state: string
-  priority: number
+  priority: string
+  assigned_to: string | null
   assigned_agent: string | null
   parent_id: string | null
+  depends_on: string[]
+  assignment_mode: string
   retry_count: number
   max_retries: number
   created_at: string
+  assigned_at: string | null
+  started_at: string | null
+  completed_at: string | null
   updated_at: string
   summary: string | null
 }
@@ -18,15 +25,16 @@ export interface Task {
 export interface TaskCreate {
   title: string
   description: string
-  priority?: number
-  assigned_agent?: string
-  parent_id?: string
+  priority?: string
+  assign_to?: string
+  depends_on?: string[]
 }
 
-export function listTasks(filters?: { state?: string; agent?: string }): Promise<Task[]> {
+export function listTasks(filters?: { status?: string; state?: string; agent?: string }): Promise<Task[]> {
   const params = new URLSearchParams()
+  if (filters?.status) params.set('status', filters.status)
   if (filters?.state) params.set('state', filters.state)
-  if (filters?.agent) params.set('agent_id', filters.agent)
+  if (filters?.agent) params.set('assigned_to', filters.agent)
   return apiGet<Task[]>(`/tasks?${params}`)
 }
 
