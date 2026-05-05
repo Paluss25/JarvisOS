@@ -6,6 +6,8 @@ const navItems = [
   { to: '/agents', label: 'Agents' },
   { to: '/missions', label: 'Missions' },
   { to: '/traces', label: 'Traces' },
+  { to: '/logs', label: 'Logs' },
+  { to: '/incidents', label: 'Incidents' },
   { to: '/activity', label: 'Activity' },
   { to: '/audit', label: 'Audit' },
   { to: '/settings', label: 'Settings' },

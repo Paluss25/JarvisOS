@@ -12,6 +12,8 @@ import ActivityFeedPage from './pages/ActivityFeedPage'
 import AuditLogPage from './pages/AuditLogPage'
 import CockpitPage from './pages/CockpitPage'
 import ControlCenterPage from './pages/ControlCenterPage'
+import IncidentsPage from './pages/IncidentsPage'
+import LogsPage from './pages/LogsPage'
 import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
@@ -30,6 +32,8 @@ export default function App() {
             <Route path="/missions/:id" element={<TaskDetailPage />} />
             <Route path="/traces" element={<TraceExplorerPage />} />
             <Route path="/traces/:traceId" element={<TraceDetailPage />} />
+            <Route path="/logs" element={<LogsPage />} />
+            <Route path="/incidents" element={<IncidentsPage />} />
             <Route path="/activity" element={<ActivityFeedPage />} />
             <Route path="/audit" element={<AuditLogPage />} />
             <Route path="/settings" element={<SettingsPage />} />
