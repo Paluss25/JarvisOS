@@ -6,6 +6,7 @@ import asyncio
 import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+from claude_agent_sdk import StreamEvent
 from src.agent_runner import AgentConfig
 from src.agent_runner.client import BaseAgentClient
 
@@ -60,6 +61,29 @@ def test_base_agent_client_init(config, tmp_path):
     assert client.name == "TestAgent"
     assert client.config.id == "test"
     assert client._sdk is None
+
+
+def test_base_agent_client_tracks_tool_use_stream_events(config):
+    """StreamEvent tool_use blocks are exposed as last-turn stats for Telegram guards."""
+    with patch("src.agent_runner.client.DailyLogger"):
+        client = BaseAgentClient(
+            config=config,
+            system_prompt="sys",
+            options=MagicMock(),
+        )
+    msg = StreamEvent()
+    msg.event = {
+        "type": "content_block_start",
+        "content_block": {"type": "tool_use", "name": "Bash"},
+    }
+
+    client._reset_turn_stats()
+    assert client._process_message(msg, []) is False
+
+    stats = client.get_last_turn_stats()
+    assert stats["tool_calls"] == 1
+    assert stats["mutating_tool_calls"] == 1
+    assert stats["last_tool_name"] == "Bash"
 
 
 @pytest.mark.asyncio

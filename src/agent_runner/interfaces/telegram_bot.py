@@ -757,6 +757,10 @@ _STREAMING_MODES = frozenset({"partial", "progress", "block", "off"})
 _TABLE_ROW_RE = re.compile(r"^\s*\|.+\|\s*$")
 _TABLE_SEP_CELL_RE = re.compile(r"^[\s\-:]+$")
 _OUTER_FENCE_RE = re.compile(r"^\s*```(?:\w+)?\n(.*?)\n```\s*$", re.DOTALL)
+_STALE_TOOL_STATUS_RE = re.compile(
+    r"^\s*Tool (?:failed|error):\s+\S+",
+    re.IGNORECASE,
+)
 
 
 def _strip_outer_code_fence(text: str) -> str:
@@ -814,6 +818,43 @@ def _reformat_tables(text: str) -> str:
             result.append(lines[i])
             i += 1
     return "\n".join(result)
+
+
+def _agent_turn_stats(agent: Any) -> dict[str, Any]:
+    getter = getattr(agent, "get_last_turn_stats", None)
+    if not callable(getter):
+        return {}
+    try:
+        stats = getter()
+    except Exception:
+        return {}
+    return stats if isinstance(stats, dict) else {}
+
+
+def _is_stale_tool_status_only(content: str) -> bool:
+    return bool(_STALE_TOOL_STATUS_RE.match(content.strip()))
+
+
+def _closure_guard_content(content: str, agent: Any) -> str:
+    stats = _agent_turn_stats(agent)
+    tool_calls = int(stats.get("tool_calls") or 0)
+    if tool_calls <= 0:
+        return content or "(no response)"
+
+    stripped = content.strip()
+    if stripped and not _is_stale_tool_status_only(stripped):
+        return content
+
+    last_tool = str(stats.get("last_tool_name") or "unknown")
+    mutating = int(stats.get("mutating_tool_calls") or 0)
+    return (
+        "Turno concluso senza riepilogo finale.\n\n"
+        f"Ho rilevato tool eseguiti: {tool_calls}"
+        f" (mutativi: {mutating}); ultimo tool: `{last_tool}`.\n"
+        "Il modello non ha prodotto una risposta finale affidabile dopo i tool. "
+        "Verifica lo stato o chiedi un riepilogo, ma la chat non verra' lasciata "
+        "ferma su un errore tecnico intermedio."
+    )
 
 
 async def _create_placeholder(message) -> Any:
@@ -1394,8 +1435,9 @@ async def _stream_to_agent(
         # Pre-process before the length check so _reformat_tables expansion is
         # accounted for — previously _send_response did this AFTER the check,
         # causing silent BadRequest failures when tables pushed content past 4096.
-        content = _strip_outer_code_fence(state["text"] or "(no response)")
+        content = _strip_outer_code_fence(state["text"].strip())
         content = _reformat_tables(content)
+        content = _closure_guard_content(content, agent)
 
         # Stop animations BEFORE sending the final response to prevent
         # the status task from overwriting it with a spinner frame.
