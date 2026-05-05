@@ -6,6 +6,8 @@ import AgentsPage from './pages/AgentsPage'
 import AgentDetailPage from './pages/AgentDetailPage'
 import MissionControlPage from './pages/MissionControlPage'
 import TaskDetailPage from './pages/TaskDetailPage'
+import TraceDetailPage from './pages/TraceDetailPage'
+import TraceExplorerPage from './pages/TraceExplorerPage'
 import ActivityFeedPage from './pages/ActivityFeedPage'
 import AuditLogPage from './pages/AuditLogPage'
 import CockpitPage from './pages/CockpitPage'
@@ -26,6 +28,8 @@ export default function App() {
             <Route path="/agents/:id/cockpit" element={<CockpitPage />} />
             <Route path="/missions" element={<MissionControlPage />} />
             <Route path="/missions/:id" element={<TaskDetailPage />} />
+            <Route path="/traces" element={<TraceExplorerPage />} />
+            <Route path="/traces/:traceId" element={<TraceDetailPage />} />
             <Route path="/activity" element={<ActivityFeedPage />} />
             <Route path="/audit" element={<AuditLogPage />} />
             <Route path="/settings" element={<SettingsPage />} />
