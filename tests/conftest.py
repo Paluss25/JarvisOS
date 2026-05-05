@@ -50,6 +50,7 @@ _UNIT_TEST_FILES = {
     "test_platform_api_cfo_cockpit.py",
     "test_platform_api_cio_cockpit.py",
     "test_platform_api_ciso_cockpit.py",
+    "test_platform_api_costs.py",
     "test_platform_api_logs_incidents.py",
     "test_platform_api_task_board.py",
     "test_platform_api_traces.py",
