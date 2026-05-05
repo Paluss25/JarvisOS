@@ -45,6 +45,7 @@ _UNIT_TEST_FILES = {
     "test_plane_client.py",
     "test_plane_plan_parser.py",
     "test_plane_service.py",
+    "test_platform_api_a2a.py",
     "test_platform_api_control_center.py",
     "test_platform_api_cfo_cockpit.py",
     "test_platform_api_cio_cockpit.py",
