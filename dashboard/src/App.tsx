@@ -17,6 +17,7 @@ import ControlCenterPage from './pages/ControlCenterPage'
 import CostsPage from './pages/CostsPage'
 import IncidentsPage from './pages/IncidentsPage'
 import LogsPage from './pages/LogsPage'
+import MemoryPage from './pages/MemoryPage'
 import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/incidents" element={<IncidentsPage />} />
             <Route path="/costs" element={<CostsPage />} />
+            <Route path="/memory" element={<MemoryPage />} />
             <Route path="/activity" element={<ActivityFeedPage />} />
             <Route path="/a2a" element={<A2ANetworkPage />} />
             <Route path="/audit" element={<AuditLogPage />} />
