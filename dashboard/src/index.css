@@ -169,3 +169,44 @@
   font-size: 13px;
   padding: 12px;
 }
+
+.cockpit-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.cockpit-section h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.cockpit-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.cockpit-panel {
+  min-height: 140px;
+  border: 1px solid var(--jo-border);
+  background: var(--jo-surface);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.cockpit-panel header {
+  border-bottom: 1px solid var(--jo-border);
+  margin: 0 -12px 8px;
+  padding: 0 12px 8px;
+}
+
+.cockpit-panel h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.cockpit-panel p {
+  margin: 4px 0 0;
+  color: var(--jo-muted);
+  font-size: 12px;
+}
