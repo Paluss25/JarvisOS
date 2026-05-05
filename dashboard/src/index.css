@@ -1,1 +1,110 @@
 @import "tailwindcss";
+
+:root {
+  --jo-bg: #090b10;
+  --jo-surface: #11141b;
+  --jo-surface-raised: #171b24;
+  --jo-border: #2a303d;
+  --jo-text: #f3f6fb;
+  --jo-muted: #9aa4b2;
+  --jo-healthy: #2bd576;
+  --jo-warning: #f5b841;
+  --jo-incident: #ff5c5c;
+  --jo-trace: #4da3ff;
+  --jo-ai: #a78bfa;
+  --jo-network: #22d3ee;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.page-header p {
+  margin: 4px 0 0;
+  color: var(--jo-muted);
+}
+
+.page-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  border: 1px solid var(--jo-border);
+  background: var(--jo-surface);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.metric-label {
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.metric-value {
+  margin-top: 6px;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.metric-detail {
+  margin-top: 4px;
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--jo-border);
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.status-healthy {
+  color: var(--jo-healthy);
+  border-color: color-mix(in srgb, var(--jo-healthy), transparent 55%);
+}
+
+.status-warning {
+  color: var(--jo-warning);
+  border-color: color-mix(in srgb, var(--jo-warning), transparent 55%);
+}
+
+.status-incident {
+  color: var(--jo-incident);
+  border-color: color-mix(in srgb, var(--jo-incident), transparent 55%);
+}
+
+.status-trace {
+  color: var(--jo-trace);
+  border-color: color-mix(in srgb, var(--jo-trace), transparent 55%);
+}
+
+.status-ai {
+  color: var(--jo-ai);
+  border-color: color-mix(in srgb, var(--jo-ai), transparent 55%);
+}
+
+.status-network {
+  color: var(--jo-network);
+  border-color: color-mix(in srgb, var(--jo-network), transparent 55%);
+}
