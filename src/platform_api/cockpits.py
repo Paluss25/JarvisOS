@@ -13,6 +13,16 @@ router = APIRouter(prefix="/api/cockpits", tags=["cockpits"])
 _security = HTTPBearer()
 
 OPEN_DECISION_STATUSES = {"proposed", "needs_review", "pending_approval"}
+CIO_OPERATION_KEYWORDS = {
+    "backup",
+    "deploy",
+    "health",
+    "homelab",
+    "incident",
+    "release",
+    "skill",
+    "tool",
+}
 
 
 async def _get_current_user(
@@ -62,6 +72,46 @@ def build_cfo_summary(decisions: list[dict], events: list[dict]) -> dict:
     }
 
 
+def is_cio_operational_event(event: dict) -> bool:
+    if event.get("agent_id") != "cio":
+        return False
+
+    payload = event.get("payload") or {}
+    event_type = event.get("event_type") or ""
+    kind = payload.get("kind")
+    return any(keyword in event_type for keyword in CIO_OPERATION_KEYWORDS) or kind in CIO_OPERATION_KEYWORDS
+
+
+def _event_matches(event: dict, *keywords: str) -> bool:
+    payload = event.get("payload") or {}
+    event_type = event.get("event_type") or ""
+    kind = payload.get("kind")
+    return any(keyword in event_type for keyword in keywords) or kind in keywords
+
+
+def _is_failed_event(event: dict) -> bool:
+    payload = event.get("payload") or {}
+    return (
+        event.get("severity") in {"critical", "error"}
+        or "failed" in (event.get("event_type") or "")
+        or payload.get("status") == "failed"
+    )
+
+
+def build_cio_summary(events: list[dict]) -> dict:
+    operational_events = [event for event in events if is_cio_operational_event(event)]
+    return {
+        "event_count": len(operational_events),
+        "tool_events": sum(1 for event in operational_events if _event_matches(event, "tool")),
+        "skill_events": sum(1 for event in operational_events if _event_matches(event, "skill")),
+        "deploy_events": sum(1 for event in operational_events if _event_matches(event, "deploy", "release")),
+        "backup_events": sum(1 for event in operational_events if _event_matches(event, "backup")),
+        "health_events": sum(1 for event in operational_events if _event_matches(event, "health")),
+        "incident_events": sum(1 for event in operational_events if _event_matches(event, "incident")),
+        "failed_events": sum(1 for event in operational_events if _is_failed_event(event)),
+    }
+
+
 @router.get("/cfo")
 async def get_cfo_cockpit(_user=Depends(_get_current_user)):
     pool = await get_pool()
@@ -95,4 +145,33 @@ async def get_cfo_cockpit(_user=Depends(_get_current_user)):
         "summary": build_cfo_summary(decisions, events),
         "decisions": decisions,
         "alerts": alerts,
+    }
+
+
+@router.get("/cio")
+async def get_cio_cockpit(_user=Depends(_get_current_user)):
+    pool = await get_pool()
+    event_rows = await pool.fetch(
+        """
+        SELECT id, ts, event_type, severity, agent_id, task_id, session_id,
+               trace_id, span_id, source, payload
+        FROM platform_events
+        WHERE agent_id = $1
+        ORDER BY ts DESC
+        LIMIT 100
+        """,
+        "cio",
+    )
+
+    raw_events = [dict(row) for row in event_rows]
+    operational_events = [event for event in raw_events if is_cio_operational_event(event)]
+    return {
+        "summary": build_cio_summary(raw_events),
+        "events": [normalize_log_event(event) for event in operational_events],
+        "incidents": [normalize_log_event(event) for event in operational_events if _is_failed_event(event)],
+        "tool_events": [
+            normalize_log_event(event)
+            for event in operational_events
+            if _event_matches(event, "tool", "skill")
+        ],
     }
