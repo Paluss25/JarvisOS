@@ -3,6 +3,7 @@ import CockpitShell from '../components/cockpits/CockpitShell'
 import { getCockpitConfig } from '../cockpits/registry'
 import CfoCockpitPage from './CfoCockpitPage'
 import CioCockpitPage from './CioCockpitPage'
+import CisoCockpitPage from './CisoCockpitPage'
 
 export default function CockpitPage() {
   const { id } = useParams()
@@ -13,6 +14,10 @@ export default function CockpitPage() {
 
   if (id === 'cio') {
     return <CioCockpitPage />
+  }
+
+  if (id === 'ciso') {
+    return <CisoCockpitPage />
   }
 
   const config = id ? getCockpitConfig(id) : null

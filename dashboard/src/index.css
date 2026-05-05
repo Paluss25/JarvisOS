@@ -513,3 +513,67 @@
     justify-items: start;
   }
 }
+
+.ciso-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.ciso-side {
+  display: grid;
+  gap: 16px;
+}
+
+.ciso-event-list {
+  display: grid;
+  gap: 10px;
+}
+
+.ciso-event-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  border: 1px solid var(--jo-border);
+  border-left: 3px solid color-mix(in srgb, var(--jo-incident), transparent 35%);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  padding: 10px;
+}
+
+.ciso-event-row strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--jo-text);
+  font-weight: 700;
+}
+
+.ciso-event-row p {
+  margin: 4px 0 0;
+  color: var(--jo-muted);
+  font-size: 13px;
+}
+
+.ciso-event-row a {
+  color: var(--jo-trace);
+}
+
+.ciso-event-meta {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 960px) {
+  .ciso-layout,
+  .ciso-event-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ciso-event-meta {
+    justify-items: start;
+  }
+}
