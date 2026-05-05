@@ -14,6 +14,7 @@ import AuditLogPage from './pages/AuditLogPage'
 import CockpitPage from './pages/CockpitPage'
 import ChatHubPage from './pages/ChatHubPage'
 import ControlCenterPage from './pages/ControlCenterPage'
+import CostsPage from './pages/CostsPage'
 import IncidentsPage from './pages/IncidentsPage'
 import LogsPage from './pages/LogsPage'
 import SettingsPage from './pages/SettingsPage'
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="/traces/:traceId" element={<TraceDetailPage />} />
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/incidents" element={<IncidentsPage />} />
+            <Route path="/costs" element={<CostsPage />} />
             <Route path="/activity" element={<ActivityFeedPage />} />
             <Route path="/a2a" element={<A2ANetworkPage />} />
             <Route path="/audit" element={<AuditLogPage />} />
