@@ -8,6 +8,7 @@ import MissionControlPage from './pages/MissionControlPage'
 import TaskDetailPage from './pages/TaskDetailPage'
 import ActivityFeedPage from './pages/ActivityFeedPage'
 import AuditLogPage from './pages/AuditLogPage'
+import ControlCenterPage from './pages/ControlCenterPage'
 import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
@@ -17,7 +18,8 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route element={<Layout />}>
-            <Route path="/" element={<Navigate to="/agents" replace />} />
+            <Route path="/" element={<Navigate to="/control-center" replace />} />
+            <Route path="/control-center" element={<ControlCenterPage />} />
             <Route path="/agents" element={<AgentsPage />} />
             <Route path="/agents/:id" element={<AgentDetailPage />} />
             <Route path="/missions" element={<MissionControlPage />} />

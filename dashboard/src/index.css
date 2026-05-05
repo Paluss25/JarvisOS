@@ -108,3 +108,64 @@
   color: var(--jo-network);
   border-color: color-mix(in srgb, var(--jo-network), transparent 55%);
 }
+
+.ops-page {
+  min-height: 100%;
+  padding: 24px;
+  background: var(--jo-bg);
+  color: var(--jo-text);
+}
+
+.ops-panel {
+  margin-top: 16px;
+  border: 1px solid var(--jo-border);
+  background: var(--jo-surface);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.ops-panel h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.ops-list {
+  display: grid;
+  gap: 6px;
+}
+
+.ops-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(160px, 1fr) minmax(120px, 0.6fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 34px;
+  border-top: 1px solid var(--jo-border);
+  color: var(--jo-muted);
+  font-size: 13px;
+}
+
+.ops-row:first-child {
+  border-top: 0;
+}
+
+.ops-row strong {
+  color: var(--jo-text);
+  font-weight: 600;
+}
+
+.panel-warning {
+  margin-bottom: 12px;
+  border: 1px solid color-mix(in srgb, var(--jo-warning), transparent 55%);
+  background: color-mix(in srgb, var(--jo-warning), transparent 90%);
+  border-radius: 8px;
+  color: var(--jo-warning);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.empty-state {
+  color: var(--jo-muted);
+  font-size: 13px;
+  padding: 12px;
+}

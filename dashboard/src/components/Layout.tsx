@@ -2,6 +2,7 @@ import { NavLink, Outlet, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const navItems = [
+  { to: '/control-center', label: 'Control' },
   { to: '/agents', label: 'Agents' },
   { to: '/missions', label: 'Missions' },
   { to: '/activity', label: 'Activity' },
