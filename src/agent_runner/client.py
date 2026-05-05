@@ -98,10 +98,15 @@ class BaseAgentClient:
         self._daily = DailyLogger(config.workspace_path)
         self._pipeline_queue: PipelineQueue | None = None
         self._last_result_msg = None
+        self._last_turn_stats: dict[str, object] = {}
 
     def set_pipeline_queue(self, queue: PipelineQueue) -> None:
         """Attach the memory pipeline queue. Called by the lifespan before serving."""
         self._pipeline_queue = queue
+
+    def get_last_turn_stats(self) -> dict[str, object]:
+        """Return lightweight telemetry for the last completed SDK turn."""
+        return dict(self._last_turn_stats)
 
     @property
     def is_busy(self) -> bool:
@@ -120,6 +125,47 @@ class BaseAgentClient:
             pass
         for key, value in update.items():
             setattr(self._options, key, value)
+
+    def _reset_turn_stats(self) -> None:
+        self._last_turn_stats = {
+            "tool_calls": 0,
+            "tool_failures": 0,
+            "mutating_tool_calls": 0,
+            "last_tool_name": "",
+        }
+
+    def _record_tool_call(self, name: str) -> None:
+        name = str(name or "").strip()
+        self._last_turn_stats["tool_calls"] = int(self._last_turn_stats.get("tool_calls", 0)) + 1
+        self._last_turn_stats["last_tool_name"] = name
+        readonly_names = {
+            "Read",
+            "Glob",
+            "Grep",
+            "WebFetch",
+            "WebSearch",
+            "infra_check",
+            "log_search",
+            "memory_get",
+            "pg_query",
+            "runbook_read",
+        }
+        if name and name not in readonly_names:
+            self._last_turn_stats["mutating_tool_calls"] = int(
+                self._last_turn_stats.get("mutating_tool_calls", 0)
+            ) + 1
+
+    def _record_stream_event_stats(self, event: dict) -> None:
+        if event.get("type") == "content_block_start":
+            block = event.get("content_block", {}) or {}
+            if block.get("type") == "tool_use":
+                self._record_tool_call(str(block.get("name", "")))
+        elif event.get("type") == "content_block_delta":
+            delta = event.get("delta", {}) or {}
+            if delta.get("type") == "tool_use_error_delta":
+                self._last_turn_stats["tool_failures"] = int(
+                    self._last_turn_stats.get("tool_failures", 0)
+                ) + 1
 
     def _refresh_skill_snapshot_options(self, force: bool = False) -> bool:
         if not self.config.effective_skills_watch_enabled:
@@ -319,6 +365,7 @@ class BaseAgentClient:
                 pass
         elif isinstance(msg, StreamEvent):
             event = msg.event
+            self._record_stream_event_stats(event)
             if event.get("type") == "content_block_delta":
                 delta = event.get("delta", {})
                 if delta.get("type") == "text_delta":
@@ -377,6 +424,7 @@ class BaseAgentClient:
         if not self._sdk:
             raise RuntimeError(f"{self.name} not connected")
         self._last_result_msg = None
+        self._reset_turn_stats()
         AGENT_BUSY.labels(agent_id=self.config.id).set(1)
         with _tracer.start_as_current_span(
             "llm.turn",
@@ -447,6 +495,7 @@ class BaseAgentClient:
         if not self._sdk:
             raise RuntimeError(f"{self.name} not connected")
         self._last_result_msg = None
+        self._reset_turn_stats()
         # Fix Issue 1: only hold the lock for the query dispatch, not across
         # yields — an early break / cancellation by the caller would otherwise
         # permanently hold the lock and deadlock future query() calls.

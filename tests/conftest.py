@@ -47,6 +47,7 @@ _UNIT_TEST_FILES = {
     "test_plane_service.py",
     "test_redaction_engine.py",
     "test_telegram_webhook.py",
+    "test_telegram_closure_guard.py",
     "test_extractor.py",
     "test_coh_extractor.py",
     "test_pending_store.py",
