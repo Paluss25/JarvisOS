@@ -1,9 +1,15 @@
 import { useParams } from 'react-router-dom'
 import CockpitShell from '../components/cockpits/CockpitShell'
 import { getCockpitConfig } from '../cockpits/registry'
+import CfoCockpitPage from './CfoCockpitPage'
 
 export default function CockpitPage() {
   const { id } = useParams()
+
+  if (id === 'cfo') {
+    return <CfoCockpitPage />
+  }
+
   const config = id ? getCockpitConfig(id) : null
 
   if (!config) {
