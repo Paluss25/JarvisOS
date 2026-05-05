@@ -11,6 +11,7 @@ import TraceExplorerPage from './pages/TraceExplorerPage'
 import ActivityFeedPage from './pages/ActivityFeedPage'
 import AuditLogPage from './pages/AuditLogPage'
 import CockpitPage from './pages/CockpitPage'
+import ChatHubPage from './pages/ChatHubPage'
 import ControlCenterPage from './pages/ControlCenterPage'
 import IncidentsPage from './pages/IncidentsPage'
 import LogsPage from './pages/LogsPage'
@@ -27,7 +28,9 @@ export default function App() {
             <Route path="/control-center" element={<ControlCenterPage />} />
             <Route path="/agents" element={<AgentsPage />} />
             <Route path="/agents/:id" element={<AgentDetailPage />} />
+            <Route path="/agents/:id/chat" element={<ChatHubPage />} />
             <Route path="/agents/:id/cockpit" element={<CockpitPage />} />
+            <Route path="/chat" element={<ChatHubPage />} />
             <Route path="/tasks" element={<TaskBoardPage />} />
             <Route path="/tasks/:id" element={<TaskDetailPage />} />
             <Route path="/missions" element={<Navigate to="/tasks" replace />} />
