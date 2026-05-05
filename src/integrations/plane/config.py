@@ -49,7 +49,7 @@ def load_plane_config() -> PlaneConfig:
 
     return PlaneConfig(
         api_key=api_key,
-        base_url=os.environ.get("PLANE_BASE_URL", "https://api.plane.so").rstrip("/"),
+        base_url=(os.environ.get("PLANE_BASE_URL", "").strip() or "https://api.plane.so").rstrip("/"),
         workspace_slug=workspace_slug,
         default_project_id=default_project_id,
         project_map={str(k): str(v) for k, v in project_map.items()},
