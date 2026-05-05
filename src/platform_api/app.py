@@ -19,6 +19,8 @@ def create_platform_app() -> FastAPI:
     from platform_api.audit_endpoints import router as audit_router
     from platform_api.auth import router as auth_router
     from platform_api.control_center import router as control_router
+    from platform_api.cockpits import router as cockpits_router
+    from platform_api.decisions import router as decisions_router
     from platform_api.domains import router as domains_router
     from platform_api.events import router as events_router
     from platform_api.incidents import router as incidents_router
@@ -62,6 +64,8 @@ def create_platform_app() -> FastAPI:
     # Routers
     app.include_router(auth_router)
     app.include_router(control_router)
+    app.include_router(decisions_router)
+    app.include_router(cockpits_router)
     app.include_router(agents_router)
     app.include_router(tasks_router)
     app.include_router(domains_router)
