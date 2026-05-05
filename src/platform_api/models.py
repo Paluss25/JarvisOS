@@ -42,11 +42,13 @@ class TaskCreate(BaseModel):
     priority: str = "normal"  # low, normal, high, urgent
     depends_on: list[UUID] = []
     assign_to: str | None = None
-    created_by: str
+    assigned_agent: str | None = None
+    created_by: str = "dashboard"
 
 
 class TaskPatch(BaseModel):
     status: str | None = None
+    state: str | None = None
     summary: str | None = None
     assigned_to: str | None = None
 
