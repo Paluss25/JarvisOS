@@ -649,6 +649,8 @@ def _build_system_prompt(ctx: dict) -> str:
     """Assemble the full system prompt from workspace context dict."""
     sections = [
         ("soul", "Identity & Soul"),
+        ("memory_guard", "Memory Freshness Guard"),
+        ("open_loops", "Open Loop Registry"),
         ("agents", "Operating Manual"),
         ("user", "About Your User"),
         ("identity", "Self-Image"),

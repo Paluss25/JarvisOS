@@ -15,6 +15,9 @@ TIMOTHY_BUILTIN_CRONS = [
             "1. Any infrastructure incidents or anomalies from yesterday\n"
             "2. Services that were restarted or had elevated error rates\n"
             "3. Any pending actions or follow-ups from previous logs\n"
+            "Use the Open Loop Registry as authoritative state. Do not report pending "
+            "actions from MEMORY.md or DREAMS.md unless they have fresh live verification "
+            "or no newer RESOLVED/VERIFIED registry entry contradicts them. "
             "Use infra_check to verify the health of critical services before reporting. "
             "Be factual and actionable. Flag anything that needs immediate attention."
         ),
