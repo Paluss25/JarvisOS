@@ -18,6 +18,7 @@ _UNIT_TEST_FILES = {
     "test_agent_skills_loader.py",
     "test_audit_writer.py",
     "test_base_agent_client.py",
+    "test_ceo_morning_briefing_prompt.py",
     "test_classifier.py",
     "test_config_loader.py",
     "test_content_isolator.py",
