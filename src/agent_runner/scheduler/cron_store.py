@@ -402,11 +402,21 @@ class CronStore:
         return self._crons.get(cron_id)
 
     def seed(self, entries: list[dict]) -> None:
-        """Seed built-in crons by name — skips entries that already exist."""
-        existing_names = {e.name for e in self._crons.values() if e.builtin}
+        """Seed or reconcile built-in crons by name.
+
+        Runtime state such as last_run, last_status, last_error, enabled, and
+        created_at remains owned by the live store. Code-owned fields are
+        refreshed so prompt/config fixes take effect after a deploy.
+        """
+        existing_by_name = {e.name: e for e in self._crons.values() if e.builtin}
         changed = False
         for raw in entries:
-            if raw["name"] in existing_names:
+            existing = existing_by_name.get(raw["name"])
+            if existing is not None:
+                for field in ("schedule", "prompt", "session_id", "telegram_notify"):
+                    if field in raw and getattr(existing, field) != raw[field]:
+                        setattr(existing, field, raw[field])
+                        changed = True
                 continue
             raw = dict(raw)
             raw.setdefault("id", uuid.uuid4().hex[:8])
