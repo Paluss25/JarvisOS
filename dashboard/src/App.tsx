@@ -17,6 +17,8 @@ import ChatHubPage from './pages/ChatHubPage'
 import ControlCenterPage from './pages/ControlCenterPage'
 import CostTraceDetailPage from './pages/CostTraceDetailPage'
 import CostsPage from './pages/CostsPage'
+import DecisionDetailPage from './pages/DecisionDetailPage'
+import DecisionsPage from './pages/DecisionsPage'
 import IncidentsPage from './pages/IncidentsPage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
 import LogsPage from './pages/LogsPage'
@@ -53,6 +55,8 @@ export default function App() {
             <Route path="/incidents/:id" element={<IncidentDetailPage />} />
             <Route path="/costs" element={<CostsPage />} />
             <Route path="/costs/traces/:traceId" element={<CostTraceDetailPage />} />
+            <Route path="/decisions" element={<DecisionsPage />} />
+            <Route path="/decisions/:id" element={<DecisionDetailPage />} />
             <Route path="/memory" element={<MemoryPage />} />
             <Route path="/memory/events/:id" element={<MemoryEventDetailPage />} />
             <Route path="/plugins" element={<PluginCenterPage />} />

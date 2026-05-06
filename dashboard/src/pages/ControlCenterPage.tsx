@@ -142,13 +142,13 @@ export default function ControlCenterPage() {
         </section>
 
         <section className="ops-panel">
-          <h2>Recent Decisions</h2>
+          <h2><Link to="/decisions">Recent Decisions</Link></h2>
           <div className="control-feed-list">
             {(summary?.recent_decisions ?? []).map((decision) => (
               <article className="control-feed-row" key={decision.id}>
                 <div>
                   <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                  <strong>{decision.title}</strong>
+                  <Link to={`/decisions/${encodeURIComponent(decision.id)}`}>{decision.title}</Link>
                   <span>{timeLabel(decision.ts)} · {decision.agent_id}</span>
                 </div>
                 <div className="control-feed-actions">

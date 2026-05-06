@@ -10,6 +10,7 @@ const navItems = [
   { to: '/logs', label: 'Logs' },
   { to: '/incidents', label: 'Incidents' },
   { to: '/costs', label: 'Costs' },
+  { to: '/decisions', label: 'Decisions' },
   { to: '/memory', label: 'Memory' },
   { to: '/plugins', label: 'Plugins' },
   { to: '/a2a', label: 'A2A' },
