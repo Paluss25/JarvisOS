@@ -1,4 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Link } from 'react-router-dom'
+import MetricCard from '../components/MetricCard'
+import PageHeader from '../components/PageHeader'
+import StatusPill from '../components/StatusPill'
 import { apiGet } from '../api/client'
 
 interface AuditEntry {
@@ -19,98 +23,149 @@ interface AuditResponse {
 
 const CATEGORIES = ['', 'agent', 'platform', 'security', 'memory', 'task']
 
+function categoryTone(category: string): 'neutral' | 'healthy' | 'warning' | 'incident' | 'trace' | 'ai' | 'network' {
+  if (category === 'security') return 'incident'
+  if (category === 'task') return 'warning'
+  if (category === 'memory') return 'ai'
+  if (category === 'agent') return 'trace'
+  if (category === 'platform') return 'network'
+  return 'neutral'
+}
+
+function detailPreview(detail: Record<string, unknown>) {
+  const preview = JSON.stringify(detail ?? {})
+  return preview.length > 150 ? `${preview.slice(0, 147)}...` : preview
+}
+
 export default function AuditLogPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [category, setCategory] = useState('')
   const [agentId, setAgentId] = useState('')
+  const [action, setAction] = useState('')
+  const [source, setSource] = useState('')
+  const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const limit = 50
 
   const load = useCallback(() => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(page * limit) })
     if (category) params.set('category', category)
-    if (agentId) params.set('agent_id', agentId)
+    if (agentId.trim()) params.set('agent_id', agentId.trim())
+    if (action.trim()) params.set('action', action.trim())
+    if (source.trim()) params.set('source', source.trim())
     setLoading(true)
     apiGet<AuditResponse>(`/audit?${params}`)
-      .then(r => { setEntries(r.items ?? []); setTotal(r.total ?? 0) })
-      .catch(() => setEntries([]))
+      .then((r) => {
+        setEntries(r.items ?? [])
+        setTotal(r.total ?? 0)
+        setError(null)
+      })
+      .catch((err) => {
+        setEntries([])
+        setTotal(0)
+        setError(err instanceof Error ? err.message : String(err))
+      })
       .finally(() => setLoading(false))
-  }, [category, agentId, page])
+  }, [category, agentId, action, source, page])
 
   useEffect(() => { load() }, [load])
 
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Audit Log</h1>
+  const visibleSecurity = entries.filter(entry => entry.category === 'security').length
+  const visibleTask = entries.filter(entry => entry.category === 'task').length
+  const visibleAgent = entries.filter(entry => entry.agent_id).length
+  const visibleSources = new Set(entries.map(entry => entry.source).filter(Boolean)).size
+  const rangeStart = total === 0 ? 0 : page * limit + 1
+  const rangeEnd = Math.min((page + 1) * limit, total)
 
-      <div className="flex gap-3 mb-4 flex-wrap">
+  return (
+    <main className="ops-page">
+      <PageHeader
+        title="Audit Log"
+        description="Governance trail for agent actions, platform events, security findings, memory writes, and task operations."
+        actions={<StatusPill label={error ? 'API degraded' : `${total} records`} tone={error ? 'warning' : 'network'} />}
+      />
+
+      <section className="filter-row audit-filter-row">
         <select
           value={category}
           onChange={e => { setCategory(e.target.value); setPage(0) }}
-          className="px-3 py-1.5 rounded bg-gray-800 text-white border border-gray-700 text-sm focus:outline-none"
         >
           {CATEGORIES.map(c => <option key={c} value={c}>{c || 'All categories'}</option>)}
         </select>
         <input
-          className="px-3 py-1.5 rounded bg-gray-800 text-white border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
-          placeholder="Agent ID"
+          placeholder="agent_id"
           value={agentId}
           onChange={e => { setAgentId(e.target.value); setPage(0) }}
         />
-      </div>
+        <input
+          placeholder="action"
+          value={action}
+          onChange={e => { setAction(e.target.value); setPage(0) }}
+        />
+        <input
+          placeholder="source"
+          value={source}
+          onChange={e => { setSource(e.target.value); setPage(0) }}
+        />
+        <button onClick={load} disabled={loading}>{loading ? 'Loading' : 'Filter'}</button>
+      </section>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left">
-          <thead>
-            <tr className="border-b border-gray-800 text-gray-400 text-xs">
-              <th className="py-2 pr-4">Time</th>
-              <th className="py-2 pr-4">Category</th>
-              <th className="py-2 pr-4">Action</th>
-              <th className="py-2 pr-4">Agent</th>
-              <th className="py-2 pr-4">Source</th>
-              <th className="py-2">Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={6} className="py-4 text-gray-500">Loading…</td></tr>
-            )}
-            {!loading && entries.length === 0 && (
-              <tr><td colSpan={6} className="py-4 text-gray-500">No entries.</td></tr>
-            )}
-            {entries.map(e => (
-              <tr key={e.id} className="border-b border-gray-900 hover:bg-gray-900 transition-colors">
-                <td className="py-2 pr-4 text-gray-400 text-xs whitespace-nowrap">{new Date(e.ts).toLocaleString()}</td>
-                <td className="py-2 pr-4 text-xs">{e.category}</td>
-                <td className="py-2 pr-4 font-mono text-xs">{e.action}</td>
-                <td className="py-2 pr-4 text-xs text-gray-400">{e.agent_id ?? '—'}</td>
-                <td className="py-2 pr-4 text-xs text-gray-400">{e.source}</td>
-                <td className="py-2 text-xs text-gray-500 font-mono truncate max-w-xs">{JSON.stringify(e.detail)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {error ? <div className="panel-warning">{error}</div> : null}
 
-      <div className="flex gap-2 mt-4">
+      <section className="metric-grid">
+        <MetricCard label="Total records" value={total} detail="Rows matching filters" />
+        <MetricCard label="Visible page" value={entries.length} detail={`${rangeStart}-${rangeEnd}`} />
+        <MetricCard label="Security" value={visibleSecurity} detail="Visible security rows" tone={visibleSecurity ? 'incident' : 'neutral'} />
+        <MetricCard label="Task ops" value={visibleTask} detail="Visible task rows" tone={visibleTask ? 'warning' : 'neutral'} />
+        <MetricCard label="Agent-linked" value={visibleAgent} detail="Rows tied to agents" />
+        <MetricCard label="Sources" value={visibleSources} detail="Distinct visible sources" />
+      </section>
+
+      <section className="ops-panel">
+        <h2>Entries</h2>
+        <div className="audit-table">
+          <div className="audit-table-head">
+            <span>Time</span>
+            <span>Category</span>
+            <span>Action</span>
+            <span>Agent</span>
+            <span>User</span>
+            <span>Source</span>
+            <span>Detail</span>
+          </div>
+          {loading ? <div className="empty-state">Loading audit entries.</div> : null}
+          {!loading && entries.length === 0 ? <div className="empty-state">No audit entries match these filters.</div> : null}
+          {!loading && entries.map(e => (
+            <div key={e.id} className="audit-table-row">
+              <span>{new Date(e.ts).toLocaleString()}</span>
+              <span><StatusPill label={e.category} tone={categoryTone(e.category)} /></span>
+              <strong>{e.action}</strong>
+              <span>{e.agent_id ? <Link to={`/agents/${encodeURIComponent(e.agent_id)}`}>{e.agent_id}</Link> : '-'}</span>
+              <span>{e.user_id ?? '-'}</span>
+              <span>{e.source ?? '-'}</span>
+              <code>{detailPreview(e.detail)}</code>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <nav className="audit-pagination">
         <button
           disabled={page === 0}
           onClick={() => setPage(p => p - 1)}
-          className="px-3 py-1.5 text-sm rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-40 transition-colors"
         >
           Prev
         </button>
-        <span className="px-3 py-1.5 text-sm text-gray-400">{page * limit + 1}–{Math.min((page + 1) * limit, total)} of {total}</span>
+        <span>{rangeStart}-{rangeEnd} of {total}</span>
         <button
           disabled={(page + 1) * limit >= total}
           onClick={() => setPage(p => p + 1)}
-          className="px-3 py-1.5 text-sm rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-40 transition-colors"
         >
           Next
         </button>
-      </div>
-    </div>
+      </nav>
+    </main>
   )
 }
