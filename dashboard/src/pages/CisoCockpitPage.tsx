@@ -32,7 +32,7 @@ function SecurityList({ events, empty }: { events: LogEvent[]; empty: string }) 
         <div className="ciso-event-row" key={event.id}>
           <div>
             <StatusPill label={event.severity} tone={severityTone(event.severity)} />
-            <strong>{eventTitle(event)}</strong>
+            <Link to={event.links?.detail ?? `/logs/${encodeURIComponent(event.id)}`}>{eventTitle(event)}</Link>
             <p>{event.event_type} · {eventDetail(event)}</p>
           </div>
           <div className="ciso-event-meta">

@@ -4,6 +4,7 @@ import { getAuditContext } from '../api/audit'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
+import LogEventRow from '../components/LogEventRow'
 import type { AuditContext } from '../types/audit'
 
 function categoryTone(category: string): 'neutral' | 'healthy' | 'warning' | 'incident' | 'trace' | 'ai' | 'network' {
@@ -12,12 +13,6 @@ function categoryTone(category: string): 'neutral' | 'healthy' | 'warning' | 'in
   if (category === 'memory') return 'ai'
   if (category === 'agent') return 'trace'
   if (category === 'platform') return 'network'
-  return 'neutral'
-}
-
-function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
-  if (severity === 'critical' || severity === 'error') return 'incident'
-  if (severity === 'warning') return 'warning'
   return 'neutral'
 }
 
@@ -104,11 +99,7 @@ export default function AuditDetailPage() {
           <h2>Related Logs</h2>
           <div className="audit-related-list">
             {context.related_logs.slice(0, 12).map((event) => (
-              <article className="audit-related-row" key={event.id}>
-                <StatusPill label={event.severity} tone={severityTone(event.severity)} />
-                <Link to={`/logs/${encodeURIComponent(event.id)}`}>{event.event_type}</Link>
-                <span>{timeLabel(event.ts)} · {event.agent_id ?? event.source}</span>
-              </article>
+              <LogEventRow className="audit-related-row" event={event} key={event.id} />
             ))}
             {context.related_logs.length === 0 ? <div className="empty-state">No related logs found.</div> : null}
           </div>

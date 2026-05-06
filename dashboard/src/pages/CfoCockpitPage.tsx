@@ -72,7 +72,7 @@ export default function CfoCockpitPage() {
               <div className="alert-row" key={alert.id}>
                 <div>
                   <StatusPill label={alert.severity} tone={alertTone(alert.severity)} />
-                  <strong>{alert.event_type}</strong>
+                  <Link to={alert.links?.detail ?? `/logs/${encodeURIComponent(alert.id)}`}>{alert.event_type}</Link>
                   <p>{payloadText(alert.payload)}</p>
                 </div>
                 <div className="cfo-alert-meta">

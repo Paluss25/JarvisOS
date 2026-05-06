@@ -10,6 +10,9 @@ export type LogEvent = {
   span_id: string | null
   source: string
   payload: Record<string, unknown>
+  links: {
+    detail: string
+  }
 }
 
 export type IncidentCreate = {

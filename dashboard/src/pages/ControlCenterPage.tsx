@@ -53,7 +53,7 @@ function IncidentFeed({ rows }: { rows: ControlIncident[] }) {
           <article className="control-feed-row" key={event.id ?? `${event.ts}:${index}`}>
             <div>
               <StatusPill label={event.severity} tone={severityTone(event.severity)} />
-              <strong>{event.event_type}</strong>
+              {event.detail_href ? <Link to={event.detail_href}>{event.event_type}</Link> : <strong>{event.event_type}</strong>}
               <span>{event.summary} · {event.agent_id ?? '-'}</span>
             </div>
             <div className="control-feed-actions">

@@ -55,6 +55,7 @@ export type ControlIncident = {
   task_id: string | null
   trace_id: string | null
   summary: string
+  detail_href: string | null
   task_href: string | null
   trace_href: string | null
 }

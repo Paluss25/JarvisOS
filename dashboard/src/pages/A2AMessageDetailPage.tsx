@@ -7,13 +7,8 @@ import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
 import DecisionEntryRow from '../components/DecisionEntryRow'
+import LogEventRow from '../components/LogEventRow'
 import type { A2AMessage, A2AMessageContext } from '../types/a2a'
-
-function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
-  if (severity === 'critical' || severity === 'error') return 'incident'
-  if (severity === 'warning') return 'warning'
-  return 'neutral'
-}
 
 function messageTone(message: A2AMessage): 'neutral' | 'healthy' | 'warning' | 'incident' | 'network' {
   if (message.severity === 'critical' || message.severity === 'error' || message.status === 'failed') return 'incident'
@@ -168,13 +163,7 @@ export default function A2AMessageDetailPage() {
           <h2>Related Logs</h2>
           <div className="a2a-related-list">
             {context.related_logs.slice(0, 10).map((event) => (
-              <article className="a2a-related-row" key={event.id}>
-                <div>
-                  <StatusPill label={event.severity} tone={severityTone(event.severity)} />
-                  <Link to={`/logs/${encodeURIComponent(event.id)}`}>{event.event_type}</Link>
-                  <span>{timeLabel(event.ts)} · {event.source}</span>
-                </div>
-              </article>
+              <LogEventRow className="a2a-related-row" event={event} key={event.id} />
             ))}
             {context.related_logs.length === 0 ? <div className="empty-state">No related logs found.</div> : null}
           </div>

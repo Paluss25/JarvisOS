@@ -5,18 +5,13 @@ import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
+import LogEventRow from '../components/LogEventRow'
 import type { DecisionContext } from '../types/decisions'
 
 function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
   if (status === 'approved') return 'healthy'
   if (status === 'rejected') return 'incident'
   if (status === 'proposed') return 'warning'
-  return 'neutral'
-}
-
-function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
-  if (severity === 'critical' || severity === 'error') return 'incident'
-  if (severity === 'warning') return 'warning'
   return 'neutral'
 }
 
@@ -112,11 +107,7 @@ export default function DecisionDetailPage() {
           <h2>Related Logs</h2>
           <div className="decision-related-list">
             {context.related_logs.slice(0, 10).map((event) => (
-              <article className="decision-related-row" key={event.id}>
-                <StatusPill label={event.severity} tone={severityTone(event.severity)} />
-                <Link to={`/logs/${encodeURIComponent(event.id)}`}>{event.event_type}</Link>
-                <span>{timeLabel(event.ts)} · {event.agent_id ?? event.source}</span>
-              </article>
+              <LogEventRow className="decision-related-row" event={event} key={event.id} />
             ))}
             {context.related_logs.length === 0 ? <div className="empty-state">No related logs found.</div> : null}
           </div>

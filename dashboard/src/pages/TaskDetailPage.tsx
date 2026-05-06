@@ -7,18 +7,13 @@ import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
 import DecisionEntryRow from '../components/DecisionEntryRow'
+import LogEventRow from '../components/LogEventRow'
 import { useAuth } from '../context/AuthContext'
 
 function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
   if (status === 'done') return 'healthy'
   if (status === 'failed' || status === 'blocked') return 'incident'
   if (status === 'running' || status === 'needs_review' || status === 'waiting') return 'warning'
-  return 'neutral'
-}
-
-function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
-  if (severity === 'critical' || severity === 'error') return 'incident'
-  if (severity === 'warning') return 'warning'
   return 'neutral'
 }
 
@@ -180,14 +175,7 @@ export default function TaskDetailPage() {
           <h2>Recent Logs</h2>
           <div className="task-event-list">
             {context.logs.slice(0, 8).map((event) => (
-              <article className="task-event-row" key={event.id}>
-                <div>
-                  <StatusPill label={event.severity} tone={severityTone(event.severity)} />
-                  <strong>{event.event_type}</strong>
-                  <span>{safeDate(event.ts)} · {event.agent_id ?? '-'}</span>
-                </div>
-                {event.trace_id ? <Link to={`/traces/${encodeURIComponent(event.trace_id)}`}>trace</Link> : null}
-              </article>
+              <LogEventRow className="task-event-row" event={event} key={event.id} />
             ))}
             {context.logs.length === 0 ? <div className="empty-state">No logs linked.</div> : null}
           </div>

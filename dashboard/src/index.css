@@ -585,6 +585,25 @@
   color: var(--jo-ai);
 }
 
+.log-entry-row-main {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.log-entry-title {
+  overflow: hidden;
+  color: var(--jo-text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-entry-title:hover {
+  color: var(--jo-trace);
+}
+
 @media (max-width: 960px) {
   .trace-detail-layout,
   .decision-detail-layout,

@@ -7,6 +7,7 @@ import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
 import DecisionEntryRow from '../components/DecisionEntryRow'
+import LogEventRow from '../components/LogEventRow'
 import type { LogContext } from '../types/logs'
 
 function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -141,14 +142,7 @@ export default function LogDetailPage() {
           <h2>Related Logs</h2>
           <div className="log-event-list">
             {context.related_logs.slice(0, 12).map((item) => (
-              <article className="log-event-row" key={item.id}>
-                <div>
-                  <StatusPill label={item.severity} tone={severityTone(item.severity)} />
-                  <Link to={`/logs/${encodeURIComponent(item.id)}`}>{item.event_type}</Link>
-                  <span>{timeLabel(item.ts)} · {item.agent_id ?? '-'}</span>
-                </div>
-                {item.trace_id ? <Link to={`/traces/${encodeURIComponent(item.trace_id)}`}>trace</Link> : null}
-              </article>
+              <LogEventRow className="log-event-row" event={item} key={item.id} />
             ))}
             {context.related_logs.length === 0 ? <div className="empty-state">No related logs found.</div> : null}
           </div>

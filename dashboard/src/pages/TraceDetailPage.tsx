@@ -7,18 +7,13 @@ import StatusPill from '../components/StatusPill'
 import TraceTree from '../components/TraceTree'
 import AuditEntryRow from '../components/AuditEntryRow'
 import DecisionEntryRow from '../components/DecisionEntryRow'
+import LogEventRow from '../components/LogEventRow'
 import type { TraceDetail, TraceSpan } from '../types/trace'
 
 function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
   if (status === 'ok') return 'healthy'
   if (status === 'error' || status === 'failed') return 'incident'
   if (status === 'running' || status === 'pending') return 'warning'
-  return 'neutral'
-}
-
-function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
-  if (severity === 'critical' || severity === 'error') return 'incident'
-  if (severity === 'warning') return 'warning'
   return 'neutral'
 }
 
@@ -151,14 +146,7 @@ export default function TraceDetailPage() {
               <h2>Correlated Logs</h2>
               <div className="trace-event-list">
                 {trace.logs.slice(0, 12).map((event) => (
-                  <article className="trace-event-row" key={event.id}>
-                    <div>
-                      <StatusPill label={event.severity} tone={severityTone(event.severity)} />
-                      <Link to={`/logs/${encodeURIComponent(event.id)}`}>{event.event_type}</Link>
-                      <span>{timeLabel(event.ts)} · {event.source}</span>
-                    </div>
-                    {event.span_id ? <span>{event.span_id}</span> : null}
-                  </article>
+                  <LogEventRow className="trace-event-row" event={event} key={event.id} />
                 ))}
                 {trace.logs.length === 0 ? <div className="empty-state">No logs linked.</div> : null}
               </div>

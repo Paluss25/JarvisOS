@@ -6,6 +6,7 @@ import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
 import DecisionEntryRow from '../components/DecisionEntryRow'
+import LogEventRow from '../components/LogEventRow'
 import type { CostTraceContext } from '../types/costs'
 
 function money(value: number): string {
@@ -16,16 +17,6 @@ function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incide
   if (status === 'ok') return 'healthy'
   if (status === 'error' || status === 'failed') return 'incident'
   return 'warning'
-}
-
-function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
-  if (severity === 'critical' || severity === 'error') return 'incident'
-  if (severity === 'warning') return 'warning'
-  return 'neutral'
-}
-
-function timeLabel(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : '-'
 }
 
 function WorkspaceLink({ to, label }: { to: string | null; label: string }) {
@@ -162,11 +153,7 @@ export default function CostTraceDetailPage() {
           <h2>Related Logs</h2>
           <div className="cost-related-list">
             {context.related_logs.slice(0, 10).map((event) => (
-              <article className="cost-related-row" key={event.id}>
-                <StatusPill label={event.severity} tone={severityTone(event.severity)} />
-                <Link to={`/logs/${encodeURIComponent(event.id)}`}>{event.event_type}</Link>
-                <span>{timeLabel(event.ts)} · {event.source}</span>
-              </article>
+              <LogEventRow className="cost-related-row" event={event} key={event.id} />
             ))}
             {context.related_logs.length === 0 ? <div className="empty-state">No related logs found.</div> : null}
           </div>
