@@ -2,7 +2,9 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from platform_api.db import get_pool
@@ -119,6 +121,46 @@ def build_memory_summary(events: list[dict], decisions: list[dict]) -> dict:
     }
 
 
+def build_memory_event_context(
+    *,
+    event: dict[str, Any],
+    related_events: list[dict[str, Any]],
+    traces: list[dict[str, Any]],
+    audit_entries: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    agent_id = event.get("agent_id")
+    task_id = event.get("task_id")
+    trace_id = event.get("trace_id")
+    promotion_count = sum(1 for decision in decisions if "memory" in (decision.get("decision_type") or ""))
+    diagnostics = []
+    if _is_conflict(event):
+        diagnostics.append({"kind": "conflict", "label": "Conflict or duplicate detected", "tone": "warning"})
+
+    return {
+        "event": event,
+        "metrics": {
+            "related_event_count": len(related_events),
+            "trace_count": len(traces),
+            "audit_count": len(audit_entries),
+            "decision_count": len(decisions),
+            "promotion_count": promotion_count,
+        },
+        "links": {
+            "agent": f"/agents/{agent_id}" if agent_id else None,
+            "task": f"/tasks/{task_id}" if task_id else None,
+            "trace": f"/traces/{trace_id}" if trace_id else None,
+            "logs": f"/logs?trace_id={trace_id}" if trace_id else f"/logs?task_id={task_id}" if task_id else "/logs",
+            "audit": f"/audit?action=&source=&agent_id={agent_id}" if agent_id else "/audit",
+        },
+        "diagnostics": diagnostics,
+        "related_events": related_events,
+        "traces": traces,
+        "audit_entries": audit_entries,
+        "decisions": decisions,
+    }
+
+
 @router.get("/summary")
 async def get_memory_summary(
     agent_id: str | None = Query(None),
@@ -164,3 +206,115 @@ async def get_memory_summary(
         "events": memory_events,
         "decisions": decisions,
     }
+
+
+@router.get("/events/{event_id}")
+async def get_memory_event_context(event_id: UUID, _user=Depends(_get_current_user)):
+    from platform_api.audit_endpoints import normalize_audit_entry
+    from platform_api.traces import build_trace_summaries
+
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT id, ts, event_type, severity, agent_id, task_id, trace_id, source, payload
+        FROM platform_events
+        WHERE id = $1
+        """,
+        event_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Memory event not found")
+
+    raw_event = dict(row)
+    if not is_memory_event(raw_event):
+        raise HTTPException(status_code=404, detail="Memory event not found")
+
+    event = normalize_memory_event(raw_event)
+    payload = raw_event.get("payload") or {}
+    domain = payload.get("domain")
+    key = payload.get("key")
+    scope = payload.get("scope")
+
+    related_rows = await pool.fetch(
+        """
+        SELECT id, ts, event_type, severity, agent_id, task_id, trace_id, source, payload
+        FROM platform_events
+        WHERE (
+            id = $1
+            OR ($2::text IS NOT NULL AND payload->>'key' = $2)
+            OR ($3::text IS NOT NULL AND payload->>'domain' = $3)
+            OR ($4::text IS NOT NULL AND payload->>'scope' = $4)
+            OR ($5::text IS NOT NULL AND trace_id = $5)
+            OR ($6::uuid IS NOT NULL AND task_id = $6::uuid)
+        )
+        ORDER BY ts DESC
+        LIMIT 100
+        """,
+        event_id,
+        key,
+        domain,
+        scope,
+        event["trace_id"],
+        event["task_id"],
+    )
+    related_events = [
+        normalize_memory_event(dict(item))
+        for item in related_rows
+        if is_memory_event(dict(item))
+    ]
+
+    trace_rows = []
+    if event["trace_id"]:
+        trace_rows = await pool.fetch(
+            """
+            SELECT trace_id, span_id, parent_span_id, ts_start, ts_end, operation,
+                   agent_id, task_id, session_id, status, duration_ms, input_tokens,
+                   output_tokens, cost_usd, model, provider, payload
+            FROM trace_spans
+            WHERE trace_id = $1
+            ORDER BY ts_start DESC
+            LIMIT 200
+            """,
+            event["trace_id"],
+        )
+    audit_rows = await pool.fetch(
+        """
+        SELECT id, ts, category, agent_id, user_id, action, detail, source
+        FROM audit_log
+        WHERE detail->>'memory_event_id' = $1
+           OR detail->>'memory_key' = $2
+           OR detail->>'task_id' = $3
+           OR agent_id = $4
+        ORDER BY ts DESC
+        LIMIT 100
+        """,
+        event["id"],
+        key,
+        event["task_id"],
+        event["agent_id"],
+    )
+    decision_rows = await pool.fetch(
+        """
+        SELECT id, ts, agent_id, task_id, trace_id, title, summary,
+               decision_type, confidence, status, evidence, payload
+        FROM decisions
+        WHERE decision_type LIKE '%memory%'
+           OR ($1::uuid IS NOT NULL AND task_id = $1::uuid)
+           OR ($2::text IS NOT NULL AND trace_id = $2)
+           OR ($3::text IS NOT NULL AND agent_id = $3)
+        ORDER BY ts DESC
+        LIMIT 100
+        """,
+        event["task_id"],
+        event["trace_id"],
+        event["agent_id"],
+    )
+    decisions = [normalize_decision(dict(row)) for row in decision_rows]
+
+    return build_memory_event_context(
+        event=event,
+        related_events=related_events,
+        traces=build_trace_summaries([dict(row) for row in trace_rows]),
+        audit_entries=[normalize_audit_entry(dict(row)) for row in audit_rows],
+        decisions=decisions,
+    )

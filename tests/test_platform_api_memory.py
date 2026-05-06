@@ -1,7 +1,12 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from platform_api.memory import build_memory_summary, is_memory_event, normalize_memory_event
+from platform_api.memory import (
+    build_memory_event_context,
+    build_memory_summary,
+    is_memory_event,
+    normalize_memory_event,
+)
 
 
 def test_is_memory_event_detects_memory_semantics():
@@ -59,3 +64,58 @@ def test_build_memory_summary_counts_memory_activity_and_decisions():
     assert summary["decision_promotions"] == 1
     assert summary["agent_count"] == 3
     assert summary["domain_count"] == 2
+
+
+def test_build_memory_event_context_exposes_provenance_links_and_diagnostics():
+    event = normalize_memory_event({
+        "id": UUID("00000000-0000-0000-0000-000000000001"),
+        "ts": datetime(2026, 5, 6, 13, 0, tzinfo=timezone.utc),
+        "event_type": "memory_conflict",
+        "severity": "warning",
+        "agent_id": "cfo",
+        "task_id": UUID("00000000-0000-0000-0000-000000000002"),
+        "trace_id": "trace-memory-1",
+        "source": "memory-box",
+        "payload": {"kind": "memory_conflict", "domain": "finance", "key": "btc-tax", "scope": "domain:finance"},
+    })
+    related = [
+        event,
+        {
+            **event,
+            "id": "event-2",
+            "event_type": "memory_write",
+            "severity": "info",
+            "kind": "memory_write",
+        },
+    ]
+
+    context = build_memory_event_context(
+        event=event,
+        related_events=related,
+        traces=[{"trace_id": "trace-memory-1"}],
+        audit_entries=[{"id": 1}],
+        decisions=[{"id": "decision-1", "decision_type": "memory_promotion"}],
+    )
+
+    assert context["event"]["id"] == "00000000-0000-0000-0000-000000000001"
+    assert context["metrics"] == {
+        "related_event_count": 2,
+        "trace_count": 1,
+        "audit_count": 1,
+        "decision_count": 1,
+        "promotion_count": 1,
+    }
+    assert context["links"] == {
+        "agent": "/agents/cfo",
+        "task": "/tasks/00000000-0000-0000-0000-000000000002",
+        "trace": "/traces/trace-memory-1",
+        "logs": "/logs?trace_id=trace-memory-1",
+        "audit": "/audit?action=&source=&agent_id=cfo",
+    }
+    assert context["diagnostics"] == [
+        {"kind": "conflict", "label": "Conflict or duplicate detected", "tone": "warning"},
+    ]
+    assert [item["id"] for item in context["related_events"]] == [
+        "00000000-0000-0000-0000-000000000001",
+        "event-2",
+    ]
