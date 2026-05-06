@@ -57,7 +57,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className="px-4 py-4 border-t border-gray-800">
-          <p className="text-xs text-gray-500 mb-2">{user.username}</p>
+          <p className="text-xs text-gray-500 mb-2">{user.name || user.email}</p>
           <button
             onClick={logout}
             className="text-xs text-gray-400 hover:text-white transition-colors"
