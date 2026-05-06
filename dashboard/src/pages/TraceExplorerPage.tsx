@@ -37,7 +37,7 @@ export default function TraceExplorerPage() {
             <span>Cost</span>
           </div>
           {traces.map((trace) => (
-            <Link className="trace-table-row" to={`/traces/${encodeURIComponent(trace.trace_id)}`} key={trace.trace_id}>
+            <Link className="trace-table-row" to={trace.links?.detail ?? `/traces/${encodeURIComponent(trace.trace_id)}`} key={trace.trace_id}>
               <span>{trace.trace_id}</span>
               <span>{trace.agent_id ?? '-'}</span>
               <span>{trace.status}</span>

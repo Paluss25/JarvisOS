@@ -75,6 +75,9 @@ export type IncidentContext = {
     duration_ms: number
     span_count: number
     cost_usd: number
+    links?: {
+      detail: string
+    }
   }>
 }
 

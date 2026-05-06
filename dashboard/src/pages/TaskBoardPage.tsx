@@ -28,7 +28,7 @@ function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incide
 
 function TaskCard({ task }: { task: Task }) {
   return (
-    <Link to={`/tasks/${task.id}`} className="task-card">
+    <Link to={task.links?.detail ?? `/tasks/${task.id}`} className="task-card">
       <div className="task-card-head">
         <StatusPill label={task.status} tone={statusTone(task.status)} />
         <span>{task.priority}</span>

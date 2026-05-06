@@ -20,6 +20,9 @@ export interface Task {
   completed_at: string | null
   updated_at: string
   summary: string | null
+  links: {
+    detail: string
+  }
 }
 
 export interface TaskContext {
@@ -38,6 +41,7 @@ export interface TaskContext {
     traces: string
     logs: string
     audit: string
+    detail: string
   }
   traces: Array<{
     trace_id: string
@@ -46,6 +50,9 @@ export interface TaskContext {
     duration_ms: number
     span_count: number
     cost_usd: number
+    links?: {
+      detail: string
+    }
   }>
   logs: Array<{
     id: string
@@ -55,6 +62,9 @@ export interface TaskContext {
     agent_id: string | null
     trace_id: string | null
     payload: Record<string, unknown>
+    links?: {
+      detail: string
+    }
   }>
   audit_entries: Array<{
     id: number
@@ -64,6 +74,9 @@ export interface TaskContext {
     action: string
     source: string
     detail: Record<string, unknown>
+    links?: {
+      detail: string
+    }
   }>
   decisions: Array<{
     id: string
@@ -73,6 +86,9 @@ export interface TaskContext {
     title: string
     summary: string
     status: string
+    links?: {
+      detail: string
+    }
   }>
   artifacts: Array<{
     event_id: string | null

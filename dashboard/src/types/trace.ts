@@ -13,6 +13,9 @@ export type TraceSummary = {
   input_tokens: number
   output_tokens: number
   cost_usd: number
+  links: {
+    detail: string
+  }
 }
 
 export type TraceSpan = {
@@ -63,6 +66,7 @@ export type TraceDetail = {
     logs: string
     audit: string
     costs: string
+    detail: string
   }
   logs: LogEvent[]
   audit_entries: IncidentContext['audit_entries']

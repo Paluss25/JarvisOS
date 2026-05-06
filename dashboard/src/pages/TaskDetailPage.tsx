@@ -144,7 +144,7 @@ export default function TaskDetailPage() {
             </div>
             {context.traces.map((trace) => (
               <div className="task-mini-row" key={trace.trace_id}>
-                <Link to={`/traces/${encodeURIComponent(trace.trace_id)}`}>{trace.trace_id}</Link>
+                <Link to={trace.links?.detail ?? `/traces/${encodeURIComponent(trace.trace_id)}`}>{trace.trace_id}</Link>
                 <StatusPill label={trace.status} tone={trace.status === 'ok' ? 'healthy' : 'incident'} />
                 <span>{trace.span_count}</span>
                 <span>{trace.duration_ms}ms</span>
