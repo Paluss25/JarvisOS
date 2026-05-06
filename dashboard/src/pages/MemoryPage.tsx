@@ -71,7 +71,11 @@ export default function MemoryPage() {
             {(data?.events ?? []).map((event) => (
               <div className="memory-table-row" key={event.id}>
                 <span>{new Date(event.ts).toLocaleString()}</span>
-                <span><StatusPill label={event.kind} tone={severityTone(event.severity)} /></span>
+                <span>
+                  <Link to={`/memory/events/${encodeURIComponent(event.id)}`}>
+                    <StatusPill label={event.kind} tone={severityTone(event.severity)} />
+                  </Link>
+                </span>
                 <span>{event.agent_id ? <Link to={`/agents/${encodeURIComponent(event.agent_id)}`}>{event.agent_id}</Link> : '-'}</span>
                 <span>{event.domain ?? event.scope ?? '-'}</span>
                 <span>{event.key ?? '-'}</span>

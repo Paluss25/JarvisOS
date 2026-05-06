@@ -20,6 +20,7 @@ import IncidentsPage from './pages/IncidentsPage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
 import LogsPage from './pages/LogsPage'
 import LogDetailPage from './pages/LogDetailPage'
+import MemoryEventDetailPage from './pages/MemoryEventDetailPage'
 import MemoryPage from './pages/MemoryPage'
 import PluginCenterPage from './pages/PluginCenterPage'
 import PluginToolDetailPage from './pages/PluginToolDetailPage'
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="/incidents/:id" element={<IncidentDetailPage />} />
             <Route path="/costs" element={<CostsPage />} />
             <Route path="/memory" element={<MemoryPage />} />
+            <Route path="/memory/events/:id" element={<MemoryEventDetailPage />} />
             <Route path="/plugins" element={<PluginCenterPage />} />
             <Route path="/plugins/tools/:kind/:name" element={<PluginToolDetailPage />} />
             <Route path="/activity" element={<ActivityFeedPage />} />
