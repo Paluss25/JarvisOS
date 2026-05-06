@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from platform_api.incidents import build_incident_event, is_incident_event
+from platform_api.incidents import build_incident_context, build_incident_event, is_incident_event
 from platform_api.logs import normalize_log_event
 
 
@@ -54,3 +54,42 @@ def test_is_incident_event_requires_type_and_payload_kind():
     assert is_incident_event({"event_type": "incident", "payload": {"kind": "incident"}})
     assert not is_incident_event({"event_type": "incident", "payload": {"kind": "log"}})
     assert not is_incident_event({"event_type": "tool_call", "payload": {"kind": "incident"}})
+
+
+def test_build_incident_context_correlates_links_and_metrics():
+    incident = normalize_log_event({
+        "id": UUID("00000000-0000-0000-0000-000000000010"),
+        "ts": datetime(2026, 5, 5, 12, 0, tzinfo=timezone.utc),
+        "event_type": "incident",
+        "severity": "critical",
+        "agent_id": "cio",
+        "task_id": UUID("00000000-0000-0000-0000-000000000002"),
+        "session_id": "session-1",
+        "trace_id": "trace-1",
+        "span_id": None,
+        "source": "dashboard",
+        "payload": {"kind": "incident", "title": "Backup failure", "status": "open"},
+    })
+    context = build_incident_context(
+        incident=incident,
+        related_logs=[{"id": "log-1"}, {"id": "log-2"}],
+        audit_entries=[{"id": 8}],
+        decisions=[{"id": "decision-1"}],
+        traces=[{"trace_id": "trace-1"}],
+    )
+
+    assert context["metrics"] == {
+        "log_count": 2,
+        "audit_count": 1,
+        "decision_count": 1,
+        "trace_count": 1,
+    }
+    assert context["links"] == {
+        "agent": "/agents/cio",
+        "task": "/tasks/00000000-0000-0000-0000-000000000002",
+        "trace": "/traces/trace-1",
+        "logs": "/logs?trace_id=trace-1",
+        "audit": "/audit?agent_id=cio",
+        "ciso": "/agents/ciso/cockpit",
+        "cio": "/agents/cio/cockpit",
+    }
