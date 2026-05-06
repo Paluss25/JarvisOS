@@ -16,6 +16,11 @@ export interface AgentInfo {
     input_tokens: number
     output_tokens: number
   } | null
+  links: {
+    detail: string
+    chat: string
+    cockpit: string
+  }
 }
 
 export interface AgentCreateRequest {

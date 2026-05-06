@@ -83,7 +83,7 @@ export default function A2ANetworkPage() {
               <div className="a2a-table-row" key={message.id}>
                 <span>{new Date(message.ts).toLocaleString()}</span>
                 <span>
-                  <Link to={`/a2a/messages/${encodeURIComponent(message.id)}`}>
+                  <Link to={message.links?.detail ?? `/a2a/messages/${encodeURIComponent(message.id)}`}>
                     <StatusPill label={messageLabel(message)} tone={severityTone(message.severity)} />
                   </Link>
                 </span>

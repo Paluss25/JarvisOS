@@ -29,7 +29,7 @@ function AgentCard({ agent, onRestart, isAdmin }: {
     <article className="agent-card">
       <header>
         <div>
-          <Link to={`/agents/${encodeURIComponent(agent.id)}`}>{agent.name}</Link>
+          <Link to={agent.links?.detail ?? `/agents/${encodeURIComponent(agent.id)}`}>{agent.name}</Link>
           <span>{agent.role}</span>
         </div>
         <StatusPill label={agent.status} tone={statusTone(agent.status)} />
@@ -47,9 +47,9 @@ function AgentCard({ agent, onRestart, isAdmin }: {
       </div>
 
       <div className="agent-card-actions">
-        <Link to={`/agents/${encodeURIComponent(agent.id)}`}>Detail</Link>
-        <Link to={`/agents/${encodeURIComponent(agent.id)}/chat`}>Chat</Link>
-        <Link to={`/agents/${encodeURIComponent(agent.id)}/cockpit`}>Cockpit</Link>
+        <Link to={agent.links?.detail ?? `/agents/${encodeURIComponent(agent.id)}`}>Detail</Link>
+        <Link to={agent.links?.chat ?? `/agents/${encodeURIComponent(agent.id)}/chat`}>Chat</Link>
+        <Link to={agent.links?.cockpit ?? `/agents/${encodeURIComponent(agent.id)}/cockpit`}>Cockpit</Link>
         <Link to={`/traces?agent_id=${encodeURIComponent(agent.id)}`}>Traces</Link>
         <Link to={`/logs?agent_id=${encodeURIComponent(agent.id)}`}>Logs</Link>
         {isAdmin ? <button onClick={() => onRestart(agent.id)}>Restart</button> : null}

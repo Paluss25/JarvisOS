@@ -38,6 +38,9 @@ export type ObservedTool = {
   status: string
   duration_ms: number | null
   payload: Record<string, unknown>
+  links: {
+    detail: string
+  }
 }
 
 export type PluginRegistryData = {

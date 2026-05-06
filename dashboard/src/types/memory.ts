@@ -26,6 +26,9 @@ export type MemoryEvent = {
   key: string | null
   scope: string | null
   payload: Record<string, unknown>
+  links: {
+    detail: string
+  }
 }
 
 export type MemoryData = {

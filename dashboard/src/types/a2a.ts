@@ -30,6 +30,9 @@ export type A2AMessage = {
   max_hops: number
   status: string
   payload: Record<string, unknown>
+  links: {
+    detail: string
+  }
 }
 
 export type A2AEdge = {

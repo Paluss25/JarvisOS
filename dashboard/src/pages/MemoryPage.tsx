@@ -73,7 +73,7 @@ export default function MemoryPage() {
               <div className="memory-table-row" key={event.id}>
                 <span>{new Date(event.ts).toLocaleString()}</span>
                 <span>
-                  <Link to={`/memory/events/${encodeURIComponent(event.id)}`}>
+                  <Link to={event.links?.detail ?? `/memory/events/${encodeURIComponent(event.id)}`}>
                     <StatusPill label={event.kind} tone={severityTone(event.severity)} />
                   </Link>
                 </span>
