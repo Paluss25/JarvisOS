@@ -55,8 +55,9 @@ def is_memory_event(event: dict) -> bool:
 
 def normalize_memory_event(event: dict) -> dict:
     payload = event.get("payload") or {}
+    event_id = _serialize(event.get("id"))
     return {
-        "id": _serialize(event.get("id")),
+        "id": event_id,
         "ts": _serialize(event.get("ts")),
         "event_type": event.get("event_type"),
         "severity": event.get("severity") or "info",
@@ -69,6 +70,9 @@ def normalize_memory_event(event: dict) -> dict:
         "key": payload.get("key"),
         "scope": payload.get("scope"),
         "payload": payload,
+        "links": {
+            "detail": f"/memory/events/{event_id}",
+        },
     }
 
 

@@ -68,11 +68,13 @@ def normalize_observed_tool(event: dict) -> dict:
     payload = event.get("payload") or {}
     is_skill = "skill" in (event.get("event_type") or "") or payload.get("skill")
     name = payload.get("skill") if is_skill else payload.get("tool")
+    display_name = name or payload.get("name") or event.get("event_type")
+    kind = "skill" if is_skill else "tool"
     return {
         "id": _serialize(event.get("id")),
         "ts": _serialize(event.get("ts")),
-        "name": name or payload.get("name") or event.get("event_type"),
-        "kind": "skill" if is_skill else "tool",
+        "name": display_name,
+        "kind": kind,
         "agent_id": event.get("agent_id"),
         "task_id": _serialize(event.get("task_id")),
         "trace_id": event.get("trace_id"),
@@ -82,6 +84,9 @@ def normalize_observed_tool(event: dict) -> dict:
         "status": payload.get("status") or "unknown",
         "duration_ms": payload.get("duration_ms"),
         "payload": payload,
+        "links": {
+            "detail": f"/plugins/tools/{kind}/{display_name}",
+        },
     }
 
 

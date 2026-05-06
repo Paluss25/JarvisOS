@@ -39,6 +39,7 @@ def test_normalize_memory_event_extracts_provenance():
     assert event["domain"] == "finance"
     assert event["key"] == "btc-tax"
     assert event["scope"] == "domain:finance"
+    assert event["links"]["detail"] == "/memory/events/00000000-0000-0000-0000-000000000001"
 
 
 def test_build_memory_summary_counts_memory_activity_and_decisions():

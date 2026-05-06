@@ -29,6 +29,11 @@ def test_normalize_agent_status_exposes_dashboard_fields():
         "uptime_s": None,
         "uptime_seconds": None,
         "context_usage": None,
+        "links": {
+            "detail": "/agents/cfo",
+            "chat": "/agents/cfo/chat",
+            "cockpit": "/agents/cfo/cockpit",
+        },
     }
 
 

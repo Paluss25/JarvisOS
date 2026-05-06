@@ -47,9 +47,11 @@ def test_normalize_observed_tool_extracts_tool_or_skill_from_event():
     assert tool["source"] == "platform"
     assert tool["duration_ms"] == 120
     assert tool["status"] == "ok"
+    assert tool["links"]["detail"] == "/plugins/tools/tool/kubectl"
     assert skill["name"] == "market-research"
     assert skill["kind"] == "skill"
     assert skill["status"] == "failed"
+    assert skill["links"]["detail"] == "/plugins/tools/skill/market-research"
 
 
 def test_build_plugin_summary_counts_registry_and_observed_tools():

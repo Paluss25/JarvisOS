@@ -55,9 +55,10 @@ def normalize_agent_status(
     health: str | None,
 ) -> dict[str, Any]:
     uptime_s = entry.get("uptime_s")
+    agent_id = entry.get("id")
     return {
-        "id": entry.get("id"),
-        "name": entry.get("name") or entry.get("id"),
+        "id": agent_id,
+        "name": entry.get("name") or agent_id,
         "role": entry.get("role") or "Agent",
         "port": entry.get("port"),
         "workspace": entry.get("workspace", ""),
@@ -69,6 +70,11 @@ def normalize_agent_status(
         "uptime_s": uptime_s,
         "uptime_seconds": uptime_s,
         "context_usage": entry.get("context_usage"),
+        "links": {
+            "detail": f"/agents/{agent_id}",
+            "chat": f"/agents/{agent_id}/chat",
+            "cockpit": f"/agents/{agent_id}/cockpit",
+        },
     }
 
 

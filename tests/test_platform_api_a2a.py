@@ -44,6 +44,7 @@ def test_normalize_a2a_event_extracts_envelope_fields():
     assert event["correlation_id"] == "cid-1"
     assert event["hop_count"] == 2
     assert event["max_hops"] == 5
+    assert event["links"]["detail"] == "/a2a/messages/00000000-0000-0000-0000-000000000001"
 
 
 def test_build_a2a_summary_counts_traffic_and_warnings():
