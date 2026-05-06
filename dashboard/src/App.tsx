@@ -15,6 +15,7 @@ import AuditLogPage from './pages/AuditLogPage'
 import CockpitPage from './pages/CockpitPage'
 import ChatHubPage from './pages/ChatHubPage'
 import ControlCenterPage from './pages/ControlCenterPage'
+import CostTraceDetailPage from './pages/CostTraceDetailPage'
 import CostsPage from './pages/CostsPage'
 import IncidentsPage from './pages/IncidentsPage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="/incidents" element={<IncidentsPage />} />
             <Route path="/incidents/:id" element={<IncidentDetailPage />} />
             <Route path="/costs" element={<CostsPage />} />
+            <Route path="/costs/traces/:traceId" element={<CostTraceDetailPage />} />
             <Route path="/memory" element={<MemoryPage />} />
             <Route path="/memory/events/:id" element={<MemoryEventDetailPage />} />
             <Route path="/plugins" element={<PluginCenterPage />} />

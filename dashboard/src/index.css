@@ -1690,8 +1690,125 @@
   color: var(--jo-trace);
 }
 
+.cost-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.cost-link-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.cost-workspace-link {
+  min-height: 32px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  color: var(--jo-text);
+  padding: 7px 10px;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.cost-workspace-link:hover {
+  color: var(--jo-ai);
+}
+
+.cost-workspace-link.disabled {
+  color: var(--jo-muted);
+}
+
+.cost-anomaly-list,
+.cost-related-list {
+  display: grid;
+  gap: 10px;
+}
+
+.cost-anomaly-row,
+.cost-related-row {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  padding: 10px;
+}
+
+.cost-related-row a {
+  color: var(--jo-trace);
+}
+
+.cost-related-row span {
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.cost-mini-table,
+.cost-span-table {
+  display: grid;
+  overflow-x: auto;
+}
+
+.cost-mini-head,
+.cost-mini-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(90px, 0.4fr) minmax(100px, 0.45fr) minmax(70px, 0.3fr);
+  gap: 12px;
+  min-width: 560px;
+  align-items: center;
+}
+
+.cost-mini-head,
+.cost-span-head {
+  color: var(--jo-muted);
+  font-size: 12px;
+  padding-bottom: 8px;
+}
+
+.cost-mini-row,
+.cost-span-row {
+  min-height: 40px;
+  border-top: 1px solid var(--jo-border);
+  color: var(--jo-text);
+  font-size: 13px;
+}
+
+.cost-context-grid {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.35fr) minmax(0, 1fr);
+  gap: 8px 12px;
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.cost-context-grid strong {
+  overflow: hidden;
+  color: var(--jo-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cost-span-head,
+.cost-span-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.7fr) minmax(160px, 0.8fr) minmax(170px, 0.85fr) minmax(100px, 0.45fr) minmax(80px, 0.35fr) minmax(90px, 0.4fr) minmax(90px, 0.4fr);
+  gap: 12px;
+  min-width: 950px;
+  align-items: center;
+}
+
+.cost-related-row strong {
+  color: var(--jo-text);
+  font-size: 13px;
+}
+
 @media (max-width: 1100px) {
-  .cost-grid {
+  .cost-grid,
+  .cost-detail-layout {
     grid-template-columns: 1fr;
   }
 }

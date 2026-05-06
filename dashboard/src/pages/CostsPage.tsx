@@ -10,7 +10,17 @@ function money(value: number): string {
   return `$${value.toFixed(4)}`
 }
 
-function GroupTable({ title, rows, linkTasks = false }: { title: string; rows: CostGroup[]; linkTasks?: boolean }) {
+function GroupTable({
+  title,
+  rows,
+  linkTasks = false,
+  linkTraces = false,
+}: {
+  title: string
+  rows: CostGroup[]
+  linkTasks?: boolean
+  linkTraces?: boolean
+}) {
   return (
     <section className="ops-panel">
       <h2>{title}</h2>
@@ -25,7 +35,11 @@ function GroupTable({ title, rows, linkTasks = false }: { title: string; rows: C
         </div>
         {rows.map((row) => (
           <div className="cost-table-row" key={row.key}>
-            <span>{linkTasks && row.key !== 'unknown' ? <Link to={`/tasks/${encodeURIComponent(row.key)}`}>{row.key}</Link> : row.key}</span>
+            <span>
+              {linkTasks && row.key !== 'unknown' ? <Link to={`/tasks/${encodeURIComponent(row.key)}`}>{row.key}</Link>
+                : linkTraces && row.key !== 'unknown' ? <Link to={`/costs/traces/${encodeURIComponent(row.key)}`}>{row.key}</Link>
+                  : row.key}
+            </span>
             <span>{money(row.cost_usd)}</span>
             <span>{row.tokens.toLocaleString()}</span>
             <span>{row.input_tokens.toLocaleString()} / {row.output_tokens.toLocaleString()}</span>
@@ -83,9 +97,11 @@ export default function CostsPage() {
         <MetricCard label="Input" value={summary?.input_tokens.toLocaleString() ?? '-'} detail="Prompt tokens" />
         <MetricCard label="Output" value={summary?.output_tokens.toLocaleString() ?? '-'} detail="Completion tokens" />
         <MetricCard label="p95 latency" value={summary ? `${summary.p95_latency_ms}ms` : '-'} detail="Nearest-rank span latency" tone={summary?.p95_latency_ms ? 'warning' : 'neutral'} />
+        <MetricCard label="Traces" value={summary?.top_traces.length ?? '-'} detail="Costed traces" />
       </section>
 
       <section className="cost-grid">
+        <GroupTable title="Top Traces" rows={summary?.top_traces ?? []} linkTraces />
         <GroupTable title="By Agent" rows={summary?.by_agent ?? []} />
         <GroupTable title="By Model" rows={summary?.by_model ?? []} />
         <GroupTable title="By Task" rows={summary?.by_task ?? []} linkTasks />
