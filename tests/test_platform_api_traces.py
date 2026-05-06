@@ -101,6 +101,7 @@ def test_build_trace_context_exposes_links_metrics_and_redacted_payloads():
     }
     assert context["links"] == {
         "agent": "/agents/cio",
+        "chat": "/agents/cio/chat?task_id=22222222-2222-2222-2222-222222222222&trace_id=trace-a",
         "task": "/tasks/22222222-2222-2222-2222-222222222222",
         "logs": "/logs?trace_id=trace-a",
         "audit": "/audit?action=&source=&trace_id=trace-a",

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from platform_api.db import get_pool
+from platform_api.links import build_chat_link
 from platform_api.decisions import normalize_decision
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
@@ -148,6 +149,7 @@ def build_memory_event_context(
         },
         "links": {
             "agent": f"/agents/{agent_id}" if agent_id else None,
+            "chat": build_chat_link(agent_id, task_id=task_id, trace_id=trace_id, memory_event_id=event.get("id")),
             "task": f"/tasks/{task_id}" if task_id else None,
             "trace": f"/traces/{trace_id}" if trace_id else None,
             "logs": f"/logs?trace_id={trace_id}" if trace_id else f"/logs?task_id={task_id}" if task_id else "/logs",

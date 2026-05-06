@@ -1,11 +1,30 @@
 from uuid import UUID
 
+from platform_api.links import build_chat_link
 from platform_api.chat import (
     build_chat_a2a_event,
     build_chat_a2a_message,
     build_chat_context,
     build_chat_decision_payload,
 )
+
+
+def test_build_chat_link_encodes_operational_context_in_stable_order():
+    assert build_chat_link(
+        "cio",
+        task_id="00000000-0000-0000-0000-000000000002",
+        trace_id="trace chat/1",
+        log_event_id="log-1",
+        memory_event_id="mem-1",
+    ) == (
+        "/agents/cio/chat?"
+        "task_id=00000000-0000-0000-0000-000000000002"
+        "&trace_id=trace+chat%2F1"
+        "&log_event_id=log-1"
+        "&memory_event_id=mem-1"
+    )
+
+    assert build_chat_link("cfo") == "/agents/cfo/chat"
 
 
 def test_build_chat_context_exposes_attachments_metrics_and_links():

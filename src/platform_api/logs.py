@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from platform_api.db import get_pool
+from platform_api.links import build_chat_link
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 _security = HTTPBearer()
@@ -67,6 +68,7 @@ def build_log_context(
         },
         "links": {
             "agent": f"/agents/{agent_id}" if agent_id else None,
+            "chat": build_chat_link(agent_id, task_id=task_id, trace_id=trace_id, log_event_id=event.get("id")),
             "task": f"/tasks/{task_id}" if task_id else None,
             "trace": f"/traces/{trace_id}" if trace_id else None,
             "logs": f"/logs?trace_id={trace_id}" if trace_id else f"/logs?agent_id={agent_id}" if agent_id else "/logs",

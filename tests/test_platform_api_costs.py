@@ -145,6 +145,7 @@ def test_build_cost_trace_context_exposes_anomalies_links_and_breakdowns():
     assert context["links"] == {
         "trace": "/traces/trace-expensive",
         "agent": "/agents/cfo",
+        "chat": "/agents/cfo/chat?task_id=task-1&trace_id=trace-expensive",
         "task": "/tasks/task-1",
         "logs": "/logs?trace_id=trace-expensive",
         "audit": "/audit?action=&source=&trace_id=trace-expensive",

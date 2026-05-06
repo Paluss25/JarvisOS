@@ -126,7 +126,9 @@ def test_build_a2a_message_context_exposes_thread_metrics_links_and_actions():
     }
     assert context["links"] == {
         "from_agent": "/agents/ceo",
+        "from_chat": "/agents/ceo/chat?task_id=00000000-0000-0000-0000-000000000002&trace_id=trace-a2a-1",
         "to_agent": "/agents/cio",
+        "to_chat": "/agents/cio/chat?task_id=00000000-0000-0000-0000-000000000002&trace_id=trace-a2a-1",
         "task": "/tasks/00000000-0000-0000-0000-000000000002",
         "trace": "/traces/trace-a2a-1",
         "logs": "/logs?trace_id=trace-a2a-1",

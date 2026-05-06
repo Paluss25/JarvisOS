@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from platform_api.db import get_pool
+from platform_api.links import build_chat_link
 
 router = APIRouter(prefix="/api/costs", tags=["costs"])
 _security = HTTPBearer()
@@ -195,6 +196,7 @@ def build_cost_trace_context(
         "links": {
             "trace": f"/traces/{trace_id}",
             "agent": f"/agents/{agent_id}" if agent_id else None,
+            "chat": build_chat_link(agent_id, task_id=task_id, trace_id=trace_id),
             "task": f"/tasks/{task_id}" if task_id else None,
             "logs": f"/logs?trace_id={trace_id}",
             "audit": f"/audit?action=&source=&trace_id={trace_id}",

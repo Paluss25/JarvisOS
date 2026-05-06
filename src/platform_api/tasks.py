@@ -11,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from platform_api.audit import audit, AuditEvent
 from platform_api.db import get_pool
+from platform_api.links import build_chat_link
 from platform_api.models import TaskCreate, TaskPatch, TaskResponse
 
 logger = logging.getLogger(__name__)
@@ -128,7 +129,7 @@ def build_task_context(
         },
         "links": {
             "agent": f"/agents/{agent_id}" if agent_id else None,
-            "chat": f"/agents/{agent_id}/chat" if agent_id else None,
+            "chat": build_chat_link(agent_id, task_id=task_id),
             "cockpit": f"/agents/{agent_id}/cockpit" if agent_id else None,
             "traces": f"/traces?task_id={task_id}",
             "logs": f"/logs?task_id={task_id}",

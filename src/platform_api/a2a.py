@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from platform_api.db import get_pool
+from platform_api.links import build_chat_link
 
 router = APIRouter(prefix="/api/a2a", tags=["a2a"])
 _security = HTTPBearer()
@@ -168,7 +169,9 @@ def build_a2a_message_context(
         },
         "links": {
             "from_agent": f"/agents/{from_agent}" if from_agent else None,
+            "from_chat": build_chat_link(from_agent, task_id=task_id, trace_id=trace_id),
             "to_agent": f"/agents/{to_agent}" if to_agent else None,
+            "to_chat": build_chat_link(to_agent, task_id=task_id, trace_id=trace_id),
             "task": f"/tasks/{task_id}" if task_id else None,
             "trace": f"/traces/{trace_id}" if trace_id else None,
             "logs": f"/logs?trace_id={trace_id}" if trace_id else f"/logs?task_id={task_id}" if task_id else "/logs",

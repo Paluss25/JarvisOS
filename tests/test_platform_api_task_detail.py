@@ -42,7 +42,7 @@ def test_build_task_context_counts_observability_links_and_artifacts():
     }
     assert context["links"] == {
         "agent": "/agents/cio",
-        "chat": "/agents/cio/chat",
+        "chat": "/agents/cio/chat?task_id=22222222-2222-2222-2222-222222222222",
         "cockpit": "/agents/cio/cockpit",
         "traces": "/traces?task_id=22222222-2222-2222-2222-222222222222",
         "logs": "/logs?task_id=22222222-2222-2222-2222-222222222222",

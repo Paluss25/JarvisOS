@@ -107,6 +107,7 @@ def test_build_memory_event_context_exposes_provenance_links_and_diagnostics():
     }
     assert context["links"] == {
         "agent": "/agents/cfo",
+        "chat": "/agents/cfo/chat?task_id=00000000-0000-0000-0000-000000000002&trace_id=trace-memory-1&memory_event_id=00000000-0000-0000-0000-000000000001",
         "task": "/tasks/00000000-0000-0000-0000-000000000002",
         "trace": "/traces/trace-memory-1",
         "logs": "/logs?trace_id=trace-memory-1",

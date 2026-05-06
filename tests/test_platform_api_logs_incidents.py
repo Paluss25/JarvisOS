@@ -58,6 +58,7 @@ def test_build_log_context_exposes_triage_links_and_payload_actions():
     }
     assert context["links"] == {
         "agent": "/agents/cio",
+        "chat": "/agents/cio/chat?task_id=00000000-0000-0000-0000-000000000002&trace_id=trace-1&log_event_id=00000000-0000-0000-0000-000000000001",
         "task": "/tasks/00000000-0000-0000-0000-000000000002",
         "trace": "/traces/trace-1",
         "logs": "/logs?trace_id=trace-1",
