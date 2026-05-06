@@ -24,6 +24,7 @@ _UNIT_TEST_FILES = {
     "test_content_isolator.py",
     "test_cos_routing.py",
     "test_cio_plane_cli.py",
+    "test_cio_issue_collector.py",
     "test_cron_interval.py",
     "test_daily_fitness_migration.py",
     "test_daily_logger_multiuser.py",

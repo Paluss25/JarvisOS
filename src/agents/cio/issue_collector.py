@@ -18,6 +18,8 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+import httpx
+
 from agents.cio.loki_client import LokiClient, PrometheusClient, TelemetryError
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,10 @@ ERROR_SCAN_LOOKBACK_S = 6 * 3600
 
 # Minimum error occurrences before raising a medium issue
 ERROR_MIN_COUNT = 3
+
+CADVISOR_HOST_PORT = 9080
+CADVISOR_METRICS_MARKER = "cadvisor_version_info"
+CADVISOR_PROBE_TIMEOUT_S = 3.0
 
 
 # ── Data classes (same as before so callers are unchanged) ────────────────────
@@ -168,23 +174,46 @@ class LokiIssueCollector:
         return down
 
     async def _check_cadvisor(self) -> list[ConsolidatedIssue]:
-        """Flag hosts where cadvisor is down (Prometheus up=0)."""
+        """Flag hosts where cadvisor is down.
+
+        Prometheus can be stale or misconfigured after host migrations. Before
+        raising an issue, verify the canonical cAdvisor host port directly and
+        confirm that the response is actually cAdvisor metrics, not another
+        service on a reused port.
+        """
         results = await self._prom.query('up{job="cadvisor"}')
         issues = []
         seen = {r["metric"].get("instance") for r in results if float(r["value"][1]) == 1.0}
         for expected in EXPECTED_NODE_EXPORTER:
-            cadvisor_instance = expected.replace(":9100", ":9080")
+            ip = expected.split(":")[0]
+            cadvisor_instance = f"{ip}:{CADVISOR_HOST_PORT}"
             if cadvisor_instance not in seen:
-                ip = expected.split(":")[0]
+                if await self._cadvisor_endpoint_has_metrics(ip):
+                    continue
                 issues.append(ConsolidatedIssue(
                     component=f"{ip}-cadvisor",
                     severity="medium",
                     reporters=["cio"],
-                    issue_type="mcp_unreachable",
-                    description=f"cadvisor unreachable on {ip}",
-                    suggested_action=f"tcp_check:{ip}:9080",
+                    issue_type="connection_error",
+                    description=f"cadvisor unreachable on {ip}:{CADVISOR_HOST_PORT}",
+                    suggested_action=(
+                        f"http_verify:http://{ip}:{CADVISOR_HOST_PORT}/metrics "
+                        f"contains {CADVISOR_METRICS_MARKER}"
+                    ),
                 ))
         return issues
+
+    async def _cadvisor_endpoint_has_metrics(self, ip: str) -> bool:
+        """Return true when the canonical cAdvisor endpoint returns cAdvisor metrics."""
+        url = f"http://{ip}:{CADVISOR_HOST_PORT}/metrics"
+        try:
+            async with httpx.AsyncClient(timeout=CADVISOR_PROBE_TIMEOUT_S) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+        except Exception as exc:
+            logger.info("issue_collector: cadvisor direct probe failed for %s — %s", url, exc)
+            return False
+        return CADVISOR_METRICS_MARKER in response.text
 
     async def _check_silent_agents(self) -> list[ConsolidatedIssue]:
         """Flag agents that have no Loki entries in the last AGENT_SILENCE_LOOKBACK_S."""
