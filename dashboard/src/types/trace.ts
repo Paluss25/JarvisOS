@@ -1,3 +1,5 @@
+import type { IncidentContext, LogEvent } from './logs'
+
 export type TraceSummary = {
   trace_id: string
   agent_id: string | null
@@ -37,4 +39,31 @@ export type TraceSpan = {
 export type TraceDetail = {
   summary: TraceSummary
   spans: TraceSpan[]
+  flat_spans: TraceSpan[]
+  waterfall: Array<{
+    span_id: string
+    operation: string
+    status: string
+    offset_ms: number
+    duration_ms: number
+  }>
+  metrics: {
+    span_count: number
+    error_count: number
+    log_count: number
+    audit_count: number
+    decision_count: number
+    token_count: number
+    cost_usd: number
+  }
+  links: {
+    agent: string | null
+    task: string | null
+    logs: string
+    audit: string
+    costs: string
+  }
+  logs: LogEvent[]
+  audit_entries: IncidentContext['audit_entries']
+  decisions: IncidentContext['decisions']
 }
