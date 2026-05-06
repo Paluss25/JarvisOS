@@ -14,6 +14,11 @@ from typing import Any
 
 import yaml
 
+from agent_runner.memory.open_loop_registry import (
+    FRESHNESS_GUARD,
+    render_open_loop_context,
+)
+
 logger = logging.getLogger(__name__)
 
 # Required files (warn if missing)
@@ -226,6 +231,8 @@ def load_workspace_context(workspace_path: str | Path, skills_allowlist: list[st
         - daily        — memory/YYYY-MM-DD.md (today)
         - yesterday    — memory/YYYY-MM-DD.md (yesterday)
         - architecture — ARCHITECTURE.md (optional; technical self-knowledge)
+        - memory_guard — global instructions for resolving stale memory
+        - open_loops   — authoritative structured open-loop state
     """
     root = Path(workspace_path)
 
@@ -236,6 +243,8 @@ def load_workspace_context(workspace_path: str | Path, skills_allowlist: list[st
 
     ctx = {
         "soul":      _read(root / "SOUL.md"),
+        "memory_guard": FRESHNESS_GUARD,
+        "open_loops": render_open_loop_context(root),
         "agents":    _read(root / "AGENTS.md"),
         "user":      _read(root / "USER.md"),
         "tools_md":  _read(root / "TOOLS.md"),
