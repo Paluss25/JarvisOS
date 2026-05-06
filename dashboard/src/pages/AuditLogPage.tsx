@@ -3,23 +3,8 @@ import { Link } from 'react-router-dom'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
-import { apiGet } from '../api/client'
-
-interface AuditEntry {
-  id: number
-  ts: string
-  category: string
-  agent_id: string | null
-  user_id: string | null
-  action: string
-  source: string
-  detail: Record<string, unknown>
-}
-
-interface AuditResponse {
-  items: AuditEntry[]
-  total: number
-}
+import { listAudit } from '../api/audit'
+import type { AuditEntry } from '../types/audit'
 
 const CATEGORIES = ['', 'agent', 'platform', 'security', 'memory', 'task']
 
@@ -56,7 +41,7 @@ export default function AuditLogPage() {
     if (action.trim()) params.set('action', action.trim())
     if (source.trim()) params.set('source', source.trim())
     setLoading(true)
-    apiGet<AuditResponse>(`/audit?${params}`)
+    listAudit(params)
       .then((r) => {
         setEntries(r.items ?? [])
         setTotal(r.total ?? 0)
@@ -141,7 +126,7 @@ export default function AuditLogPage() {
             <div key={e.id} className="audit-table-row">
               <span>{new Date(e.ts).toLocaleString()}</span>
               <span><StatusPill label={e.category} tone={categoryTone(e.category)} /></span>
-              <strong>{e.action}</strong>
+              <strong><Link to={`/audit/${e.id}`}>{e.action}</Link></strong>
               <span>{e.agent_id ? <Link to={`/agents/${encodeURIComponent(e.agent_id)}`}>{e.agent_id}</Link> : '-'}</span>
               <span>{e.user_id ?? '-'}</span>
               <span>{e.source ?? '-'}</span>

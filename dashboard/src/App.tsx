@@ -11,6 +11,7 @@ import TraceExplorerPage from './pages/TraceExplorerPage'
 import ActivityFeedPage from './pages/ActivityFeedPage'
 import A2AMessageDetailPage from './pages/A2AMessageDetailPage'
 import A2ANetworkPage from './pages/A2ANetworkPage'
+import AuditDetailPage from './pages/AuditDetailPage'
 import AuditLogPage from './pages/AuditLogPage'
 import CockpitPage from './pages/CockpitPage'
 import ChatHubPage from './pages/ChatHubPage'
@@ -65,6 +66,7 @@ export default function App() {
             <Route path="/a2a" element={<A2ANetworkPage />} />
             <Route path="/a2a/messages/:id" element={<A2AMessageDetailPage />} />
             <Route path="/audit" element={<AuditLogPage />} />
+            <Route path="/audit/:id" element={<AuditDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>
