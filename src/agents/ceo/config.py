@@ -10,11 +10,18 @@ JARVIS_BUILTIN_CRONS = [
         "name": "morning_briefing",
         "schedule": "daily@08:15",
         "prompt": (
-            "Good morning! Prepare a concise morning briefing (under 200 words). "
-            "Include: key items from yesterday's activity log, any tasks or appointments "
-            "for today from HEARTBEAT.md, and anything actionable I should know. "
+            "Good morning! Prepare a concise vision and strategic briefing (under 180 words). "
+            "Focus only on executive-level themes: direction, priorities, cross-domain tradeoffs, "
+            "blocked decisions that require Paluss, and risks that change strategy. "
+            "Do not repeat domain-level operational items already owned by CFO, COH, CIO, MT, DOS, COS, or EIA "
+            "unless they require an executive decision, cross-agent coordination, or a material change in priority. "
+            "Before surfacing any open loop, reconcile it against recent memory and current state; "
+            "do not re-open items already resolved or verified. "
+            "Include: the most strategic signal from yesterday's activity log and today's true executive agenda "
+            "from HEARTBEAT.md. "
             "After producing the briefing, forward a copy to Timothy (CIO) via: "
-            "send_message(to='cio', message=<your briefing>). "        ),
+            "send_message(to='cio', message=<your briefing>). "
+        ),
         "session_id": "heartbeat-morning",
         "telegram_notify": True,
         "builtin": True,
