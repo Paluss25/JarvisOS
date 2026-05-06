@@ -25,6 +25,7 @@ def test_normalize_log_event_serializes_ids_and_timestamp():
     assert event["task_id"] == "00000000-0000-0000-0000-000000000002"
     assert event["trace_id"] == "trace-1"
     assert event["payload"]["tool"] == "kubectl"
+    assert event["links"]["detail"] == "/logs/00000000-0000-0000-0000-000000000001"
 
 
 def test_build_log_context_exposes_triage_links_and_payload_actions():

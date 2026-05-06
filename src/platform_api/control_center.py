@@ -75,11 +75,12 @@ def build_control_summary(
         }
 
     def event_card(event: dict) -> dict:
+        event_id = serialize(event.get("id"))
         task_id = serialize(event.get("task_id"))
         trace_id = event.get("trace_id")
         payload = event.get("payload") or {}
         return {
-            "id": serialize(event.get("id")),
+            "id": event_id,
             "ts": serialize(event.get("ts")),
             "severity": event.get("severity") or "info",
             "event_type": event.get("event_type"),
@@ -87,6 +88,7 @@ def build_control_summary(
             "task_id": task_id,
             "trace_id": trace_id,
             "summary": payload.get("summary") or payload.get("message") or event.get("event_type"),
+            "detail_href": f"/logs/{event_id}" if event_id else None,
             "task_href": f"/tasks/{task_id}" if task_id else None,
             "trace_href": f"/traces/{trace_id}" if trace_id else None,
         }

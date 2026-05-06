@@ -30,8 +30,9 @@ def _serialize(value: Any) -> Any:
 
 
 def normalize_log_event(row: dict) -> dict:
+    event_id = _serialize(row.get("id"))
     return {
-        "id": _serialize(row.get("id")),
+        "id": event_id,
         "ts": _serialize(row.get("ts")),
         "event_type": row.get("event_type"),
         "severity": row.get("severity") or "info",
@@ -42,6 +43,9 @@ def normalize_log_event(row: dict) -> dict:
         "span_id": row.get("span_id"),
         "source": row.get("source") or "platform",
         "payload": row.get("payload") or {},
+        "links": {
+            "detail": f"/logs/{event_id}",
+        },
     }
 
 
