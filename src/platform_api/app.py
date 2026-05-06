@@ -29,6 +29,7 @@ def create_platform_app() -> FastAPI:
     from platform_api.logs import router as logs_router
     from platform_api.memory import router as memory_router
     from platform_api.plugins import router as plugins_router
+    from platform_api.settings import router as settings_router
     from platform_api.tasks import router as tasks_router
     from platform_api.token_keepalive import TokenKeepalive
     from platform_api.traces import router as traces_router
@@ -81,6 +82,7 @@ def create_platform_app() -> FastAPI:
     app.include_router(incidents_router)
     app.include_router(memory_router)
     app.include_router(plugins_router)
+    app.include_router(settings_router)
     app.include_router(audit_router)
     app.include_router(webhooks_router)
 
