@@ -111,6 +111,9 @@ def build_trace_summaries(spans: list[dict]) -> list[dict]:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost_usd": round(cost_usd, 6),
+            "links": {
+                "detail": f"/traces/{trace_id}",
+            },
         })
 
     return sorted(summaries, key=lambda item: item["started_at"], reverse=True)
@@ -174,6 +177,7 @@ def build_trace_context(
             "cost_usd": summary["cost_usd"],
         },
         "links": {
+            "detail": f"/traces/{trace_id}",
             "agent": f"/agents/{agent_id}" if agent_id else None,
             "chat": build_chat_link(agent_id, task_id=task_id, trace_id=trace_id),
             "task": f"/tasks/{task_id}" if task_id else None,

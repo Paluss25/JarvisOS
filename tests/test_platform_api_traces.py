@@ -47,6 +47,7 @@ def test_build_trace_summaries_groups_and_orders_by_latest_start():
     assert summaries[0]["input_tokens"] == 20
     assert summaries[0]["output_tokens"] == 40
     assert summaries[0]["cost_usd"] == 0.246912
+    assert summaries[0]["links"]["detail"] == "/traces/trace-a"
     assert summaries[1]["status"] == "error"
 
 
@@ -100,6 +101,7 @@ def test_build_trace_context_exposes_links_metrics_and_redacted_payloads():
         "cost_usd": 0.246912,
     }
     assert context["links"] == {
+        "detail": "/traces/trace-a",
         "agent": "/agents/cio",
         "chat": "/agents/cio/chat?task_id=22222222-2222-2222-2222-222222222222&trace_id=trace-a",
         "task": "/tasks/22222222-2222-2222-2222-222222222222",

@@ -42,6 +42,7 @@ def _serialize_uuid_list(values) -> list[str]:
 
 
 def normalize_task(row: dict) -> dict:
+    task_id = _serialize(row.get("id"))
     status = row.get("status") or "pending"
     assigned_to = row.get("assigned_to")
     updated_at = (
@@ -51,7 +52,7 @@ def normalize_task(row: dict) -> dict:
         or row.get("created_at")
     )
     return {
-        "id": _serialize(row.get("id")),
+        "id": task_id,
         "parent_id": _serialize(row.get("parent_id")),
         "title": row.get("title"),
         "description": row.get("description") or "",
@@ -72,6 +73,9 @@ def normalize_task(row: dict) -> dict:
         "completed_at": _serialize(row.get("completed_at")),
         "updated_at": _serialize(updated_at),
         "duration_ms": row.get("duration_ms"),
+        "links": {
+            "detail": f"/tasks/{task_id}",
+        },
     }
 
 
@@ -128,6 +132,7 @@ def build_task_context(
             "artifact_count": len(artifacts),
         },
         "links": {
+            "detail": f"/tasks/{task_id}",
             "agent": f"/agents/{agent_id}" if agent_id else None,
             "chat": build_chat_link(agent_id, task_id=task_id),
             "cockpit": f"/agents/{agent_id}/cockpit" if agent_id else None,

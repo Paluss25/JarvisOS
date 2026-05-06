@@ -34,6 +34,7 @@ def test_normalize_task_exposes_canonical_and_dashboard_aliases():
     assert task["depends_on"] == ["00000000-0000-0000-0000-000000000002"]
     assert task["created_at"] == "2026-05-06T10:00:00+00:00"
     assert task["updated_at"] == "2026-05-06T10:02:00+00:00"
+    assert task["links"]["detail"] == "/tasks/00000000-0000-0000-0000-000000000001"
 
 
 def test_normalize_task_uses_created_at_as_updated_at_when_no_lifecycle_timestamps():
