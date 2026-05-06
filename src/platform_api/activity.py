@@ -69,6 +69,7 @@ def normalize_activity_event(row: dict[str, Any]) -> dict[str, Any]:
 
 def normalize_activity_audit(row: dict[str, Any]) -> dict[str, Any]:
     detail = row.get("detail") or {}
+    audit_id = _serialize(row.get("id"))
     task_id = detail.get("task_id")
     trace_id = detail.get("trace_id")
     agent_id = row.get("agent_id")
@@ -76,7 +77,7 @@ def normalize_activity_audit(row: dict[str, Any]) -> dict[str, Any]:
     source = row.get("source") or "audit"
     query = f"action={action or ''}&source={source}&agent_id={agent_id or ''}"
     return {
-        "id": _serialize(row.get("id")),
+        "id": audit_id,
         "ts": _serialize(row.get("ts")),
         "kind": "audit",
         "label": action,
@@ -89,7 +90,7 @@ def normalize_activity_audit(row: dict[str, Any]) -> dict[str, Any]:
         "preview": _preview(detail),
         "payload": detail,
         "links": {
-            "detail": f"/audit?{query}",
+            "detail": f"/audit/{audit_id}" if audit_id else f"/audit?{query}",
             "agent": f"/agents/{agent_id}" if agent_id else None,
             "chat": build_chat_link(agent_id, task_id=task_id, trace_id=trace_id),
             "task": f"/tasks/{task_id}" if task_id else None,

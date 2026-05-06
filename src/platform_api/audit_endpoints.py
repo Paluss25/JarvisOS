@@ -25,8 +25,9 @@ async def _get_current_user(
 
 def normalize_audit_entry(row: Mapping[str, Any]) -> dict[str, Any]:
     ts = row.get("ts")
+    entry_id = row.get("id")
     return {
-        "id": row.get("id"),
+        "id": entry_id,
         "ts": ts.isoformat() if hasattr(ts, "isoformat") else ts,
         "category": row.get("category"),
         "agent_id": row.get("agent_id"),
@@ -34,6 +35,9 @@ def normalize_audit_entry(row: Mapping[str, Any]) -> dict[str, Any]:
         "action": row.get("action"),
         "detail": row.get("detail") or {},
         "source": row.get("source"),
+        "links": {
+            "detail": f"/audit/{entry_id}",
+        },
     }
 
 

@@ -25,6 +25,9 @@ def test_normalize_audit_entry_serializes_timestamp_and_defaults_detail():
         "action": "task_created",
         "detail": {},
         "source": "api",
+        "links": {
+            "detail": "/audit/7",
+        },
     }
 
 
@@ -49,6 +52,7 @@ def test_build_audit_response_wraps_items_with_total_count():
     assert len(response["items"]) == 1
     assert response["items"][0]["category"] == "security"
     assert response["items"][0]["detail"] == {"severity": "critical"}
+    assert response["items"][0]["links"]["detail"] == "/audit/3"
 
 
 def test_build_audit_context_exposes_links_metrics_and_related_records():

@@ -71,5 +71,6 @@ def test_build_activity_summary_merges_platform_events_and_audit_entries():
     }
     assert [item["kind"] for item in summary["items"]] == ["audit", "platform_event"]
     assert summary["items"][0]["label"] == "task_retried"
-    assert summary["items"][0]["links"]["detail"] == "/audit?action=task_retried&source=api&agent_id=cio"
+    assert summary["items"][0]["links"]["detail"] == "/audit/7"
+    assert summary["items"][0]["links"]["audit"] == "/audit?action=task_retried&source=api&agent_id=cio"
     assert summary["items"][1]["links"]["trace"] == "/traces/trace-activity-1"
