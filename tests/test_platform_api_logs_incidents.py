@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from platform_api.incidents import build_incident_context, build_incident_event, is_incident_event
-from platform_api.logs import normalize_log_event
+from platform_api.logs import build_log_context, normalize_log_event
 
 
 def test_normalize_log_event_serializes_ids_and_timestamp():
@@ -25,6 +25,48 @@ def test_normalize_log_event_serializes_ids_and_timestamp():
     assert event["task_id"] == "00000000-0000-0000-0000-000000000002"
     assert event["trace_id"] == "trace-1"
     assert event["payload"]["tool"] == "kubectl"
+
+
+def test_build_log_context_exposes_triage_links_and_payload_actions():
+    event = normalize_log_event({
+        "id": UUID("00000000-0000-0000-0000-000000000001"),
+        "ts": datetime(2026, 5, 5, 12, 0, tzinfo=timezone.utc),
+        "event_type": "tool_call_failed",
+        "severity": "error",
+        "agent_id": "cio",
+        "task_id": UUID("00000000-0000-0000-0000-000000000002"),
+        "session_id": "session-1",
+        "trace_id": "trace-1",
+        "span_id": "span-1",
+        "source": "agent",
+        "payload": {"tool": "kubectl", "message": "pod crashloop"},
+    })
+
+    context = build_log_context(
+        event=event,
+        related_logs=[{"id": "event-2"}],
+        audit_entries=[{"id": 10}],
+        decisions=[{"id": "decision-1"}],
+        traces=[{"trace_id": "trace-1"}],
+    )
+
+    assert context["metrics"] == {
+        "related_log_count": 1,
+        "audit_count": 1,
+        "decision_count": 1,
+        "trace_count": 1,
+    }
+    assert context["links"] == {
+        "agent": "/agents/cio",
+        "task": "/tasks/00000000-0000-0000-0000-000000000002",
+        "trace": "/traces/trace-1",
+        "logs": "/logs?trace_id=trace-1",
+        "audit": "/audit?agent_id=cio",
+    }
+    assert context["suggested_actions"] == [
+        {"kind": "incident", "label": "Create incident", "severity": "error"},
+        {"kind": "task", "label": "Create task", "priority": "high"},
+    ]
 
 
 def test_build_incident_event_sets_payload_and_defaults():
