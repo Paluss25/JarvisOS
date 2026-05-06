@@ -9,6 +9,7 @@ import TaskDetailPage from './pages/TaskDetailPage'
 import TraceDetailPage from './pages/TraceDetailPage'
 import TraceExplorerPage from './pages/TraceExplorerPage'
 import ActivityFeedPage from './pages/ActivityFeedPage'
+import A2AMessageDetailPage from './pages/A2AMessageDetailPage'
 import A2ANetworkPage from './pages/A2ANetworkPage'
 import AuditLogPage from './pages/AuditLogPage'
 import CockpitPage from './pages/CockpitPage'
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="/plugins" element={<PluginCenterPage />} />
             <Route path="/activity" element={<ActivityFeedPage />} />
             <Route path="/a2a" element={<A2ANetworkPage />} />
+            <Route path="/a2a/messages/:id" element={<A2AMessageDetailPage />} />
             <Route path="/audit" element={<AuditLogPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>

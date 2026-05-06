@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getA2ASummary } from '../api/a2a'
+import { getA2AMessages } from '../api/a2a'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
@@ -21,7 +21,7 @@ export default function A2ANetworkPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    getA2ASummary()
+    getA2AMessages()
       .then((result) => {
         setData(result)
         setError(null)
@@ -29,20 +29,8 @@ export default function A2ANetworkPage() {
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, [])
 
-  const edges = useMemo(() => {
-    const counts = new Map<string, { from: string; to: string; count: number; failures: number }>()
-    for (const message of data?.messages ?? []) {
-      if (!message.from_agent || !message.to_agent) continue
-      const key = `${message.from_agent}->${message.to_agent}`
-      const current = counts.get(key) ?? { from: message.from_agent, to: message.to_agent, count: 0, failures: 0 }
-      current.count += 1
-      if (message.severity === 'error' || message.severity === 'critical' || message.status === 'failed') current.failures += 1
-      counts.set(key, current)
-    }
-    return [...counts.values()].sort((a, b) => b.count - a.count)
-  }, [data])
-
   const summary = data?.summary
+  const edges = data?.edges ?? []
 
   return (
     <main className="ops-page">
@@ -68,11 +56,11 @@ export default function A2ANetworkPage() {
           <h2>Network Edges</h2>
           <div className="a2a-edge-list">
             {edges.map((edge) => (
-              <div className="a2a-edge-row" key={`${edge.from}->${edge.to}`}>
-                <span>{edge.from}</span>
+              <div className="a2a-edge-row" key={`${edge.from_agent}->${edge.to_agent}`}>
+                <span>{edge.from_agent}</span>
                 <strong>→</strong>
-                <span>{edge.to}</span>
-                <StatusPill label={`${edge.count} msg`} tone={edge.failures ? 'incident' : 'network'} />
+                <span>{edge.to_agent}</span>
+                <StatusPill label={`${edge.message_count} msg`} tone={edge.failure_count ? 'incident' : 'network'} />
               </div>
             ))}
             {edges.length === 0 ? <div className="empty-state">No A2A edges recorded.</div> : null}
@@ -94,7 +82,11 @@ export default function A2ANetworkPage() {
             {(data?.messages ?? []).map((message) => (
               <div className="a2a-table-row" key={message.id}>
                 <span>{new Date(message.ts).toLocaleString()}</span>
-                <span><StatusPill label={messageLabel(message)} tone={severityTone(message.severity)} /></span>
+                <span>
+                  <Link to={`/a2a/messages/${encodeURIComponent(message.id)}`}>
+                    <StatusPill label={messageLabel(message)} tone={severityTone(message.severity)} />
+                  </Link>
+                </span>
                 <span>{message.from_agent ?? '-'} → {message.to_agent ?? '-'}</span>
                 <span>{message.mode}</span>
                 <span>{message.hop_count}/{message.max_hops}</span>

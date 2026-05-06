@@ -1529,8 +1529,125 @@
   color: var(--jo-trace);
 }
 
+.a2a-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.a2a-link-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.a2a-workspace-link,
+.a2a-action-row button,
+.a2a-action-row a {
+  min-height: 32px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  color: var(--jo-text);
+  padding: 7px 10px;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.a2a-workspace-link:hover,
+.a2a-action-row a:hover {
+  color: var(--jo-network);
+}
+
+.a2a-workspace-link.disabled {
+  color: var(--jo-muted);
+}
+
+.a2a-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.a2a-action-row button {
+  cursor: pointer;
+}
+
+.a2a-thread-list,
+.a2a-related-list {
+  display: grid;
+  gap: 10px;
+}
+
+.a2a-thread-row,
+.a2a-related-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  padding: 10px;
+}
+
+.a2a-thread-row div,
+.a2a-related-row div {
+  display: grid;
+  gap: 5px;
+}
+
+.a2a-thread-row strong,
+.a2a-related-row strong,
+.a2a-related-row a {
+  color: var(--jo-text);
+  font-size: 13px;
+}
+
+.a2a-related-row a:hover {
+  color: var(--jo-network);
+}
+
+.a2a-thread-row span,
+.a2a-related-row span {
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.a2a-envelope-grid {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.35fr) minmax(0, 1fr);
+  gap: 8px 12px;
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.a2a-envelope-grid strong {
+  overflow: hidden;
+  color: var(--jo-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a2a-payload {
+  max-height: 420px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  color: var(--jo-muted);
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 @media (max-width: 960px) {
-  .a2a-layout {
+  .a2a-layout,
+  .a2a-detail-layout,
+  .a2a-thread-row,
+  .a2a-related-row {
     grid-template-columns: 1fr;
   }
 }
