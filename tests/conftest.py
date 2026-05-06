@@ -29,6 +29,8 @@ _UNIT_TEST_FILES = {
     "test_cron_interval.py",
     "test_daily_fitness_migration.py",
     "test_daily_logger_multiuser.py",
+    "test_don_config.py",
+    "test_don_fast_actions.py",
     "test_dos_daily_fitness_import.py",
     "test_drhouse_router.py",
     "test_eia_digest.py",
