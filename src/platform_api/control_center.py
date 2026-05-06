@@ -94,14 +94,16 @@ def build_control_summary(
     def decision_card(decision: dict) -> dict:
         task_id = serialize(decision.get("task_id"))
         trace_id = decision.get("trace_id")
+        decision_id = serialize(decision.get("id"))
         return {
-            "id": serialize(decision.get("id")),
+            "id": decision_id,
             "ts": serialize(decision.get("ts")),
             "agent_id": decision.get("agent_id"),
             "task_id": task_id,
             "trace_id": trace_id,
             "title": decision.get("title"),
             "status": decision.get("status") or "proposed",
+            "detail_href": f"/decisions/{decision_id}" if decision_id else None,
             "href": f"/tasks/{task_id}" if task_id else None,
             "trace_href": f"/traces/{trace_id}" if trace_id else None,
         }

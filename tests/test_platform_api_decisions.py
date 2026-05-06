@@ -31,6 +31,7 @@ def test_build_decision_context_exposes_links_metrics_and_evidence():
     )
 
     assert context["decision"]["id"] == "00000000-0000-0000-0000-000000000001"
+    assert context["decision"]["links"]["detail"] == "/decisions/00000000-0000-0000-0000-000000000001"
     assert context["metrics"] == {
         "evidence_count": 2,
         "payload_key_count": 2,

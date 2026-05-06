@@ -29,6 +29,7 @@ def test_normalize_decision_serializes_audit_fields():
     assert decision["confidence"] == 0.875
     assert decision["evidence"][0]["source"] == "btc-fiscal-api"
     assert decision["payload"]["currency"] == "EUR"
+    assert decision["links"]["detail"] == "/decisions/00000000-0000-0000-0000-000000000001"
 
 
 def test_build_cfo_summary_counts_decisions_and_alerts():

@@ -73,6 +73,7 @@ def test_build_control_summary_exposes_operator_work_queues_and_links():
     assert summary["work_in_progress"][0]["href"] == "/tasks/task-1"
     assert summary["needs_review"][0]["agent_href"] == "/agents/cfo"
     assert summary["incident_feed"][0]["trace_href"] == "/traces/trace-1"
+    assert summary["recent_decisions"][0]["detail_href"] == "/decisions/decision-1"
     assert summary["recent_decisions"][0]["href"] == "/tasks/task-2"
     assert summary["slow_traces"][0]["trace_id"] == "trace-2"
     assert summary["agent_spotlight"][0] == {

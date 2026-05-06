@@ -39,8 +39,9 @@ def _number(value: Any) -> float | None:
 
 
 def normalize_decision(row: dict) -> dict:
+    decision_id = _serialize(row.get("id"))
     return {
-        "id": _serialize(row.get("id")),
+        "id": decision_id,
         "ts": _serialize(row.get("ts")),
         "agent_id": row.get("agent_id"),
         "task_id": _serialize(row.get("task_id")),
@@ -52,6 +53,9 @@ def normalize_decision(row: dict) -> dict:
         "status": row.get("status") or "proposed",
         "evidence": row.get("evidence") or [],
         "payload": row.get("payload") or {},
+        "links": {
+            "detail": f"/decisions/{decision_id}",
+        },
     }
 
 
