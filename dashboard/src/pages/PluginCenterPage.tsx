@@ -96,7 +96,9 @@ export default function PluginCenterPage() {
           </div>
           {(data?.observed_tools ?? []).map((tool, index) => (
             <div className="observed-tool-row" key={`${tool.name}:${tool.agent_id}:${index}`}>
-              <strong>{tool.name}</strong>
+              <strong>
+                <Link to={`/plugins/tools/${tool.kind}/${encodeURIComponent(tool.name)}`}>{tool.name}</Link>
+              </strong>
               <span>{tool.kind}</span>
               <span>{tool.agent_id ? <Link to={`/agents/${tool.agent_id}`}>{tool.agent_id}</Link> : '-'}</span>
               <span><StatusPill label={tool.status} tone={toneForStatus(tool.status)} /></span>

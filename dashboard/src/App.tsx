@@ -22,6 +22,7 @@ import LogsPage from './pages/LogsPage'
 import LogDetailPage from './pages/LogDetailPage'
 import MemoryPage from './pages/MemoryPage'
 import PluginCenterPage from './pages/PluginCenterPage'
+import PluginToolDetailPage from './pages/PluginToolDetailPage'
 import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="/costs" element={<CostsPage />} />
             <Route path="/memory" element={<MemoryPage />} />
             <Route path="/plugins" element={<PluginCenterPage />} />
+            <Route path="/plugins/tools/:kind/:name" element={<PluginToolDetailPage />} />
             <Route path="/activity" element={<ActivityFeedPage />} />
             <Route path="/a2a" element={<A2ANetworkPage />} />
             <Route path="/a2a/messages/:id" element={<A2AMessageDetailPage />} />

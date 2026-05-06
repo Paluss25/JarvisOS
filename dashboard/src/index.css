@@ -2188,8 +2188,137 @@
   align-items: center;
 }
 
+.plugin-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.plugin-link-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.plugin-workspace-link {
+  min-height: 32px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  color: var(--jo-text);
+  padding: 7px 10px;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.plugin-workspace-link:hover {
+  color: var(--jo-network);
+}
+
+.plugin-workspace-link.disabled {
+  color: var(--jo-muted);
+}
+
+.plugin-diagnostic-list,
+.plugin-agent-list,
+.plugin-trace-list,
+.plugin-payload-list,
+.plugin-related-list {
+  display: grid;
+  gap: 10px;
+}
+
+.plugin-diagnostic-row,
+.plugin-agent-row,
+.plugin-trace-row,
+.plugin-related-row {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  padding: 10px;
+}
+
+.plugin-diagnostic-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.plugin-agent-row a,
+.plugin-trace-row a,
+.plugin-event-row a {
+  color: var(--jo-trace);
+}
+
+.plugin-agent-row span,
+.plugin-agent-row small,
+.plugin-trace-row span,
+.plugin-related-row span {
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.plugin-event-table {
+  display: grid;
+  overflow-x: auto;
+}
+
+.plugin-event-head,
+.plugin-event-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(110px, 0.5fr) minmax(100px, 0.45fr) minmax(160px, 0.8fr) minmax(160px, 0.8fr) minmax(90px, 0.4fr);
+  gap: 12px;
+  min-width: 900px;
+  align-items: center;
+}
+
+.plugin-event-head {
+  color: var(--jo-muted);
+  font-size: 12px;
+  padding-bottom: 8px;
+}
+
+.plugin-event-row {
+  min-height: 42px;
+  border-top: 1px solid var(--jo-border);
+  color: var(--jo-text);
+  font-size: 13px;
+}
+
+.plugin-payload {
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+}
+
+.plugin-payload summary {
+  cursor: pointer;
+  padding: 10px;
+  color: var(--jo-text);
+  font-size: 13px;
+}
+
+.plugin-payload pre {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  border-top: 1px solid var(--jo-border);
+  color: var(--jo-muted);
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.plugin-related-row strong {
+  color: var(--jo-text);
+  font-size: 13px;
+}
+
 @media (max-width: 1100px) {
-  .plugin-layout {
+  .plugin-layout,
+  .plugin-detail-layout {
     grid-template-columns: 1fr;
   }
 }
