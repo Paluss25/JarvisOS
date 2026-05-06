@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 def create_platform_app() -> FastAPI:
     from platform_api.a2a import router as a2a_router
+    from platform_api.activity import router as activity_router
     from platform_api.agents import router as agents_router
     from platform_api.audit_endpoints import router as audit_router
     from platform_api.auth import router as auth_router
@@ -70,6 +71,7 @@ def create_platform_app() -> FastAPI:
     # Routers
     app.include_router(auth_router)
     app.include_router(control_router)
+    app.include_router(activity_router)
     app.include_router(chat_router)
     app.include_router(a2a_router)
     app.include_router(decisions_router)
