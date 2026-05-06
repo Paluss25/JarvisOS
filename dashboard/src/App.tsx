@@ -18,6 +18,7 @@ import CostsPage from './pages/CostsPage'
 import IncidentsPage from './pages/IncidentsPage'
 import LogsPage from './pages/LogsPage'
 import MemoryPage from './pages/MemoryPage'
+import PluginCenterPage from './pages/PluginCenterPage'
 import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
@@ -44,6 +45,7 @@ export default function App() {
             <Route path="/incidents" element={<IncidentsPage />} />
             <Route path="/costs" element={<CostsPage />} />
             <Route path="/memory" element={<MemoryPage />} />
+            <Route path="/plugins" element={<PluginCenterPage />} />
             <Route path="/activity" element={<ActivityFeedPage />} />
             <Route path="/a2a" element={<A2ANetworkPage />} />
             <Route path="/audit" element={<AuditLogPage />} />
