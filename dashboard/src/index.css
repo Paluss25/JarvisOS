@@ -1115,6 +1115,147 @@
   opacity: 0.45;
 }
 
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.approval-class-list,
+.model-route-list,
+.constraint-list {
+  display: grid;
+  gap: 10px;
+}
+
+.approval-class-card,
+.model-route-row,
+.constraint-row {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  padding: 10px;
+}
+
+.approval-class-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.approval-class-card strong,
+.model-route-row strong {
+  display: block;
+  margin-top: 7px;
+  color: var(--jo-text);
+}
+
+.approval-class-card p,
+.memory-policy-row p {
+  margin: 4px 0 0;
+  color: var(--jo-muted);
+  font-size: 13px;
+}
+
+.approval-class-card > span {
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.approval-class-card code {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--jo-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-flag-grid,
+.settings-control-stack,
+.domain-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-flag-grid {
+  margin-bottom: 12px;
+}
+
+.model-route-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.model-route-row span {
+  display: block;
+  margin-top: 4px;
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.memory-policy-table,
+.permission-table {
+  display: grid;
+  overflow-x: auto;
+}
+
+.memory-policy-head,
+.memory-policy-row {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) minmax(90px, 0.35fr) minmax(190px, 0.85fr) minmax(260px, 1.15fr);
+  gap: 12px;
+  min-width: 820px;
+  align-items: center;
+}
+
+.memory-policy-head,
+.permission-table-head {
+  color: var(--jo-muted);
+  font-size: 12px;
+  padding-bottom: 8px;
+}
+
+.memory-policy-row,
+.permission-table-row {
+  min-height: 46px;
+  border-top: 1px solid var(--jo-border);
+  color: var(--jo-text);
+  font-size: 13px;
+}
+
+.memory-policy-row strong {
+  color: var(--jo-text);
+}
+
+.constraint-row {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  color: var(--jo-muted);
+  font-size: 13px;
+}
+
+.permission-table-head,
+.permission-table-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.5fr) minmax(260px, 1.2fr) repeat(4, minmax(70px, 0.3fr));
+  gap: 12px;
+  min-width: 820px;
+  align-items: center;
+}
+
+.permission-table-row a {
+  color: var(--jo-trace);
+}
+
+@media (max-width: 1100px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1100px) {
   .memory-layout {
     grid-template-columns: 1fr;
