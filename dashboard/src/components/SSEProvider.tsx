@@ -23,31 +23,46 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     const token = localStorage.getItem('access_token')
     if (!token) return
 
-    const url = `/api/events?token=${encodeURIComponent(token)}`
-    const es = new EventSource(url)
-    esRef.current = es
+    let cancelled = false
 
-    es.onopen = () => setConnected(true)
-    es.onerror = () => setConnected(false)
-
-    es.onmessage = (e) => {
+    async function connect() {
       try {
-        const payload = JSON.parse(e.data)
-        if (payload === ':keepalive') return
-        const event: SSEEvent = {
-          id: crypto.randomUUID(),
-          type: payload.type ?? 'unknown',
-          data: payload,
-          ts: new Date().toISOString(),
+        const resp = await fetch('/api/events/ticket', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!resp.ok || cancelled) return
+        const data = await resp.json()
+        const es = new EventSource(`/api/events?ticket=${encodeURIComponent(data.ticket)}`)
+        esRef.current = es
+
+        es.onopen = () => setConnected(true)
+        es.onerror = () => setConnected(false)
+
+        es.onmessage = (e) => {
+          try {
+            const payload = JSON.parse(e.data)
+            if (payload === ':keepalive') return
+            const event: SSEEvent = {
+              id: crypto.randomUUID(),
+              type: payload.type ?? 'unknown',
+              data: payload,
+              ts: new Date().toISOString(),
+            }
+            setEvents(prev => [event, ...prev].slice(0, 200))
+          } catch {
+            // ignore malformed events
+          }
         }
-        setEvents(prev => [event, ...prev].slice(0, 200))
       } catch {
-        // ignore malformed events
+        setConnected(false)
       }
     }
+    connect()
 
     return () => {
-      es.close()
+      cancelled = true
+      esRef.current?.close()
       setConnected(false)
     }
   }, [])
