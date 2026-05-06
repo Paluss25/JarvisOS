@@ -2,6 +2,7 @@
 
 import logging
 import os
+from typing import Any
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -70,6 +71,74 @@ def normalize_task(row: dict) -> dict:
         "completed_at": _serialize(row.get("completed_at")),
         "updated_at": _serialize(updated_at),
         "duration_ms": row.get("duration_ms"),
+    }
+
+
+def _artifact_from_event(event: dict[str, Any]) -> list[dict[str, Any]]:
+    payload = event.get("payload") or {}
+    event_id = event.get("id")
+    artifacts: list[dict[str, Any]] = []
+
+    artifact_path = payload.get("artifact_path") or payload.get("artifact_url")
+    if artifact_path:
+        artifacts.append({
+            "event_id": str(event_id) if event_id is not None else None,
+            "name": payload.get("artifact_name") or payload.get("name") or str(artifact_path).split("/")[-1],
+            "path": artifact_path,
+            "kind": "artifact",
+        })
+
+    output = payload.get("output") or payload.get("result")
+    if output:
+        preview = str(output)
+        artifacts.append({
+            "event_id": str(event_id) if event_id is not None else None,
+            "name": "output",
+            "path": None,
+            "kind": "output",
+            "preview": preview[:240],
+        })
+
+    return artifacts
+
+
+def build_task_context(
+    *,
+    task: dict[str, Any],
+    traces: list[dict[str, Any]],
+    logs: list[dict[str, Any]],
+    audit_entries: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    task_id = task["id"]
+    agent_id = task.get("assigned_agent") or task.get("assigned_to")
+    artifacts = [
+        artifact
+        for event in logs
+        for artifact in _artifact_from_event(event)
+    ]
+    return {
+        "task": task,
+        "metrics": {
+            "trace_count": len(traces),
+            "log_count": len(logs),
+            "audit_count": len(audit_entries),
+            "decision_count": len(decisions),
+            "artifact_count": len(artifacts),
+        },
+        "links": {
+            "agent": f"/agents/{agent_id}" if agent_id else None,
+            "chat": f"/agents/{agent_id}/chat" if agent_id else None,
+            "cockpit": f"/agents/{agent_id}/cockpit" if agent_id else None,
+            "traces": f"/traces?task_id={task_id}",
+            "logs": f"/logs?task_id={task_id}",
+            "audit": f"/audit?action=&source=&task_id={task_id}",
+        },
+        "traces": traces,
+        "logs": logs,
+        "audit_entries": audit_entries,
+        "decisions": decisions,
+        "artifacts": artifacts,
     }
 
 
@@ -187,6 +256,73 @@ async def get_task(task_id: UUID, _user=Depends(get_current_user)):
     if not row:
         raise HTTPException(status_code=404, detail="Task not found")
     return normalize_task(dict(row))
+
+
+@router.get("/{task_id}/context")
+async def get_task_context(task_id: UUID, _user=Depends(get_current_user)):
+    from platform_api.audit_endpoints import normalize_audit_entry
+    from platform_api.decisions import normalize_decision
+    from platform_api.logs import normalize_log_event
+    from platform_api.traces import build_trace_summaries
+
+    pool = await get_pool()
+    row = await pool.fetchrow("SELECT * FROM tasks WHERE id = $1", task_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    trace_rows = await pool.fetch(
+        """
+        SELECT trace_id, span_id, parent_span_id, ts_start, ts_end, operation,
+               agent_id, task_id, session_id, status, duration_ms, input_tokens,
+               output_tokens, cost_usd, model, provider, payload
+        FROM trace_spans
+        WHERE task_id = $1
+        ORDER BY ts_start DESC
+        LIMIT 200
+        """,
+        task_id,
+    )
+    event_rows = await pool.fetch(
+        """
+        SELECT id, ts, event_type, severity, agent_id, task_id, session_id,
+               trace_id, span_id, source, payload
+        FROM platform_events
+        WHERE task_id = $1
+        ORDER BY ts DESC
+        LIMIT 100
+        """,
+        task_id,
+    )
+    audit_rows = await pool.fetch(
+        """
+        SELECT id, ts, category, agent_id, user_id, action, detail, source
+        FROM audit_log
+        WHERE detail->>'task_id' = $1
+        ORDER BY ts DESC
+        LIMIT 100
+        """,
+        str(task_id),
+    )
+    decision_rows = await pool.fetch(
+        """
+        SELECT id, ts, agent_id, task_id, trace_id, title, summary,
+               decision_type, confidence, status, evidence, payload
+        FROM decisions
+        WHERE task_id = $1
+        ORDER BY ts DESC
+        LIMIT 100
+        """,
+        task_id,
+    )
+
+    logs = [normalize_log_event(dict(row)) for row in event_rows]
+    return build_task_context(
+        task=normalize_task(dict(row)),
+        traces=build_trace_summaries([dict(row) for row in trace_rows]),
+        logs=logs,
+        audit_entries=[normalize_audit_entry(dict(row)) for row in audit_rows],
+        decisions=[normalize_decision(dict(row)) for row in decision_rows],
+    )
 
 
 # ---------------------------------------------------------------------------

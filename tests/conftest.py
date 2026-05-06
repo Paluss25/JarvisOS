@@ -58,6 +58,7 @@ _UNIT_TEST_FILES = {
     "test_platform_api_plugins.py",
     "test_platform_api_settings.py",
     "test_platform_api_task_board.py",
+    "test_platform_api_task_detail.py",
     "test_platform_api_traces.py",
     "test_redaction_engine.py",
     "test_telegram_webhook.py",
