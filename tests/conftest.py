@@ -48,6 +48,7 @@ _UNIT_TEST_FILES = {
     "test_platform_api_a2a.py",
     "test_platform_api_agents.py",
     "test_platform_api_audit.py",
+    "test_platform_api_chat.py",
     "test_platform_api_control_center.py",
     "test_platform_api_cfo_cockpit.py",
     "test_platform_api_cio_cockpit.py",
