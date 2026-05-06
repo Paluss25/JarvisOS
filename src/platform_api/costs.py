@@ -79,6 +79,20 @@ def _group_spans(spans: list[dict], key_fn) -> list[dict]:
     return sorted(rows, key=lambda item: item["cost_usd"], reverse=True)
 
 
+def _attach_detail_links(rows: list[dict], href_fn) -> list[dict]:
+    linked = []
+    for row in rows:
+        key = row.get("key")
+        href = href_fn(key) if key and key != "unknown" else None
+        linked.append({
+            **row,
+            "links": {
+                "detail": href,
+            },
+        })
+    return linked
+
+
 def _is_retry_span(span: dict[str, Any]) -> bool:
     payload = span.get("payload") or {}
     operation = span.get("operation") or ""
@@ -133,9 +147,15 @@ def build_cost_summary(spans: list[dict]) -> dict:
                 part for part in [span.get("provider"), span.get("model")] if part
             ),
         ),
-        "by_task": _group_spans(spans, lambda span: span.get("task_id")),
+        "by_task": _attach_detail_links(
+            _group_spans(spans, lambda span: span.get("task_id")),
+            lambda key: f"/tasks/{key}",
+        ),
         "by_session": _group_spans(spans, lambda span: span.get("session_id")),
-        "top_traces": _group_spans(spans, lambda span: span.get("trace_id")),
+        "top_traces": _attach_detail_links(
+            _group_spans(spans, lambda span: span.get("trace_id")),
+            lambda key: f"/costs/traces/{key}",
+        ),
     }
 
 
@@ -194,6 +214,7 @@ def build_cost_trace_context(
             "model_count": len(models),
         },
         "links": {
+            "detail": f"/costs/traces/{trace_id}",
             "trace": f"/traces/{trace_id}",
             "agent": f"/agents/{agent_id}" if agent_id else None,
             "chat": build_chat_link(agent_id, task_id=task_id, trace_id=trace_id),

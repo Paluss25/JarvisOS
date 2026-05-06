@@ -81,8 +81,10 @@ def test_build_cost_summary_groups_agents_models_tasks_and_latency():
     assert summary["by_agent"][0]["cost_usd"] == 0.2
     assert summary["by_model"][0]["key"] == "anthropic/claude-sonnet"
     assert summary["by_task"][0]["key"] == "task-2"
+    assert summary["by_task"][0]["links"]["detail"] == "/tasks/task-2"
     assert summary["by_session"][0]["key"] == "session-2"
     assert summary["top_traces"][0]["key"] == "trace-cio-1"
+    assert summary["top_traces"][0]["links"]["detail"] == "/costs/traces/trace-cio-1"
 
 
 def test_build_cost_trace_context_exposes_anomalies_links_and_breakdowns():
@@ -143,6 +145,7 @@ def test_build_cost_trace_context_exposes_anomalies_links_and_breakdowns():
         "retry_cost_usd": 0.8,
     }
     assert context["links"] == {
+        "detail": "/costs/traces/trace-expensive",
         "trace": "/traces/trace-expensive",
         "agent": "/agents/cfo",
         "chat": "/agents/cfo/chat?task_id=task-1&trace_id=trace-expensive",
