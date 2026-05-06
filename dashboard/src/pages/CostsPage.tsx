@@ -36,8 +36,8 @@ function GroupTable({
         {rows.map((row) => (
           <div className="cost-table-row" key={row.key}>
             <span>
-              {linkTasks && row.key !== 'unknown' ? <Link to={`/tasks/${encodeURIComponent(row.key)}`}>{row.key}</Link>
-                : linkTraces && row.key !== 'unknown' ? <Link to={`/costs/traces/${encodeURIComponent(row.key)}`}>{row.key}</Link>
+              {linkTasks && row.key !== 'unknown' ? <Link to={row.links?.detail ?? `/tasks/${encodeURIComponent(row.key)}`}>{row.key}</Link>
+                : linkTraces && row.key !== 'unknown' ? <Link to={row.links?.detail ?? `/costs/traces/${encodeURIComponent(row.key)}`}>{row.key}</Link>
                   : row.key}
             </span>
             <span>{money(row.cost_usd)}</span>

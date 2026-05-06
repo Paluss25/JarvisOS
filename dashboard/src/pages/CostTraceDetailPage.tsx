@@ -65,6 +65,7 @@ export default function CostTraceDetailPage() {
         <section className="ops-panel">
           <h2>Workspace Links</h2>
           <div className="cost-link-grid">
+            <WorkspaceLink to={context.links.detail} label="Cost Trace" />
             <WorkspaceLink to="/costs" label="Costs" />
             <WorkspaceLink to={context.links.trace} label="Trace" />
             <WorkspaceLink to={context.links.agent} label="Agent" />

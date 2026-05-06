@@ -9,6 +9,9 @@ export type CostGroup = {
   output_tokens: number
   span_count: number
   duration_ms: number
+  links?: {
+    detail: string | null
+  }
 }
 
 export type CostSummary = {
@@ -66,6 +69,7 @@ export type CostTraceContext = {
     model_count: number
   }
   links: {
+    detail: string
     trace: string
     agent: string | null
     chat: string | null
