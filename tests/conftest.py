@@ -27,6 +27,7 @@ _UNIT_TEST_FILES = {
     "test_daily_fitness_migration.py",
     "test_daily_logger_multiuser.py",
     "test_dos_daily_fitness_import.py",
+    "test_dockerfile_dashboard_packaging.py",
     "test_drhouse_router.py",
     "test_eia_digest.py",
     "test_email_cli_config.py",
