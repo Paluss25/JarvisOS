@@ -24,6 +24,20 @@ NUTRITION_BUILTIN_CRONS = [
         "telegram_notify": False,
         "builtin": True,
     },
+    {
+        "name": "goal_review_prep",
+        "schedule": "once@2026-05-19@09:03",
+        "prompt": (
+            "Goal review prep for COH/Jarvis review. Build a trusted W18/W19 nutrition snapshot "
+            "using corrected values only: reject implausible API refinements, identify stale or "
+            "superseded duplicate-memory claims, compare intake against active targets, and send "
+            "a concise prep packet to COH via send_message(to='coh', message=<summary>, "
+            "wait_response=false). Log the packet and any unresolved data-integrity gaps via daily_log."
+        ),
+        "session_id": "heartbeat-goal-review-prep",
+        "telegram_notify": False,
+        "builtin": True,
+    },
 ]
 
 

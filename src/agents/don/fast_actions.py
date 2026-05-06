@@ -29,6 +29,8 @@ _API_TIMEOUT = 10.0   # seconds — generous timeout for background refinement
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}")
+_MACRO_KCAL_TOLERANCE = 0.10
+_HAIKU_REFINEMENT_TOLERANCE = 0.25
 
 
 def _coerce_params(params: list | None) -> list | None:
@@ -183,12 +185,51 @@ async def _enrich_from_api(components: list[dict]) -> dict | None:
     return combined
 
 
+def _macro_energy_kcal(protein_g: float, carbs_g: float, fat_g: float) -> float:
+    return (protein_g * 4.0) + (carbs_g * 4.0) + (fat_g * 9.0)
+
+
+def _plausibility_rejection_reason(api_macros: dict, haiku_kcal: float | None = None) -> str | None:
+    """Return a rejection reason when refined macros are not plausible.
+
+    Two checks are intentional:
+    - API kcal must match calories implied by P/C/F within 10%.
+    - API kcal must stay close to COH's initial Haiku estimate. The Haiku
+      estimate is user/context-aware; API lookup may match the wrong food.
+    """
+    try:
+        kcal = float(api_macros["calories_est"])
+        protein_g = float(api_macros["protein_g"])
+        carbs_g = float(api_macros["carbs_g"])
+        fat_g = float(api_macros["fat_g"])
+    except (KeyError, TypeError, ValueError):
+        return "missing or invalid macro fields"
+
+    if kcal <= 0:
+        return "non-positive calories"
+
+    macro_kcal = _macro_energy_kcal(protein_g, carbs_g, fat_g)
+    lower = macro_kcal * (1.0 - _MACRO_KCAL_TOLERANCE)
+    upper = macro_kcal * (1.0 + _MACRO_KCAL_TOLERANCE)
+    if kcal < lower or kcal > upper:
+        return f"API kcal {kcal:.0f} outside macro energy bracket {lower:.0f}-{upper:.0f}"
+
+    if haiku_kcal and haiku_kcal > 0:
+        haiku = float(haiku_kcal)
+        lower = haiku * (1.0 - _HAIKU_REFINEMENT_TOLERANCE)
+        upper = haiku * (1.0 + _HAIKU_REFINEMENT_TOLERANCE)
+        if kcal < lower or kcal > upper:
+            return f"API kcal {kcal:.0f} outside Haiku bracket {lower:.0f}-{upper:.0f}"
+
+    return None
+
+
 async def _refine_meal_macros(meal_id: int, components: list[dict], haiku_kcal: float | None = None) -> None:
     """Background task: update meal row with API-precise macros if available.
 
     Runs after the INSERT has already responded to COH. No impact on response time.
-    Sanity check: if API calories differ from Haiku by more than 2.5x, skip the update
-    (likely a regional/non-standard food that the generic DB matched poorly).
+    Plausibility guard: reject API refinements whose kcal do not match P/C/F
+    energy within 10%, or whose kcal drift more than 25% from the Haiku estimate.
     """
     import asyncpg
 
@@ -200,16 +241,22 @@ async def _refine_meal_macros(meal_id: int, components: list[dict], haiku_kcal: 
     if not api_macros:
         return
 
-    # Sanity check: reject API data if it's wildly different from Haiku estimate
-    if haiku_kcal and haiku_kcal > 0:
-        ratio = api_macros["calories_est"] / haiku_kcal
-        if ratio > 2.5 or ratio < 0.4:
-            logger.warning(
-                "fast_actions: API calories %s kcal vs Haiku %s kcal (ratio %.1fx) — "
-                "sanity check failed, keeping Haiku estimates for meal %s",
-                api_macros["calories_est"], haiku_kcal, ratio, meal_id,
+    rejection_reason = _plausibility_rejection_reason(api_macros, haiku_kcal)
+    if rejection_reason:
+        logger.warning(
+            "fast_actions: plausibility bracket rejected refinement for meal %s — %s; "
+            "keeping Haiku estimates",
+            meal_id, rejection_reason,
+        )
+        try:
+            from agent_runner.memory.daily_logger import DailyLogger
+            DailyLogger(_DON_WORKSPACE).log(
+                f"[fast_path/plausibility_reject] meal {meal_id}: {rejection_reason}; "
+                "kept Haiku estimates"
             )
-            return
+        except Exception:
+            pass
+        return
 
     try:
         conn = await asyncpg.connect(url)
