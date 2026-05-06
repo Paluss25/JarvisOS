@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from platform_api.activity import build_activity_summary, normalize_activity_event
+from platform_api.activity import build_activity_summary, normalize_activity_audit, normalize_activity_event
 
 
 def test_normalize_activity_event_exposes_dashboard_links_and_preview():
@@ -74,3 +74,21 @@ def test_build_activity_summary_merges_platform_events_and_audit_entries():
     assert summary["items"][0]["links"]["detail"] == "/audit/7"
     assert summary["items"][0]["links"]["audit"] == "/audit?action=task_retried&source=api&agent_id=cio"
     assert summary["items"][1]["links"]["trace"] == "/traces/trace-activity-1"
+
+
+def test_normalize_activity_audit_handles_legacy_string_detail():
+    audit = normalize_activity_audit({
+        "id": 8,
+        "ts": datetime(2026, 5, 6, 15, 2, tzinfo=timezone.utc),
+        "category": "security",
+        "agent_id": None,
+        "user_id": "operator",
+        "action": "legacy_audit",
+        "detail": "plain legacy detail",
+        "source": "api",
+    })
+
+    assert audit["preview"] == "plain legacy detail"
+    assert audit["payload"] == {"message": "plain legacy detail"}
+    assert audit["links"]["task"] is None
+    assert audit["links"]["trace"] is None

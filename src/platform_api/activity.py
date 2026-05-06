@@ -68,7 +68,8 @@ def normalize_activity_event(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_activity_audit(row: dict[str, Any]) -> dict[str, Any]:
-    detail = row.get("detail") or {}
+    raw_detail = row.get("detail")
+    detail = raw_detail if isinstance(raw_detail, dict) else {"message": str(raw_detail)} if raw_detail is not None else {}
     audit_id = _serialize(row.get("id"))
     task_id = detail.get("task_id")
     trace_id = detail.get("trace_id")
