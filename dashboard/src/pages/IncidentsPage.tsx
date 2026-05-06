@@ -74,7 +74,7 @@ export default function IncidentsPage() {
             <div className="log-table-row" key={incident.id}>
               <span>{new Date(incident.ts).toLocaleString()}</span>
               <span>{incident.severity}</span>
-              <span>{String(incident.payload.title ?? incident.event_type)}</span>
+              <span><Link to={`/incidents/${encodeURIComponent(incident.id)}`}>{String(incident.payload.title ?? incident.event_type)}</Link></span>
               <span>{incident.agent_id ?? '-'}</span>
               <span>{incident.trace_id ? <Link to={`/traces/${encodeURIComponent(incident.trace_id)}`}>{incident.trace_id}</Link> : '-'}</span>
               <span>{String(incident.payload.status ?? 'open')}</span>

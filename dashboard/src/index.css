@@ -410,6 +410,10 @@
   color: var(--jo-muted);
 }
 
+.ops-panel a {
+  color: var(--jo-trace);
+}
+
 .ops-button {
   min-height: 32px;
   border: 1px solid var(--jo-border);
@@ -671,6 +675,105 @@
 
   .ciso-event-meta {
     justify-items: start;
+  }
+}
+
+.incident-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.incident-link-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.incident-workspace-link,
+.incident-response-form button {
+  min-height: 32px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  color: var(--jo-text);
+  padding: 7px 10px;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.incident-workspace-link:hover {
+  color: var(--jo-trace);
+}
+
+.incident-workspace-link.disabled {
+  color: var(--jo-muted);
+}
+
+.incident-response-form {
+  display: grid;
+  gap: 10px;
+}
+
+.incident-response-form p {
+  margin: 0;
+  color: var(--jo-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.incident-response-form button {
+  justify-self: start;
+}
+
+.incident-event-list,
+.incident-trace-list {
+  display: grid;
+  gap: 10px;
+}
+
+.incident-event-row,
+.incident-trace-row {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  padding: 10px;
+}
+
+.incident-event-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.incident-event-row div {
+  display: grid;
+  gap: 5px;
+}
+
+.incident-event-row strong {
+  color: var(--jo-text);
+  font-size: 13px;
+}
+
+.incident-event-row span,
+.incident-trace-row span {
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.incident-trace-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+@media (max-width: 960px) {
+  .incident-workspace-layout,
+  .incident-event-row,
+  .incident-trace-row {
+    grid-template-columns: 1fr;
   }
 }
 
