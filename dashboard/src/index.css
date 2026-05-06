@@ -246,6 +246,16 @@
   font-size: 13px;
 }
 
+.panel-success {
+  margin-bottom: 12px;
+  border: 1px solid color-mix(in srgb, var(--jo-healthy), transparent 55%);
+  background: color-mix(in srgb, var(--jo-healthy), transparent 90%);
+  border-radius: 8px;
+  color: var(--jo-healthy);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
 .empty-state {
   color: var(--jo-muted);
   font-size: 13px;
@@ -1346,6 +1356,79 @@
   font-size: 12px;
 }
 
+.chat-context-panel {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--jo-border);
+  padding: 10px;
+}
+
+.chat-context-panel header {
+  border: 0;
+  padding: 0;
+}
+
+.chat-context-panel label {
+  display: grid;
+  gap: 5px;
+}
+
+.chat-context-panel label span {
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.chat-context-panel input,
+.chat-panel footer select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  color: var(--jo-text);
+  padding: 0 9px;
+}
+
+.chat-context-links {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  padding: 9px;
+}
+
+.chat-context-links strong {
+  color: var(--jo-text);
+  font-size: 13px;
+}
+
+.chat-context-links div,
+.chat-message-context,
+.chat-message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-context-links a,
+.chat-message-context a {
+  border: 1px solid var(--jo-border);
+  border-radius: 999px;
+  color: var(--jo-text);
+  font-size: 12px;
+  min-height: 24px;
+  padding: 3px 8px;
+  text-decoration: none;
+}
+
+.chat-context-links > a {
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chat-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -1409,7 +1492,7 @@
   border-color: color-mix(in srgb, var(--jo-ai), transparent 45%);
 }
 
-.chat-message div {
+.chat-message-meta {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -1417,7 +1500,7 @@
   font-size: 12px;
 }
 
-.chat-message div strong {
+.chat-message-meta strong {
   color: var(--jo-text);
 }
 
@@ -1438,6 +1521,14 @@
   background: var(--jo-surface);
   color: var(--jo-text);
   padding: 0 10px;
+}
+
+.chat-message button:disabled {
+  color: var(--jo-muted);
+}
+
+.chat-panel footer select {
+  flex: 0 0 140px;
 }
 
 .chat-panel footer button:disabled {
