@@ -59,7 +59,9 @@ export type A2AMessageContext = {
   }
   links: {
     from_agent: string | null
+    from_chat: string | null
     to_agent: string | null
+    to_chat: string | null
     task: string | null
     trace: string | null
     logs: string

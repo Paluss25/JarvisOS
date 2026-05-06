@@ -106,7 +106,9 @@ export default function A2AMessageDetailPage() {
           <div className="a2a-link-grid">
             <WorkspaceLink to="/a2a" label="A2A Network" />
             <WorkspaceLink to={context.links.from_agent} label="From Agent" />
+            <WorkspaceLink to={context.links.from_chat} label="From Chat" />
             <WorkspaceLink to={context.links.to_agent} label="To Agent" />
+            <WorkspaceLink to={context.links.to_chat} label="To Chat" />
             <WorkspaceLink to={context.links.task} label="Task" />
             <WorkspaceLink to={context.links.trace} label="Trace" />
             <WorkspaceLink to={context.links.logs} label="Logs" />

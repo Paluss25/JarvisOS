@@ -68,6 +68,7 @@ export type CostTraceContext = {
   links: {
     trace: string
     agent: string | null
+    chat: string | null
     task: string | null
     logs: string
     audit: string

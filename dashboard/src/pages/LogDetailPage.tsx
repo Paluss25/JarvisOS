@@ -109,6 +109,7 @@ export default function LogDetailPage() {
           <div className="log-link-grid">
             <WorkspaceLink to="/logs" label="Logs" />
             <WorkspaceLink to={context.links.agent} label="Agent" />
+            <WorkspaceLink to={context.links.chat} label="Chat" />
             <WorkspaceLink to={context.links.task} label="Task" />
             <WorkspaceLink to={context.links.trace} label="Trace" />
             <WorkspaceLink to={context.links.audit} label="Audit" />

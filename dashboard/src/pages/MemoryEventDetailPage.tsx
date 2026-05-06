@@ -73,6 +73,7 @@ export default function MemoryEventDetailPage() {
           <div className="memory-link-grid">
             <WorkspaceLink to="/memory" label="Memory" />
             <WorkspaceLink to={context.links.agent} label="Agent" />
+            <WorkspaceLink to={context.links.chat} label="Chat" />
             <WorkspaceLink to={context.links.task} label="Task" />
             <WorkspaceLink to={context.links.trace} label="Trace" />
             <WorkspaceLink to={context.links.logs} label="Logs" />

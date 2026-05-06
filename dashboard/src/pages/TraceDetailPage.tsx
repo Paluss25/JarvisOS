@@ -80,6 +80,7 @@ export default function TraceDetailPage() {
               <div className="trace-link-grid">
                 <WorkspaceLink to="/traces" label="Trace Explorer" />
                 <WorkspaceLink to={trace.links.agent} label="Agent" />
+                <WorkspaceLink to={trace.links.chat} label="Chat" />
                 <WorkspaceLink to={trace.links.task} label="Task" />
                 <WorkspaceLink to={trace.links.logs} label="Logs" />
                 <WorkspaceLink to={trace.links.audit} label="Audit" />

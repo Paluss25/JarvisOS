@@ -45,6 +45,7 @@ export type MemoryEventContext = {
   }
   links: {
     agent: string | null
+    chat: string | null
     task: string | null
     trace: string | null
     logs: string

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { chatAgent, listAgents, type AgentInfo } from '../api/agents'
 import { forwardChatA2A, getChatContext, saveChatDecision, type ChatContext } from '../api/chat'
 import { createTask } from '../api/tasks'
@@ -28,8 +28,10 @@ function agentLabel(agent: AgentInfo): string {
 
 export default function ChatHubPage() {
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
+  const searchKey = searchParams.toString()
   const [agents, setAgents] = useState<AgentInfo[]>([])
-  const [agentId, setAgentId] = useState(id ?? 'ceo')
+  const [agentId, setAgentId] = useState(id ?? searchParams.get('agent_id') ?? 'ceo')
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [contextInputs, setContextInputs] = useState<ContextInputs>({
@@ -49,12 +51,23 @@ export default function ChatHubPage() {
     listAgents()
       .then((result) => {
         setAgents(result)
-        if (!id && result.length > 0) setAgentId(result[0].id)
-        const firstTarget = result.find((agent) => agent.id !== (id ?? result[0]?.id))
+        if (!id && !searchParams.get('agent_id') && result.length > 0) setAgentId(result[0].id)
+        const firstTarget = result.find((agent) => agent.id !== (id ?? searchParams.get('agent_id') ?? result[0]?.id))
         setTargetAgentId(firstTarget?.id ?? result[0]?.id ?? '')
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-  }, [id])
+  }, [id, searchKey])
+
+  useEffect(() => {
+    const nextAgent = id ?? searchParams.get('agent_id')
+    if (nextAgent) setAgentId(nextAgent)
+    setContextInputs({
+      task_id: searchParams.get('task_id') ?? '',
+      trace_id: searchParams.get('trace_id') ?? '',
+      log_event_id: searchParams.get('log_event_id') ?? '',
+      memory_event_id: searchParams.get('memory_event_id') ?? '',
+    })
+  }, [id, searchKey])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })

@@ -58,6 +58,7 @@ export type TraceDetail = {
   }
   links: {
     agent: string | null
+    chat: string | null
     task: string | null
     logs: string
     audit: string
