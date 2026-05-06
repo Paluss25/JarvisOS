@@ -4,6 +4,7 @@ import { getMemoryEventContext } from '../api/memory'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
+import AuditEntryRow from '../components/AuditEntryRow'
 import type { MemoryEvent, MemoryEventContext } from '../types/memory'
 
 function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -168,11 +169,7 @@ export default function MemoryEventDetailPage() {
               </article>
             ))}
             {context.audit_entries.slice(0, 8).map((entry) => (
-              <article className="memory-context-row" key={`audit:${entry.id}`}>
-                <StatusPill label={entry.category} tone={entry.category === 'security' ? 'incident' : 'network'} />
-                <strong>{entry.action}</strong>
-                <span>{timeLabel(entry.ts)} · {entry.source}</span>
-              </article>
+              <AuditEntryRow className="memory-context-row" entry={entry} key={`audit:${entry.id}`} />
             ))}
             {context.decisions.length === 0 && context.audit_entries.length === 0 ? <div className="empty-state">No audit or decision records linked.</div> : null}
           </div>

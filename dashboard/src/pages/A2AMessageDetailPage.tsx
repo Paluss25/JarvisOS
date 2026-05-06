@@ -5,6 +5,7 @@ import { createTask } from '../api/tasks'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
+import AuditEntryRow from '../components/AuditEntryRow'
 import type { A2AMessage, A2AMessageContext } from '../types/a2a'
 
 function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -200,13 +201,7 @@ export default function A2AMessageDetailPage() {
               </article>
             ))}
             {context.audit_entries.slice(0, 8).map((entry) => (
-              <article className="a2a-related-row" key={`audit:${entry.id}`}>
-                <div>
-                  <StatusPill label={entry.category} tone={entry.category === 'security' ? 'incident' : 'network'} />
-                  <strong>{entry.action}</strong>
-                  <span>{timeLabel(entry.ts)} · {entry.source}</span>
-                </div>
-              </article>
+              <AuditEntryRow className="a2a-related-row" entry={entry} key={`audit:${entry.id}`} />
             ))}
             {context.traces.length === 0 && context.decisions.length === 0 && context.audit_entries.length === 0 ? <div className="empty-state">No trace, audit, or decision records found.</div> : null}
           </div>

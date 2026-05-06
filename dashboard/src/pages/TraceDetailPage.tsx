@@ -5,6 +5,7 @@ import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import TraceTree from '../components/TraceTree'
+import AuditEntryRow from '../components/AuditEntryRow'
 import type { TraceDetail, TraceSpan } from '../types/trace'
 
 function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -175,13 +176,7 @@ export default function TraceDetailPage() {
                   </article>
                 ))}
                 {trace.audit_entries.slice(0, 8).map((entry) => (
-                  <article className="trace-event-row" key={`audit:${entry.id}`}>
-                    <div>
-                      <StatusPill label={entry.category} tone={entry.category === 'security' ? 'incident' : 'network'} />
-                      <strong>{entry.action}</strong>
-                      <span>{timeLabel(entry.ts)} · {entry.source}</span>
-                    </div>
-                  </article>
+                  <AuditEntryRow className="trace-event-row" entry={entry} key={`audit:${entry.id}`} />
                 ))}
                 {trace.decisions.length === 0 && trace.audit_entries.length === 0 ? <div className="empty-state">No audit or decision records linked.</div> : null}
               </div>

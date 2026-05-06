@@ -10,6 +10,9 @@ export type AuditEntry = {
   action: string
   source: string
   detail: Record<string, unknown>
+  links: {
+    detail: string
+  }
 }
 
 export type AuditResponse = {

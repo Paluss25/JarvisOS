@@ -47,6 +47,9 @@ export type IncidentContext = {
     action: string
     source: string
     detail: Record<string, unknown>
+    links?: {
+      detail: string
+    }
   }>
   decisions: Array<{
     id: string

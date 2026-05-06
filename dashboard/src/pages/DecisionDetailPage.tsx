@@ -4,6 +4,7 @@ import { getDecisionContext } from '../api/decisions'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
+import AuditEntryRow from '../components/AuditEntryRow'
 import type { DecisionContext } from '../types/decisions'
 
 function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -132,11 +133,7 @@ export default function DecisionDetailPage() {
               </article>
             ))}
             {context.audit_entries.slice(0, 8).map((entry) => (
-              <article className="decision-related-row" key={`audit:${entry.id}`}>
-                <StatusPill label={entry.category} tone={entry.category === 'security' ? 'incident' : 'network'} />
-                <strong>{entry.action}</strong>
-                <span>{timeLabel(entry.ts)} · {entry.source}</span>
-              </article>
+              <AuditEntryRow className="decision-related-row" entry={entry} key={`audit:${entry.id}`} />
             ))}
             {context.traces.length === 0 && context.audit_entries.length === 0 ? <div className="empty-state">No trace or audit records found.</div> : null}
           </div>

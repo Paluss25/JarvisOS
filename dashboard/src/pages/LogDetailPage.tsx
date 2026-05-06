@@ -5,6 +5,7 @@ import { createTask } from '../api/tasks'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
+import AuditEntryRow from '../components/AuditEntryRow'
 import type { LogContext } from '../types/logs'
 
 function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -172,13 +173,7 @@ export default function LogDetailPage() {
           <h2>Audit</h2>
           <div className="log-event-list">
             {context.audit_entries.slice(0, 10).map((entry) => (
-              <article className="log-event-row" key={entry.id}>
-                <div>
-                  <StatusPill label={entry.category} tone={entry.category === 'security' ? 'incident' : 'network'} />
-                  <strong>{entry.action}</strong>
-                  <span>{timeLabel(entry.ts)} · {entry.source}</span>
-                </div>
-              </article>
+              <AuditEntryRow className="log-event-row" entry={entry} key={entry.id} />
             ))}
             {context.audit_entries.length === 0 ? <div className="empty-state">No audit entries found.</div> : null}
           </div>

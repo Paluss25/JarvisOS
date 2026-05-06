@@ -5,6 +5,7 @@ import { listAgents, type AgentInfo } from '../api/agents'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
+import AuditEntryRow from '../components/AuditEntryRow'
 import { useAuth } from '../context/AuthContext'
 
 function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -205,13 +206,7 @@ export default function TaskDetailPage() {
               </article>
             ))}
             {context.audit_entries.slice(0, 6).map((entry) => (
-              <article className="task-event-row" key={`audit:${entry.id}`}>
-                <div>
-                  <StatusPill label={entry.category} tone={entry.category === 'security' ? 'incident' : 'network'} />
-                  <strong>{entry.action}</strong>
-                  <span>{safeDate(entry.ts)} · {entry.source}</span>
-                </div>
-              </article>
+              <AuditEntryRow className="task-event-row" entry={entry} key={`audit:${entry.id}`} />
             ))}
             {context.decisions.length === 0 && context.audit_entries.length === 0 ? <div className="empty-state">No audit or decision records linked.</div> : null}
           </div>

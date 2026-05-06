@@ -5,6 +5,7 @@ import { getIncidentContext } from '../api/logs'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
+import AuditEntryRow from '../components/AuditEntryRow'
 import type { IncidentContext } from '../types/logs'
 
 function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -159,13 +160,7 @@ export default function IncidentDetailPage() {
           <h2>Audit</h2>
           <div className="incident-event-list">
             {context.audit_entries.slice(0, 10).map((entry) => (
-              <article className="incident-event-row" key={entry.id}>
-                <div>
-                  <StatusPill label={entry.category} tone={entry.category === 'security' ? 'incident' : 'network'} />
-                  <strong>{entry.action}</strong>
-                  <span>{timeLabel(entry.ts)} · {entry.source}</span>
-                </div>
-              </article>
+              <AuditEntryRow className="incident-event-row" entry={entry} key={entry.id} />
             ))}
             {context.audit_entries.length === 0 ? <div className="empty-state">No audit entries found.</div> : null}
           </div>

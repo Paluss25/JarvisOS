@@ -4,6 +4,7 @@ import { getToolContext } from '../api/plugins'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
+import AuditEntryRow from '../components/AuditEntryRow'
 import type { ObservedTool, ToolContext } from '../types/plugins'
 
 function toneForStatus(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -11,12 +12,6 @@ function toneForStatus(status: string): 'neutral' | 'healthy' | 'warning' | 'inc
   if (status === 'failed' || status === 'error') return 'incident'
   if (status === 'unknown') return 'neutral'
   return 'warning'
-}
-
-function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
-  if (severity === 'critical' || severity === 'error') return 'incident'
-  if (severity === 'warning') return 'warning'
-  return 'neutral'
 }
 
 function timeLabel(value: string | null | undefined) {
@@ -173,11 +168,7 @@ export default function PluginToolDetailPage() {
               </article>
             ))}
             {context.audit_entries.slice(0, 8).map((entry) => (
-              <article className="plugin-related-row" key={`audit:${entry.id}`}>
-                <StatusPill label={entry.category} tone={severityTone(entry.category)} />
-                <strong>{entry.action}</strong>
-                <span>{timeLabel(entry.ts)} · {entry.source}</span>
-              </article>
+              <AuditEntryRow className="plugin-related-row" entry={entry} key={`audit:${entry.id}`} />
             ))}
             {context.decisions.length === 0 && context.audit_entries.length === 0 ? <div className="empty-state">No audit or decision records linked.</div> : null}
           </div>
