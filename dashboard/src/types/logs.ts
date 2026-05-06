@@ -68,3 +68,30 @@ export type IncidentContext = {
     cost_usd: number
   }>
 }
+
+export type LogContext = {
+  event: LogEvent
+  metrics: {
+    related_log_count: number
+    audit_count: number
+    decision_count: number
+    trace_count: number
+  }
+  links: {
+    agent: string | null
+    task: string | null
+    trace: string | null
+    logs: string
+    audit: string
+  }
+  suggested_actions: Array<{
+    kind: 'incident' | 'task'
+    label: string
+    severity?: string
+    priority?: string
+  }>
+  related_logs: LogEvent[]
+  audit_entries: IncidentContext['audit_entries']
+  decisions: IncidentContext['decisions']
+  traces: IncidentContext['traces']
+}

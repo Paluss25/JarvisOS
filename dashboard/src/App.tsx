@@ -18,6 +18,7 @@ import CostsPage from './pages/CostsPage'
 import IncidentsPage from './pages/IncidentsPage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
 import LogsPage from './pages/LogsPage'
+import LogDetailPage from './pages/LogDetailPage'
 import MemoryPage from './pages/MemoryPage'
 import PluginCenterPage from './pages/PluginCenterPage'
 import SettingsPage from './pages/SettingsPage'
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/traces" element={<TraceExplorerPage />} />
             <Route path="/traces/:traceId" element={<TraceDetailPage />} />
             <Route path="/logs" element={<LogsPage />} />
+            <Route path="/logs/:id" element={<LogDetailPage />} />
             <Route path="/incidents" element={<IncidentsPage />} />
             <Route path="/incidents/:id" element={<IncidentDetailPage />} />
             <Route path="/costs" element={<CostsPage />} />

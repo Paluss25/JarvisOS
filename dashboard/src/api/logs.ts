@@ -1,5 +1,5 @@
 import { apiGet, apiPost } from './client'
-import type { IncidentContext, IncidentCreate, LogEvent } from '../types/logs'
+import type { IncidentContext, IncidentCreate, LogContext, LogEvent } from '../types/logs'
 
 export function listLogs(filters?: {
   agent_id?: string
@@ -29,4 +29,8 @@ export function createIncident(body: IncidentCreate): Promise<LogEvent> {
 
 export function getIncidentContext(id: string): Promise<IncidentContext> {
   return apiGet<IncidentContext>(`/incidents/${id}`)
+}
+
+export function getLogContext(id: string): Promise<LogContext> {
+  return apiGet<LogContext>(`/logs/${id}`)
 }

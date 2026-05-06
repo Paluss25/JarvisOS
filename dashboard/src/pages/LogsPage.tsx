@@ -54,7 +54,7 @@ export default function LogsPage() {
             <div className="log-table-row" key={event.id}>
               <span>{new Date(event.ts).toLocaleString()}</span>
               <span>{event.severity}</span>
-              <span>{event.event_type}</span>
+              <span><Link to={`/logs/${encodeURIComponent(event.id)}`}>{event.event_type}</Link></span>
               <span>{event.agent_id ?? '-'}</span>
               <span>{event.trace_id ? <Link to={`/traces/${encodeURIComponent(event.trace_id)}`}>{event.trace_id}</Link> : '-'}</span>
               <span>{event.source}</span>
