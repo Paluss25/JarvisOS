@@ -6,6 +6,7 @@ import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
+import DecisionEntryRow from '../components/DecisionEntryRow'
 import type { A2AMessage, A2AMessageContext } from '../types/a2a'
 
 function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -192,13 +193,7 @@ export default function A2AMessageDetailPage() {
               </article>
             ))}
             {context.decisions.map((decision) => (
-              <article className="a2a-related-row" key={decision.id}>
-                <div>
-                  <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                  <strong>{decision.title}</strong>
-                  <span>{decision.summary}</span>
-                </div>
-              </article>
+              <DecisionEntryRow className="a2a-related-row" decision={decision} key={decision.id} />
             ))}
             {context.audit_entries.slice(0, 8).map((entry) => (
               <AuditEntryRow className="a2a-related-row" entry={entry} key={`audit:${entry.id}`} />

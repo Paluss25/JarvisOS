@@ -60,6 +60,9 @@ export type IncidentContext = {
     title: string
     summary: string
     status: string
+    links?: {
+      detail: string
+    }
   }>
   traces: Array<{
     trace_id: string

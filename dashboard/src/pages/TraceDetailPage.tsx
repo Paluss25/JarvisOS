@@ -6,6 +6,7 @@ import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import TraceTree from '../components/TraceTree'
 import AuditEntryRow from '../components/AuditEntryRow'
+import DecisionEntryRow from '../components/DecisionEntryRow'
 import type { TraceDetail, TraceSpan } from '../types/trace'
 
 function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -167,13 +168,7 @@ export default function TraceDetailPage() {
               <h2>Audit & Decisions</h2>
               <div className="trace-event-list">
                 {trace.decisions.map((decision) => (
-                  <article className="trace-event-row" key={decision.id}>
-                    <div>
-                      <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                      <strong>{decision.title}</strong>
-                      <span>{decision.summary}</span>
-                    </div>
-                  </article>
+                  <DecisionEntryRow className="trace-event-row" decision={decision} key={decision.id} />
                 ))}
                 {trace.audit_entries.slice(0, 8).map((entry) => (
                   <AuditEntryRow className="trace-event-row" entry={entry} key={`audit:${entry.id}`} />

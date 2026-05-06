@@ -67,6 +67,7 @@ export type ControlDecision = {
   trace_id: string | null
   title: string
   status: string
+  detail_href: string | null
   href: string | null
   trace_href: string | null
 }

@@ -127,7 +127,7 @@ export default function AuditDetailPage() {
             {context.decisions.map((decision) => (
               <article className="audit-related-row" key={decision.id}>
                 <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                <Link to={`/decisions/${encodeURIComponent(decision.id)}`}>{decision.title}</Link>
+                <Link to={decision.links?.detail ?? `/decisions/${encodeURIComponent(decision.id)}`}>{decision.title}</Link>
                 <span>{decision.summary}</span>
               </article>
             ))}

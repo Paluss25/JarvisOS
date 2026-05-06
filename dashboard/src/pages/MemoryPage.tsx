@@ -4,6 +4,7 @@ import { getMemorySummary } from '../api/memory'
 import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
+import DecisionEntryRow from '../components/DecisionEntryRow'
 import type { MemoryData } from '../types/memory'
 
 function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -90,12 +91,7 @@ export default function MemoryPage() {
           <h2>Promoted Decisions</h2>
           <div className="memory-decision-list">
             {(data?.decisions ?? []).map((decision) => (
-              <article className="memory-decision" key={decision.id}>
-                <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                <strong>{decision.title}</strong>
-                <p>{decision.summary}</p>
-                <span>{decision.agent_id} · {new Date(decision.ts).toLocaleString()}</span>
-              </article>
+              <DecisionEntryRow className="memory-decision" decision={decision} key={decision.id} />
             ))}
             {!error && (data?.decisions.length ?? 0) === 0 ? <div className="empty-state">No memory promotion decisions recorded.</div> : null}
           </div>

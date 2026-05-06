@@ -5,6 +5,7 @@ import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
+import DecisionEntryRow from '../components/DecisionEntryRow'
 import type { ObservedTool, ToolContext } from '../types/plugins'
 
 function toneForStatus(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -161,11 +162,7 @@ export default function PluginToolDetailPage() {
           <h2>Audit & Decisions</h2>
           <div className="plugin-related-list">
             {context.decisions.map((decision) => (
-              <article className="plugin-related-row" key={decision.id}>
-                <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                <strong>{decision.title}</strong>
-                <span>{decision.summary}</span>
-              </article>
+              <DecisionEntryRow className="plugin-related-row" decision={decision} key={decision.id} />
             ))}
             {context.audit_entries.slice(0, 8).map((entry) => (
               <AuditEntryRow className="plugin-related-row" entry={entry} key={`audit:${entry.id}`} />

@@ -6,6 +6,7 @@ import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
+import DecisionEntryRow from '../components/DecisionEntryRow'
 import type { IncidentContext } from '../types/logs'
 
 function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -170,14 +171,7 @@ export default function IncidentDetailPage() {
           <h2>Decisions</h2>
           <div className="incident-event-list">
             {context.decisions.map((decision) => (
-              <article className="incident-event-row" key={decision.id}>
-                <div>
-                  <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                  <strong>{decision.title}</strong>
-                  <span>{decision.summary}</span>
-                </div>
-                {decision.trace_id ? <Link to={`/traces/${encodeURIComponent(decision.trace_id)}`}>trace</Link> : null}
-              </article>
+              <DecisionEntryRow className="incident-event-row" decision={decision} key={decision.id} />
             ))}
             {context.decisions.length === 0 ? <div className="empty-state">No decisions found.</div> : null}
           </div>

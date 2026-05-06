@@ -101,7 +101,7 @@ export default function DecisionsPage() {
               <span><StatusPill label={decision.status} tone={statusTone(decision.status)} /></span>
               <span>{decision.decision_type}</span>
               <span>
-                <Link to={`/decisions/${encodeURIComponent(decision.id)}`}>{decision.title}</Link>
+                <Link to={decision.links?.detail ?? `/decisions/${encodeURIComponent(decision.id)}`}>{decision.title}</Link>
                 <small>{decision.summary}</small>
               </span>
               <span>{decision.agent_id ? <Link to={`/agents/${encodeURIComponent(decision.agent_id)}`}>{decision.agent_id}</Link> : '-'}</span>

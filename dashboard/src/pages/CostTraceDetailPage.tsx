@@ -5,6 +5,7 @@ import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
+import DecisionEntryRow from '../components/DecisionEntryRow'
 import type { CostTraceContext } from '../types/costs'
 
 function money(value: number): string {
@@ -175,11 +176,7 @@ export default function CostTraceDetailPage() {
           <h2>Audit & Decisions</h2>
           <div className="cost-related-list">
             {context.decisions.map((decision) => (
-              <article className="cost-related-row" key={decision.id}>
-                <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                <strong>{decision.title}</strong>
-                <span>{decision.summary}</span>
-              </article>
+              <DecisionEntryRow className="cost-related-row" decision={decision} key={decision.id} />
             ))}
             {context.audit_entries.slice(0, 8).map((entry) => (
               <AuditEntryRow className="cost-related-row" entry={entry} key={`audit:${entry.id}`} />

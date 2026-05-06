@@ -6,6 +6,7 @@ import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
+import DecisionEntryRow from '../components/DecisionEntryRow'
 import { useAuth } from '../context/AuthContext'
 
 function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -196,14 +197,7 @@ export default function TaskDetailPage() {
           <h2>Audit & Decisions</h2>
           <div className="task-event-list">
             {context.decisions.map((decision) => (
-              <article className="task-event-row" key={decision.id}>
-                <div>
-                  <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                  <strong>{decision.title}</strong>
-                  <span>{decision.summary}</span>
-                </div>
-                {decision.trace_id ? <Link to={`/traces/${encodeURIComponent(decision.trace_id)}`}>trace</Link> : null}
-              </article>
+              <DecisionEntryRow className="task-event-row" decision={decision} key={decision.id} />
             ))}
             {context.audit_entries.slice(0, 6).map((entry) => (
               <AuditEntryRow className="task-event-row" entry={entry} key={`audit:${entry.id}`} />

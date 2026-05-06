@@ -148,7 +148,7 @@ export default function ControlCenterPage() {
               <article className="control-feed-row" key={decision.id}>
                 <div>
                   <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                  <Link to={`/decisions/${encodeURIComponent(decision.id)}`}>{decision.title}</Link>
+                  <Link to={decision.detail_href ?? `/decisions/${encodeURIComponent(decision.id)}`}>{decision.title}</Link>
                   <span>{timeLabel(decision.ts)} · {decision.agent_id}</span>
                 </div>
                 <div className="control-feed-actions">

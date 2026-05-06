@@ -13,6 +13,9 @@ export type CfoDecision = {
   status: string
   evidence: Array<Record<string, unknown>>
   payload: Record<string, unknown>
+  links: {
+    detail: string
+  }
 }
 
 export type CfoSummary = {

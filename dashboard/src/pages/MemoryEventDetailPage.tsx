@@ -5,6 +5,7 @@ import MetricCard from '../components/MetricCard'
 import PageHeader from '../components/PageHeader'
 import StatusPill from '../components/StatusPill'
 import AuditEntryRow from '../components/AuditEntryRow'
+import DecisionEntryRow from '../components/DecisionEntryRow'
 import type { MemoryEvent, MemoryEventContext } from '../types/memory'
 
 function severityTone(severity: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
@@ -162,11 +163,7 @@ export default function MemoryEventDetailPage() {
           <h2>Audit & Decisions</h2>
           <div className="memory-context-list">
             {context.decisions.map((decision) => (
-              <article className="memory-context-row" key={decision.id}>
-                <StatusPill label={decision.status} tone={decision.status === 'approved' ? 'healthy' : 'warning'} />
-                <strong>{decision.title}</strong>
-                <span>{decision.summary}</span>
-              </article>
+              <DecisionEntryRow className="memory-context-row" decision={decision} key={decision.id} />
             ))}
             {context.audit_entries.slice(0, 8).map((entry) => (
               <AuditEntryRow className="memory-context-row" entry={entry} key={`audit:${entry.id}`} />
