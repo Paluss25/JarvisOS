@@ -328,6 +328,15 @@
   color: var(--jo-muted);
 }
 
+.ops-button {
+  min-height: 32px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  color: var(--jo-text);
+  padding: 0 10px;
+}
+
 .log-table {
   display: grid;
   overflow-x: auto;
@@ -1248,6 +1257,125 @@
 
 .permission-table-row a {
   color: var(--jo-trace);
+}
+
+.agent-filter-row {
+  margin: 16px 0;
+}
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 12px;
+}
+
+.agent-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface);
+  padding: 12px;
+}
+
+.agent-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.agent-card header div {
+  display: grid;
+  gap: 3px;
+}
+
+.agent-card header a {
+  color: var(--jo-text);
+  font-size: 16px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.agent-card header a:hover,
+.agent-card-actions a:hover,
+.agent-quick-link:hover {
+  color: var(--jo-trace);
+}
+
+.agent-card header span,
+.agent-card-meta,
+.agent-identity-grid span {
+  color: var(--jo-muted);
+  font-size: 12px;
+}
+
+.agent-card-meta,
+.agent-chip-list,
+.agent-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.agent-card-actions {
+  border-top: 1px solid var(--jo-border);
+  padding-top: 10px;
+}
+
+.agent-card-actions a,
+.agent-card-actions button,
+.agent-quick-link {
+  min-height: 30px;
+  border: 1px solid var(--jo-border);
+  border-radius: 8px;
+  background: var(--jo-surface-raised);
+  color: var(--jo-text);
+  padding: 6px 9px;
+  font-size: 12px;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.agent-card-actions button {
+  cursor: pointer;
+}
+
+.agent-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.7fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.agent-link-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.agent-quick-link {
+  display: flex;
+  align-items: center;
+}
+
+.agent-identity-grid {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.4fr) minmax(0, 1fr);
+  gap: 10px 12px;
+  font-size: 13px;
+}
+
+.agent-identity-grid strong {
+  color: var(--jo-text);
+  font-weight: 600;
+}
+
+@media (max-width: 960px) {
+  .agent-detail-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 1100px) {

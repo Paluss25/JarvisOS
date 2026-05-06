@@ -5,6 +5,10 @@ export interface AgentInfo {
   name: string
   role: string
   port: number
+  workspace: string
+  domains: string[]
+  capabilities: string[]
+  supervisord_state: string | null
   status: string      // running | stopped | unknown
   health: string      // ok | degraded | offline
   uptime_seconds: number | null
