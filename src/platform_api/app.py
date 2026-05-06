@@ -1,17 +1,66 @@
 """JarvisOS Platform API — FastAPI application factory."""
 
+import errno
+import os
 import asyncio
 import logging
+import stat
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import RedirectResponse
+from starlette.datastructures import URL
 
 from platform_api.db import get_pool, close_pool
 
 logger = logging.getLogger(__name__)
+
+
+class SPAStaticFiles(StaticFiles):
+    """Serve React client routes through index.html while preserving API 404s."""
+
+    async def get_response(self, path: str, scope):
+        if scope["method"] not in ("GET", "HEAD"):
+            raise StarletteHTTPException(status_code=405)
+
+        try:
+            full_path, stat_result = self.lookup_path(path)
+        except PermissionError:
+            raise StarletteHTTPException(status_code=401)
+        except OSError as exc:
+            if exc.errno == errno.ENAMETOOLONG:
+                raise StarletteHTTPException(status_code=404)
+            raise
+
+        if stat_result and stat.S_ISREG(stat_result.st_mode):
+            return self.file_response(full_path, stat_result, scope)
+
+        if stat_result and stat.S_ISDIR(stat_result.st_mode) and self.html:
+            index_path = os.path.join(path, "index.html")
+            full_path, stat_result = self.lookup_path(index_path)
+            if stat_result is not None and stat.S_ISREG(stat_result.st_mode):
+                if not scope["path"].endswith("/"):
+                    url = URL(scope=scope)
+                    return RedirectResponse(url=url.replace(path=url.path + "/"))
+                return self.file_response(full_path, stat_result, scope)
+
+        if self.html and self._should_fallback_to_index(path):
+            full_path, stat_result = self.lookup_path("index.html")
+            if stat_result and stat.S_ISREG(stat_result.st_mode):
+                return self.file_response(full_path, stat_result, scope)
+
+        raise StarletteHTTPException(status_code=404)
+
+    @staticmethod
+    def _should_fallback_to_index(path: str) -> bool:
+        first_segment = path.split("/", 1)[0]
+        if first_segment in {"api", "webhooks"}:
+            return False
+        return "." not in Path(path).name
 
 
 def create_platform_app() -> FastAPI:
@@ -98,7 +147,7 @@ def create_platform_app() -> FastAPI:
     # Serve React dashboard from dashboard/dist/ if it exists
     dashboard_dist = Path("/app/dashboard/dist")
     if dashboard_dist.exists():
-        app.mount("/", StaticFiles(directory=str(dashboard_dist), html=True), name="dashboard")
+        app.mount("/", SPAStaticFiles(directory=str(dashboard_dist), html=True), name="dashboard")
         logger.info("platform: serving dashboard from %s", dashboard_dist)
 
     return app
