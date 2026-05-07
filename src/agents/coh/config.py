@@ -46,6 +46,11 @@ DRHOUSE_BUILTIN_CRONS = [
             "2. Training completed or skipped (use send_message to Roger for today's activity)\n"
             "3. Recovery indicators — sleep, HRV, readiness if available\n"
             "4. Cross-domain conflicts or flags (e.g. insufficient protein on training day)\n"
+            "5. If today's log contains late Garmin recovery photos/screenshots "
+            "(sleep, HRV, stress, body battery, RHR), ask Roger/DOS to verify WHOOP freshness: "
+            "send_message(to='dos', mode='async', message='Run whoop_sync for the relevant date/date_from/date_to, "
+            "then compare Garmin vs WHOOP via daily_recovery_source_comparison and report deltas to COH.'). "
+            "Do not perform WHOOP sync inside COH; DOS owns the whoop_sync tool.\n"
             "Summarise in 3-4 bullet points. Log key findings to daily_log."
         ),
         "session_id": "heartbeat-eod",
@@ -136,6 +141,16 @@ def build_drhouse_config(workspace_root: Path = Path("/app/workspace/coh")) -> A
         telegram_streaming_mode="progress",
         mcp_server_factory=create_drhouse_mcp_server,
         builtin_crons=DRHOUSE_BUILTIN_CRONS,
+        default_image_caption=(
+            "Analyze this image. If this is a Garmin recovery/sleep/HRV/stress/body battery/RHR "
+            "photo or screenshot, extract and log the Garmin metrics first, then trigger WHOOP "
+            "validation by delegating to DOS: send_message(to='dos', mode='async', message='Run "
+            "whoop_sync(date_from=<photo date ISO>, date_to=<photo date ISO>, user_id=1), then query "
+            "daily_recovery_source_comparison for that date and send COH the Garmin-vs-WHOOP deltas.'). "
+            "Use the image date or explicit user date for date_from/date_to. Do not wait synchronously "
+            "for this during photo ingestion; close the user-facing photo response and let DOS report back "
+            "asynchronously."
+        ),
         allowed_tools=[
             "Bash", "Read", "Write", "Edit",
             "WebSearch", "WebFetch", "Glob", "Grep",

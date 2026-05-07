@@ -3,6 +3,7 @@
 import pytest
 
 from agents.coh import db
+from agents.coh.config import DRHOUSE_BUILTIN_CRONS, build_drhouse_config
 from agents.coh.tools import create_drhouse_mcp_server
 
 
@@ -34,6 +35,13 @@ class _CaptureConn:
         self.sql.append(sql)
         self.args.append(args)
         return []
+
+
+def _cron(name: str) -> dict:
+    for cron in DRHOUSE_BUILTIN_CRONS:
+        if cron["name"] == name:
+            return cron
+    raise AssertionError(f"{name} cron not found")
 
 
 @pytest.mark.asyncio
@@ -80,6 +88,26 @@ def test_medical_user_alias_maps_paluss_to_health_uuid():
     assert db.resolve_medical_user_id("75f9a1ac-e4ca-41cd-8d2b-1f393db7e732") == (
         "75f9a1ac-e4ca-41cd-8d2b-1f393db7e732"
     )
+
+
+def test_coh_image_caption_routes_recovery_photos_to_dos_whoop_sync():
+    caption = build_drhouse_config().default_image_caption
+
+    assert "Garmin recovery/sleep/HRV/stress/body battery" in caption
+    assert "send_message(to='dos'" in caption
+    assert "whoop_sync" in caption
+    assert "date_from" in caption
+    assert "date_to" in caption
+    assert "mode='async'" in caption
+
+
+def test_coh_eod_consolidation_checks_whoop_after_late_photos():
+    prompt = _cron("eod_health_consolidation")["prompt"]
+
+    assert "late Garmin recovery photos" in prompt
+    assert "send_message(to='dos'" in prompt
+    assert "whoop_sync" in prompt
+    assert "daily_recovery_source_comparison" in prompt
 
 
 def test_health_tool_describes_lab_public_schema(tmp_path):
