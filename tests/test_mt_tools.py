@@ -19,6 +19,13 @@ import agents.mt.email_sorter as sorter_mod
 from agents.mt.email_sorter import sort_email
 
 
+def _tool(server, name):
+    for entry in server._tools:
+        if entry.name == name:
+            return entry
+    raise AssertionError(f"tool not registered: {name}")
+
+
 def test_read_processed_ids_empty(tmp_path):
     assert _read_processed_ids(tmp_path) == set()
 
@@ -48,6 +55,43 @@ def test_task_helpers(tmp_path):
     tasks = _task_list(tmp_path, status="open")
     assert len(tasks) == 1
     assert tasks[0]["id"] == task["id"]
+
+
+@pytest.mark.asyncio
+async def test_create_task_marks_source_email_processed(tmp_path):
+    from agents.mt.tools import create_mt_mcp_server
+
+    server = create_mt_mcp_server(tmp_path)
+    create_task = _tool(server, "create_task").fn
+
+    response = await create_task({
+        "title": "Amazon rata 76,96 EUR",
+        "notes": "Digest item from pm-437",
+        "due_date": "2026-05-12",
+        "email_id": "pm-437",
+        "account": "protonmail",
+        "received_at": "2026-05-07T01:29:20Z",
+    })
+
+    assert response["content"][0]["text"]
+    processed = _read_processed_ids(tmp_path)
+    assert "pm-437" in processed
+    assert "protonmail|pm-437|2026-05-07T01:29:20Z" in processed
+
+
+@pytest.mark.asyncio
+async def test_create_task_extracts_email_id_from_notes_when_missing(tmp_path):
+    from agents.mt.tools import create_mt_mcp_server
+
+    server = create_mt_mcp_server(tmp_path)
+    create_task = _tool(server, "create_task").fn
+
+    await create_task({
+        "title": "xAI invoice",
+        "notes": "Verificare fattura xAI API 04/2026 (pm-339)",
+    })
+
+    assert "pm-339" in _read_processed_ids(tmp_path)
 
 
 def _mock_response(status_code: int, body: dict):

@@ -358,21 +358,51 @@ def _compute_action_hint(payload: dict) -> str:
         return "forward_to_cos"
 
     classification = payload.get("classification", {})
-    risk = str(classification.get("risk_level", "low")).lower()
-    if risk in {"high", "critical"}:
-        return "forward_to_cos"
-
     domain = str(classification.get("primary_domain", "")).lower()
+    secondary_domain = str(classification.get("secondary_domain", "")).lower()
     subject = str(payload.get("subject", "")).lower()
     body = str(payload.get("body_redacted", "")).lower()
     sender = str(payload.get("sender", "")).lower()
     text = f"{subject} {body}"
+    risk = str(classification.get("risk_level", "low")).lower()
+    security = payload.get("security_signals", {})
+
+    security_auth_markers = (
+        "sign-in", "sign in", "accesso", "spid", "password",
+        "certificate transparency", "new login", "login alert",
+    )
+    if any(marker in text or marker in sender for marker in security_auth_markers):
+        return "forward_to_cos"
 
     # Finance emails with whitelist YNAB routing → auto-dispatch to CFO worker
     ynab_account_id = classification.get("ynab_account_id")
     ynab_account_source = classification.get("ynab_account_source", "static")
     if domain == "finance" and (ynab_account_id is not None or ynab_account_source == "body_extract"):
         return "forward_to_cfo"
+
+    if "americanexpress@welcome.americanexpress.com" in sender and "conferma operazione" in subject:
+        return "archive"
+
+    has_security_concern = (
+        str(security.get("prompt_injection_risk", "none")).lower() not in {"", "none", "low"}
+        or bool(security.get("suspicious_links"))
+        or bool(security.get("blocked_attachments"))
+    )
+    low_value_markers = (
+        "newsletter", "marketing", "promotion", "promo", "try it free",
+        "proton meet is here", "linkedin", "netdata", "strava",
+        "booking.com", "italo", "ryanair", "google cloud",
+        "recaptcha", "todoist", "gemini", "pirelli", "ho. mobile",
+    )
+    if not has_security_concern and (
+        secondary_domain == "marketing"
+        or domain in {"newsletter", "marketing", "automated", "spam", "notification"}
+        or any(marker in text or marker in sender for marker in low_value_markers)
+    ):
+        return "archive"
+
+    if risk in {"high", "critical"}:
+        return "forward_to_cos"
 
     action_keywords = (
         "fattura", "invoice", "scadenza", "deadline", "urgente", "urgent",

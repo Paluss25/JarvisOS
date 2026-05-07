@@ -202,6 +202,15 @@ def _task_create(workspace: Path, title: str, notes: str = "", due_date: str = "
     return task
 
 
+def _extract_email_id(*values: str) -> str:
+    """Extract a digest email_id such as pm-437 or gmx-317 from free text."""
+    for value in values:
+        match = re.search(r"\b(?:pm|gmx)-\d+\b", str(value or ""), re.I)
+        if match:
+            return match.group(0)
+    return ""
+
+
 def _task_list(workspace: Path, status: str = "") -> list[dict]:
     task_log = workspace / "task_log.json"
     if not task_log.exists():
@@ -597,6 +606,9 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
                 "title": {"type": "string"},
                 "notes": {"type": "string"},
                 "due_date": {"type": "string"},
+                "email_id": {"type": "string"},
+                "account": {"type": "string"},
+                "received_at": {"type": "string"},
             },
             "required": ["title"],
         },
@@ -612,6 +624,20 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
             notes=args.get("notes", "").strip(),
             due_date=args.get("due_date", "").strip(),
         )
+        email_id = (
+            args.get("email_id", "").strip()
+            or _extract_email_id(args.get("notes", ""), title)
+        )
+        if email_id:
+            _mark_email_state(
+                workspace_path,
+                email_id=email_id,
+                account=args.get("account", "").strip(),
+                received_at=args.get("received_at", "").strip(),
+                status="processed",
+                metadata={"task_id": task["id"]},
+            )
+            _mark_processed(workspace_path, email_id)
         return _text(json.dumps(task))
 
     @sdk_tool(

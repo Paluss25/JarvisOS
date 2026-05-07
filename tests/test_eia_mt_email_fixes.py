@@ -115,6 +115,82 @@ def test_action_hint_uses_body_for_action_required_tasks():
     assert _compute_action_hint(payload) == "create_task"
 
 
+def test_action_hint_archives_known_marketing_even_when_classifier_overstates_risk():
+    from agents.email_intelligence_agent.tools import _compute_action_hint
+
+    payload = {
+        "sender": "Proton Meet meet@proton.me",
+        "subject": "Proton Meet is here: Try it free now",
+        "body_redacted": "Try Proton Meet for free today. Marketing newsletter from Proton.",
+        "policy": {"decision": "reroute", "allow": True},
+        "security_signals": {
+            "prompt_injection_risk": "none",
+            "suspicious_links": [],
+            "blocked_attachments": [],
+        },
+        "classification": {
+            "primary_domain": "legal",
+            "secondary_domain": "marketing",
+            "sensitivity": "sensitive",
+            "risk_level": "high",
+            "priority": "high",
+            "confidence": 0.4,
+        },
+    }
+
+    assert _compute_action_hint(payload) == "archive"
+
+
+def test_action_hint_keeps_security_auth_events_for_cos():
+    from agents.email_intelligence_agent.tools import _compute_action_hint
+
+    payload = {
+        "sender": "support@whoop.com",
+        "subject": "New Sign-In Alert - Was This You?",
+        "body_redacted": "We noticed a new sign-in to your WHOOP account.",
+        "policy": {"decision": "reroute", "allow": True},
+        "security_signals": {
+            "prompt_injection_risk": "none",
+            "suspicious_links": [],
+            "blocked_attachments": [],
+        },
+        "classification": {
+            "primary_domain": "general",
+            "sensitivity": "critical",
+            "risk_level": "critical",
+            "priority": "urgent",
+            "confidence": 0.0,
+        },
+    }
+
+    assert _compute_action_hint(payload) == "forward_to_cos"
+
+
+def test_action_hint_does_not_create_task_for_unparsed_amex_confirmation():
+    from agents.email_intelligence_agent.tools import _compute_action_hint
+
+    payload = {
+        "sender": "American Express <AmericanExpress@welcome.americanexpress.com>",
+        "subject": "Conferma Operazione",
+        "body_redacted": "(empty body)",
+        "policy": {"decision": "allow", "allow": True},
+        "security_signals": {
+            "prompt_injection_risk": "none",
+            "suspicious_links": [],
+            "blocked_attachments": [],
+        },
+        "classification": {
+            "primary_domain": "general",
+            "sensitivity": "public",
+            "risk_level": "low",
+            "priority": "normal",
+            "confidence": 0.0,
+        },
+    }
+
+    assert _compute_action_hint(payload) == "archive"
+
+
 def test_write_to_digest_deduplicates_by_account_email_and_received_at(tmp_path):
     from agents.email_intelligence_agent.tools import _write_to_digest
 
