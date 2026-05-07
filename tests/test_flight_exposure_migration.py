@@ -48,7 +48,8 @@ def test_flight_exposure_migration_creates_expected_indexes():
     assert "CREATE INDEX IF NOT EXISTS idx_flight_activities_user_takeoff ON chro.flight_activities(user_id, takeoff_time DESC)" in normalized
     assert "CREATE INDEX IF NOT EXISTS idx_flight_activities_open ON chro.flight_activities(user_id, takeoff_time DESC) WHERE status = 'open'" in normalized
     assert "CREATE INDEX IF NOT EXISTS idx_flight_exposures_user_takeoff ON flight_exposures(user_id, takeoff_at DESC)" in normalized
-    assert "CREATE INDEX IF NOT EXISTS idx_flight_exposures_open ON flight_exposures(user_id, takeoff_at DESC) WHERE status = 'open'" in normalized
+    assert "DROP INDEX IF EXISTS idx_flight_exposures_open" in normalized
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_flight_exposures_open ON flight_exposures(user_id) WHERE status = 'open'" in normalized
 
 
 def test_flight_exposure_migration_has_no_cross_database_foreign_keys():

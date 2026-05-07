@@ -16,6 +16,7 @@ def test_parse_empty_takeoff_uses_now_and_experimental_default():
 
     assert parsed.event_time == _now()
     assert parsed.experimental is True
+    assert parsed.experimental_provided is False
     assert parsed.aircraft_type is None
     assert parsed.flight_type is None
 
@@ -63,6 +64,7 @@ def test_parse_landing_details_can_override_missing_values():
     assert parsed.aircraft_type == "M-346"
     assert parsed.flight_type == "Handling Qualities"
     assert parsed.experimental is False
+    assert parsed.experimental_provided is True
 
 
 def test_parse_after_midnight_retroactive_time_rolls_back_one_day():
@@ -78,4 +80,5 @@ def test_parse_italian_experimental_false():
     parsed = parse_flight_command("11:30 M-346 sperimentale no Handling Qualities", command="decollo", now=_now())
 
     assert parsed.experimental is False
+    assert parsed.experimental_provided is True
     assert parsed.flight_type == "Handling Qualities"

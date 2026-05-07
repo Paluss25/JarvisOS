@@ -57,8 +57,10 @@ CREATE TABLE IF NOT EXISTS flight_exposures (
 CREATE INDEX IF NOT EXISTS idx_flight_exposures_user_takeoff
     ON flight_exposures(user_id, takeoff_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_flight_exposures_open
-    ON flight_exposures(user_id, takeoff_at DESC)
+DROP INDEX IF EXISTS idx_flight_exposures_open;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_flight_exposures_open
+    ON flight_exposures(user_id)
     WHERE status = 'open';
 
 DO $$
