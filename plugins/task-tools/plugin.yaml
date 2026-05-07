@@ -1,0 +1,11 @@
+name: task-tools
+version: 1
+entrypoint: plugin.py
+tools:
+  - create_task
+  - update_task
+  - list_my_tasks
+allowed_agents:
+  - ceo
+  - cio
+  - mt

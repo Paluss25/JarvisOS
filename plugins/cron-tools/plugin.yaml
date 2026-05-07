@@ -1,0 +1,10 @@
+name: cron-tools
+version: 1
+entrypoint: plugin.py
+tools:
+  - cron_create
+  - cron_list
+  - cron_update
+  - cron_delete
+allowed_agents:
+  - cio

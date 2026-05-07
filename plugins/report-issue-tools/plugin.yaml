@@ -1,0 +1,16 @@
+name: report-issue-tools
+version: 1
+entrypoint: plugin.py
+tools:
+  - report_issue
+allowed_agents:
+  - ceo
+  - cio
+  - mt
+  - cfo
+  - cos
+  - dos
+  - coh
+  - don
+  - chro
+  - email_intelligence_agent

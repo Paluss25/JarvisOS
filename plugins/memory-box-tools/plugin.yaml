@@ -1,0 +1,10 @@
+name: memory-box-tools
+version: 1
+entrypoint: plugin.py
+tools:
+  - query_agent_memory
+allowed_agents:
+  - ceo
+  - cio
+  - mt
+  - coh
