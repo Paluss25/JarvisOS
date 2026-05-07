@@ -4,3 +4,7 @@ class PluginError(RuntimeError):
 
 class PluginManifestError(PluginError):
     """Raised when a plugin manifest is missing required fields or is invalid."""
+
+
+class PluginLoadError(PluginError):
+    """Raised when a trusted local plugin cannot be loaded safely."""
