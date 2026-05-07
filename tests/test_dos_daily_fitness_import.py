@@ -181,11 +181,13 @@ def test_import_daily_fitness_data_inserts_files_raw_rows_and_recovery_summary()
     assert result["recovery_metrics_upserted"] is True
     assert conn.transaction.called
     assert conn.executemany.await_count >= 3
-    upsert_args = conn.execute.await_args.args
+    upsert_args = conn.execute.await_args_list[0].args
     upsert_sql = upsert_args[0]
     assert "INSERT INTO recovery_metrics" in upsert_sql
     assert "steps, distance_km, active_kcal, active_min" in upsert_sql
     assert upsert_args[12:17] == (100, 1.2, 85, 16.5, "ok")
+    observation_sql = conn.execute.await_args_list[1].args[0]
+    assert "INSERT INTO daily_recovery_observations" in observation_sql
 
 
 def test_import_daily_fitness_data_skips_existing_file_sha_but_upserts_recovery():
@@ -214,7 +216,7 @@ def test_import_daily_fitness_data_skips_existing_file_sha_but_upserts_recovery(
     assert result["status"] == "imported"
     assert result["files_imported"] == 0
     assert result["files_existing"] == 1
-    conn.execute.assert_awaited_once()
+    assert conn.execute.await_count == 2
 
 
 def test_garmin_fitness_import_tool_is_registered():

@@ -531,3 +531,45 @@ async def _upsert_recovery_metrics(conn: Any, import_date: date, user_id: int, s
         summary.get("active_min"),
         summary.get("data_quality", "ok"),
     )
+    await conn.execute(
+        """
+        INSERT INTO daily_recovery_observations
+            (date, user_id, source, rhr_overnight, hrv_overnight_avg,
+             sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min,
+             sleep_light_min, sleep_awake_min, steps, distance_km, active_kcal,
+             active_min, data_quality, raw_json, updated_at)
+        VALUES ($1,$2,'garmin_fit_daily',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,now())
+        ON CONFLICT (date, user_id, source) DO UPDATE SET
+            rhr_overnight = EXCLUDED.rhr_overnight,
+            hrv_overnight_avg = EXCLUDED.hrv_overnight_avg,
+            sleep_duration_min = EXCLUDED.sleep_duration_min,
+            sleep_score = EXCLUDED.sleep_score,
+            sleep_deep_min = EXCLUDED.sleep_deep_min,
+            sleep_rem_min = EXCLUDED.sleep_rem_min,
+            sleep_light_min = EXCLUDED.sleep_light_min,
+            sleep_awake_min = EXCLUDED.sleep_awake_min,
+            steps = EXCLUDED.steps,
+            distance_km = EXCLUDED.distance_km,
+            active_kcal = EXCLUDED.active_kcal,
+            active_min = EXCLUDED.active_min,
+            data_quality = EXCLUDED.data_quality,
+            raw_json = EXCLUDED.raw_json,
+            updated_at = now()
+        """,
+        import_date,
+        user_id,
+        summary.get("rhr_overnight"),
+        summary.get("hrv_overnight_avg"),
+        summary.get("sleep_duration_min"),
+        summary.get("sleep_score"),
+        summary.get("sleep_deep_min"),
+        summary.get("sleep_rem_min"),
+        summary.get("sleep_light_min"),
+        summary.get("sleep_awake_min"),
+        summary.get("steps"),
+        summary.get("distance_km"),
+        summary.get("active_kcal"),
+        summary.get("active_min"),
+        summary.get("data_quality", "ok"),
+        _jsonb(summary),
+    )
