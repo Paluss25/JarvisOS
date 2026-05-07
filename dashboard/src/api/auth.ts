@@ -7,14 +7,16 @@ export interface LoginResponse {
 }
 
 export interface UserProfile {
-  username: string
+  id: string
+  email: string
+  name: string
   role: string
 }
 
 export async function login(username: string, password: string): Promise<LoginResponse> {
   const resp = await apiFetch('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ email: username, password }),
   })
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}))

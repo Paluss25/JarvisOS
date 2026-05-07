@@ -16,6 +16,9 @@ venv/
 dist/
 build/
 
+# Node
+node_modules/
+
 # Runtime data (appdata volumes — NOT tracked in git)
 /pgdata/
 /redis/

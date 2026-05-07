@@ -1,85 +1,199 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getTask, Task, assignTask } from '../api/tasks'
-import { listAgents, AgentInfo } from '../api/agents'
+import { assignTask, getTaskContext, type TaskContext } from '../api/tasks'
+import { listAgents, type AgentInfo } from '../api/agents'
+import MetricCard from '../components/MetricCard'
+import PageHeader from '../components/PageHeader'
+import StatusPill from '../components/StatusPill'
+import AuditEntryRow from '../components/AuditEntryRow'
+import DecisionEntryRow from '../components/DecisionEntryRow'
+import LogEventRow from '../components/LogEventRow'
 import { useAuth } from '../context/AuthContext'
 
-function Field({ label, value }: { label: string; value: string | null | undefined }) {
-  return (
-    <div className="bg-gray-900 rounded-lg p-3">
-      <dt className="text-xs text-gray-500 mb-1">{label}</dt>
-      <dd className="text-sm text-white">{value ?? '—'}</dd>
-    </div>
-  )
+function statusTone(status: string): 'neutral' | 'healthy' | 'warning' | 'incident' {
+  if (status === 'done') return 'healthy'
+  if (status === 'failed' || status === 'blocked') return 'incident'
+  if (status === 'running' || status === 'needs_review' || status === 'waiting') return 'warning'
+  return 'neutral'
+}
+
+function safeDate(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleString() : '-'
+}
+
+function ContextLink({ to, label }: { to: string | null; label: string }) {
+  return to ? <Link className="task-context-link" to={to}>{label}</Link> : <span className="task-context-link disabled">{label}</span>
 }
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { isAdmin } = useAuth()
-  const [task, setTask] = useState<Task | null>(null)
+  const [context, setContext] = useState<TaskContext | null>(null)
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [assignTo, setAssignTo] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  function load() {
+    if (!id) return
+    getTaskContext(id)
+      .then((result) => {
+        setContext(result)
+        setAssignTo(result.task.assigned_agent ?? '')
+        setError(null)
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+    listAgents().then(setAgents).catch(() => setAgents([]))
+  }
 
   useEffect(() => {
-    if (!id) return
-    getTask(id).then(t => { setTask(t); setAssignTo(t.assigned_agent ?? '') })
-    listAgents().then(setAgents)
+    load()
   }, [id])
 
   async function handleAssign() {
     if (!id || !assignTo) return
-    const updated = await assignTask(id, assignTo)
-    setTask(updated)
+    await assignTask(id, assignTo)
+    load()
   }
 
-  if (!task) return <div className="p-6 text-gray-400">Loading…</div>
+  if (!context) return <main className="ops-page empty-state">{error ?? 'Loading task.'}</main>
+
+  const { task, metrics } = context
 
   return (
-    <div className="p-6 max-w-3xl">
-      <Link to="/missions" className="text-sm text-gray-400 hover:text-white mb-4 inline-block">
-        &larr; Mission Control
-      </Link>
-      <h1 className="text-2xl font-bold mb-1">{task.title}</h1>
-      <p className="text-gray-400 text-sm mb-6">{task.description}</p>
+    <main className="ops-page">
+      <PageHeader
+        title={task.title}
+        description={task.description || 'No description provided.'}
+        actions={<StatusPill label={task.status} tone={statusTone(task.status)} />}
+      />
 
-      <dl className="grid grid-cols-2 gap-3 mb-6">
-        <Field label="ID" value={task.id} />
-        <Field label="State" value={task.state} />
-        <Field label="Priority" value={String(task.priority)} />
-        <Field label="Assigned Agent" value={task.assigned_agent} />
-        <Field label="Parent" value={task.parent_id} />
-        <Field label="Retries" value={`${task.retry_count} / ${task.max_retries}`} />
-        <Field label="Created" value={new Date(task.created_at).toLocaleString()} />
-        <Field label="Updated" value={new Date(task.updated_at).toLocaleString()} />
-      </dl>
+      {error ? <div className="panel-warning">{error}</div> : null}
 
-      {task.summary && (
-        <div className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-400 mb-2">Summary</h2>
-          <p className="text-sm text-gray-200 bg-gray-900 rounded-lg p-4">{task.summary}</p>
-        </div>
-      )}
+      <section className="metric-grid">
+        <MetricCard label="Traces" value={metrics.trace_count} detail="Execution traces" />
+        <MetricCard label="Logs" value={metrics.log_count} detail="Correlated events" />
+        <MetricCard label="Audit" value={metrics.audit_count} detail="Governance records" />
+        <MetricCard label="Decisions" value={metrics.decision_count} detail="Linked decisions" />
+        <MetricCard label="Artifacts" value={metrics.artifact_count} detail="Outputs and files" />
+        <MetricCard label="Retries" value={`${task.retry_count}/${task.max_retries}`} detail={task.assignment_mode} tone={task.retry_count ? 'warning' : 'neutral'} />
+      </section>
 
-      {isAdmin && (
-        <div className="flex gap-2">
-          <select
-            value={assignTo}
-            onChange={e => setAssignTo(e.target.value)}
-            className="px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
-          >
-            <option value="">Assign to agent…</option>
-            {agents.map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
+      <section className="task-detail-layout">
+        <section className="ops-panel">
+          <h2>Work Context</h2>
+          <div className="task-context-grid">
+            <ContextLink to="/tasks" label="Task Board" />
+            <ContextLink to={context.links.agent} label="Agent" />
+            <ContextLink to={context.links.chat} label="Chat" />
+            <ContextLink to={context.links.cockpit} label="Cockpit" />
+            <ContextLink to={context.links.traces} label="Traces" />
+            <ContextLink to={context.links.logs} label="Logs" />
+            <ContextLink to={context.links.audit} label="Audit" />
+          </div>
+        </section>
+
+        <section className="ops-panel">
+          <h2>Assignment</h2>
+          <div className="task-assignment-panel">
+            <div>
+              <span>Assigned agent</span>
+              <strong>{task.assigned_agent ? <Link to={`/agents/${encodeURIComponent(task.assigned_agent)}`}>{task.assigned_agent}</Link> : '-'}</strong>
+            </div>
+            <div>
+              <span>Priority</span>
+              <strong>{task.priority}</strong>
+            </div>
+            <div>
+              <span>Created</span>
+              <strong>{safeDate(task.created_at)}</strong>
+            </div>
+            <div>
+              <span>Updated</span>
+              <strong>{safeDate(task.updated_at)}</strong>
+            </div>
+            {isAdmin ? (
+              <div className="task-assign-row">
+                <select value={assignTo} onChange={e => setAssignTo(e.target.value)}>
+                  <option value="">Assign to agent...</option>
+                  {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+                <button onClick={handleAssign}>Assign</button>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </section>
+
+      {task.summary ? (
+        <section className="ops-panel">
+          <h2>Summary</h2>
+          <p className="task-summary">{task.summary}</p>
+        </section>
+      ) : null}
+
+      <section className="task-detail-layout">
+        <section className="ops-panel">
+          <h2>Traces</h2>
+          <div className="task-mini-table">
+            <div className="task-mini-head">
+              <span>Trace</span>
+              <span>Status</span>
+              <span>Spans</span>
+              <span>Duration</span>
+              <span>Cost</span>
+            </div>
+            {context.traces.map((trace) => (
+              <div className="task-mini-row" key={trace.trace_id}>
+                <Link to={trace.links?.detail ?? `/traces/${encodeURIComponent(trace.trace_id)}`}>{trace.trace_id}</Link>
+                <StatusPill label={trace.status} tone={trace.status === 'ok' ? 'healthy' : 'incident'} />
+                <span>{trace.span_count}</span>
+                <span>{trace.duration_ms}ms</span>
+                <span>${trace.cost_usd.toFixed(4)}</span>
+              </div>
             ))}
-          </select>
-          <button
-            onClick={handleAssign}
-            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 rounded transition-colors"
-          >
-            Assign
-          </button>
-        </div>
-      )}
-    </div>
+            {context.traces.length === 0 ? <div className="empty-state">No traces linked.</div> : null}
+          </div>
+        </section>
+
+        <section className="ops-panel">
+          <h2>Artifacts & Outputs</h2>
+          <div className="artifact-list">
+            {context.artifacts.map((artifact, index) => (
+              <article className="artifact-row" key={`${artifact.event_id}:${index}`}>
+                <StatusPill label={artifact.kind} tone={artifact.kind === 'artifact' ? 'trace' : 'ai'} />
+                <strong>{artifact.name}</strong>
+                <span>{artifact.path ?? artifact.preview ?? '-'}</span>
+              </article>
+            ))}
+            {context.artifacts.length === 0 ? <div className="empty-state">No artifacts or output payloads detected.</div> : null}
+          </div>
+        </section>
+      </section>
+
+      <section className="task-detail-layout">
+        <section className="ops-panel">
+          <h2>Recent Logs</h2>
+          <div className="task-event-list">
+            {context.logs.slice(0, 8).map((event) => (
+              <LogEventRow className="task-event-row" event={event} key={event.id} />
+            ))}
+            {context.logs.length === 0 ? <div className="empty-state">No logs linked.</div> : null}
+          </div>
+        </section>
+
+        <section className="ops-panel">
+          <h2>Audit & Decisions</h2>
+          <div className="task-event-list">
+            {context.decisions.map((decision) => (
+              <DecisionEntryRow className="task-event-row" decision={decision} key={decision.id} />
+            ))}
+            {context.audit_entries.slice(0, 6).map((entry) => (
+              <AuditEntryRow className="task-event-row" entry={entry} key={`audit:${entry.id}`} />
+            ))}
+            {context.decisions.length === 0 && context.audit_entries.length === 0 ? <div className="empty-state">No audit or decision records linked.</div> : null}
+          </div>
+        </section>
+      </section>
+    </main>
   )
 }

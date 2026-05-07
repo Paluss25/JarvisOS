@@ -1,190 +1,176 @@
-import { useState, useEffect } from 'react'
-import { apiGet, apiPost, apiDelete } from '../api/client'
-import { useAuth } from '../context/AuthContext'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { getSettingsGovernance } from '../api/settings'
+import MetricCard from '../components/MetricCard'
+import PageHeader from '../components/PageHeader'
+import StatusPill from '../components/StatusPill'
+import type { ApprovalClass, SettingsGovernanceData } from '../types/settings'
 
-type SettingsTab = 'agents' | 'domains' | 'users'
-
-interface Domain {
-  name: string
-  agents: string[]
+function riskTone(risk: ApprovalClass['risk']): 'healthy' | 'warning' | 'incident' {
+  if (risk === 'high') return 'incident'
+  if (risk === 'medium') return 'warning'
+  return 'healthy'
 }
 
-interface UserEntry {
-  username: string
-  role: string
-}
-
-function AgentCreationTab() {
-  const [form, setForm] = useState({ id: '', name: '', role: '', port: '8002', telegram_token_env: '' })
-  const [msg, setMsg] = useState('')
-
-  async function handleSubmit() {
-    try {
-      await apiPost('/agents', { ...form, port: Number(form.port) })
-      setMsg('Agent created.')
-      setForm({ id: '', name: '', role: '', port: '8002', telegram_token_env: '' })
-    } catch (e) {
-      setMsg(`Error: ${String(e)}`)
-    }
-  }
-
-  return (
-    <div className="max-w-md space-y-3">
-      <h2 className="font-semibold text-lg mb-3">Create Agent</h2>
-      {(['id', 'name', 'role', 'port', 'telegram_token_env'] as const).map(field => (
-        <div key={field}>
-          <label className="block text-xs text-gray-400 mb-1 capitalize">{field.replace('_', ' ')}</label>
-          <input
-            className="w-full px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 focus:outline-none focus:border-blue-500 text-sm"
-            value={form[field]}
-            onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
-          />
-        </div>
-      ))}
-      {msg && <p className={`text-sm ${msg.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>{msg}</p>}
-      <button onClick={handleSubmit} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 rounded transition-colors">
-        Create Agent
-      </button>
-    </div>
-  )
-}
-
-function DomainsTab() {
-  const [domains, setDomains] = useState<Domain[]>([])
-  const [newName, setNewName] = useState('')
-  const [grantDomain, setGrantDomain] = useState('')
-  const [grantAgent, setGrantAgent] = useState('')
-  const [grantMode, setGrantMode] = useState<'read' | 'write'>('read')
-
-  useEffect(() => {
-    apiGet<Domain[]>('/domains').then(setDomains)
-  }, [])
-
-  async function createDomain() {
-    await apiPost('/domains', { name: newName })
-    setNewName('')
-    apiGet<Domain[]>('/domains').then(setDomains)
-  }
-
-  async function grant() {
-    await apiPost(`/domains/${grantDomain}/grant`, { agent_id: grantAgent, mode: grantMode })
-    apiGet<Domain[]>('/domains').then(setDomains)
-  }
-
-  async function deleteDomain(name: string) {
-    await apiDelete(`/domains/${name}`)
-    apiGet<Domain[]>('/domains').then(setDomains)
-  }
-
-  return (
-    <div className="max-w-lg space-y-6">
-      <div>
-        <h2 className="font-semibold text-lg mb-3">Domains</h2>
-        <div className="space-y-2 mb-4">
-          {domains.map(d => (
-            <div key={d.name} className="flex items-center justify-between bg-gray-900 rounded-lg px-4 py-3">
-              <div>
-                <span className="font-medium">{d.name}</span>
-                <span className="text-xs text-gray-400 ml-2">{d.agents.join(', ') || 'no agents'}</span>
-              </div>
-              <button onClick={() => deleteDomain(d.name)} className="text-xs text-red-400 hover:text-red-300">Delete</button>
-            </div>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <input
-            className="flex-1 px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 focus:outline-none focus:border-blue-500 text-sm"
-            placeholder="New domain name"
-            value={newName}
-            onChange={e => setNewName(e.target.value)}
-          />
-          <button onClick={createDomain} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 rounded transition-colors">Create</button>
-        </div>
-      </div>
-
-      <div>
-        <h2 className="font-semibold mb-3">Grant Access</h2>
-        <div className="flex gap-2 flex-wrap">
-          <input className="px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 text-sm focus:outline-none" placeholder="Domain" value={grantDomain} onChange={e => setGrantDomain(e.target.value)} />
-          <input className="px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 text-sm focus:outline-none" placeholder="Agent ID" value={grantAgent} onChange={e => setGrantAgent(e.target.value)} />
-          <select value={grantMode} onChange={e => setGrantMode(e.target.value as 'read' | 'write')} className="px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 text-sm focus:outline-none">
-            <option value="read">read</option>
-            <option value="write">write</option>
-          </select>
-          <button onClick={grant} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 rounded transition-colors">Grant</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function UsersTab() {
-  const [users, setUsers] = useState<UserEntry[]>([])
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [role, setRole] = useState<'admin' | 'viewer'>('viewer')
-  const [msg, setMsg] = useState('')
-
-  useEffect(() => {
-    apiGet<UserEntry[]>('/users').then(setUsers).catch(() => setUsers([]))
-  }, [])
-
-  async function createUser() {
-    try {
-      await apiPost('/users', { username, password, role })
-      setMsg('User created.')
-      setUsername(''); setPassword('')
-      apiGet<UserEntry[]>('/users').then(setUsers)
-    } catch (e) {
-      setMsg(`Error: ${String(e)}`)
-    }
-  }
-
-  return (
-    <div className="max-w-md space-y-4">
-      <h2 className="font-semibold text-lg mb-3">Users</h2>
-      <div className="space-y-1 mb-4">
-        {users.map(u => (
-          <div key={u.username} className="flex items-center justify-between bg-gray-900 rounded-lg px-4 py-3">
-            <span className="font-medium">{u.username}</span>
-            <span className="text-xs text-gray-400 bg-gray-800 px-2 py-0.5 rounded">{u.role}</span>
-          </div>
-        ))}
-      </div>
-      <h3 className="font-medium">Create User</h3>
-      <input className="w-full px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 focus:outline-none focus:border-blue-500 text-sm" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} />
-      <input className="w-full px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 focus:outline-none focus:border-blue-500 text-sm" type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
-      <select value={role} onChange={e => setRole(e.target.value as 'admin' | 'viewer')} className="w-full px-3 py-2 rounded bg-gray-800 text-white border border-gray-700 focus:outline-none text-sm">
-        <option value="viewer">viewer</option>
-        <option value="admin">admin</option>
-      </select>
-      {msg && <p className={`text-sm ${msg.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>{msg}</p>}
-      <button onClick={createUser} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 rounded transition-colors">Create User</button>
-    </div>
-  )
+function flag(value: boolean) {
+  return value ? 'enabled' : 'disabled'
 }
 
 export default function SettingsPage() {
-  const { isAdmin } = useAuth()
-  const [tab, setTab] = useState<SettingsTab>('agents')
+  const [data, setData] = useState<SettingsGovernanceData | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getSettingsGovernance()
+      .then((result) => {
+        setData(result)
+        setError(null)
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+  }, [])
+
+  const summary = data?.summary
+  const modelRouting = data?.model_routing
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">Settings</h1>
-      <div className="flex gap-4 mb-6 border-b border-gray-800">
-        {(['agents', 'domains', ...(isAdmin ? ['users'] : [])] as SettingsTab[]).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`pb-2 text-sm font-medium capitalize transition-colors ${tab === t ? 'border-b-2 border-blue-500 text-white' : 'text-gray-400 hover:text-white'}`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-      {tab === 'agents' && <AgentCreationTab />}
-      {tab === 'domains' && <DomainsTab />}
-      {tab === 'users' && isAdmin && <UsersTab />}
-    </div>
+    <main className="ops-page">
+      <PageHeader
+        title="Settings"
+        description="Read-only governance posture for agents, approval policy, memory retention, model routing, and shared constraints."
+        actions={<StatusPill label={error ? 'API degraded' : 'governance view'} tone={error ? 'warning' : 'network'} />}
+      />
+
+      {error ? <div className="panel-warning">{error}</div> : null}
+
+      <section className="metric-grid">
+        <MetricCard label="Agents" value={summary?.agent_count ?? '-'} detail={`${summary?.worker_count ?? 0} workers`} />
+        <MetricCard label="Domains" value={summary?.domain_count ?? '-'} detail="Shared workspaces" />
+        <MetricCard label="Users" value={summary?.user_count ?? '-'} detail="Authenticated accounts" />
+        <MetricCard label="Human approvals" value={summary?.human_approval_actions ?? '-'} detail="Single approval actions" tone={summary?.human_approval_actions ? 'warning' : 'neutral'} />
+        <MetricCard label="Two-step approvals" value={summary?.two_step_actions ?? '-'} detail="High risk actions" tone={summary?.two_step_actions ? 'incident' : 'neutral'} />
+        <MetricCard label="Denied actions" value={summary?.denied_action_count ?? '-'} detail={`${summary?.permission_agent_count ?? 0} policy agents`} tone={summary?.denied_action_count ? 'warning' : 'neutral'} />
+        <MetricCard label="Retention" value={summary ? `${summary.min_retention_days}-${summary.max_retention_days}d` : '-'} detail={`${summary?.memory_store_count ?? 0} memory stores`} />
+        <MetricCard label="Config audit" value={summary?.audit_config_events ?? '-'} detail="Policy/config related events" />
+      </section>
+
+      <section className="settings-layout">
+        <section className="ops-panel">
+          <h2>Approval Policy</h2>
+          <div className="approval-class-list">
+            {(data?.approval_classes ?? []).map((item) => (
+              <article className="approval-class-card" key={item.name}>
+                <div>
+                  <StatusPill label={item.risk} tone={riskTone(item.risk)} />
+                  <strong>{item.name}</strong>
+                  <p>{item.description}</p>
+                </div>
+                <span>{item.action_count} actions</span>
+                <code>{item.actions.join(', ') || '-'}</code>
+              </article>
+            ))}
+            {(data?.approval_classes.length ?? 0) === 0 ? <div className="empty-state">No approval policy loaded.</div> : null}
+          </div>
+        </section>
+
+        <section className="ops-panel">
+          <h2>Model Routing</h2>
+          <div className="settings-flag-grid">
+            <StatusPill label={`local first ${flag(modelRouting?.local_first ?? false)}`} tone={modelRouting?.local_first ? 'healthy' : 'warning'} />
+            <StatusPill label={`cloud default ${modelRouting?.cloud_default_disabled ? 'disabled' : 'enabled'}`} tone={modelRouting?.cloud_default_disabled ? 'healthy' : 'warning'} />
+            <StatusPill label={`uncertain route deny ${flag(modelRouting?.deny_if_route_uncertain ?? false)}`} tone={modelRouting?.deny_if_route_uncertain ? 'healthy' : 'warning'} />
+          </div>
+          <div className="model-route-list">
+            {(modelRouting?.rules ?? []).map((rule) => (
+              <article className="model-route-row" key={rule.id}>
+                <div>
+                  <strong>{rule.id}</strong>
+                  <span>{JSON.stringify(rule.conditions)}</span>
+                </div>
+                <StatusPill label={rule.route ?? 'unknown'} tone={rule.route === 'cloud_allowed' ? 'warning' : 'healthy'} />
+              </article>
+            ))}
+            {(modelRouting?.rules.length ?? 0) === 0 ? <div className="empty-state">No model routing rules loaded.</div> : null}
+          </div>
+        </section>
+      </section>
+
+      <section className="settings-layout">
+        <section className="ops-panel">
+          <h2>Memory Stores</h2>
+          <div className="memory-policy-table">
+            <div className="memory-policy-head">
+              <span>Store</span>
+              <span>Retention</span>
+              <span>Roles</span>
+              <span>Controls</span>
+            </div>
+            {(data?.memory_stores ?? []).map((store) => (
+              <div className="memory-policy-row" key={store.name}>
+                <div>
+                  <strong>{store.name}</strong>
+                  <p>{store.description}</p>
+                </div>
+                <span>{store.retention_days}d</span>
+                <span>{store.access_roles.join(', ') || '-'}</span>
+                <span className="settings-control-stack">
+                  <StatusPill label={`vector ${flag(store.vectorization_allowed)}`} tone={store.vectorization_allowed ? 'ai' : 'neutral'} />
+                  <StatusPill label={`redaction ${flag(store.redaction_required)}`} tone={store.redaction_required ? 'healthy' : 'warning'} />
+                  <StatusPill label={`pii minimized ${flag(store.pii_minimized)}`} tone={store.pii_minimized ? 'healthy' : 'neutral'} />
+                </span>
+              </div>
+            ))}
+            {(data?.memory_stores.length ?? 0) === 0 ? <div className="empty-state">No memory policy stores loaded.</div> : null}
+          </div>
+        </section>
+
+        <section className="ops-panel">
+          <h2>Shared Constraints</h2>
+          <div className="constraint-list">
+            {(data?.shared_constraints ?? []).map((constraint) => (
+              <div className="constraint-row" key={constraint}>
+                <StatusPill label="deny" tone="incident" />
+                <span>{constraint}</span>
+              </div>
+            ))}
+            {(data?.shared_constraints.length ?? 0) === 0 ? <div className="empty-state">No shared constraints loaded.</div> : null}
+          </div>
+        </section>
+      </section>
+
+      <section className="settings-layout">
+        <section className="ops-panel">
+          <h2>Agent Permissions</h2>
+          <div className="permission-table">
+            <div className="permission-table-head">
+              <span>Agent</span>
+              <span>Description</span>
+              <span>Read</span>
+              <span>Write</span>
+              <span>Execute</span>
+              <span>Denied</span>
+            </div>
+            {(data?.permission_agents ?? []).map((agent) => (
+              <div className="permission-table-row" key={agent.agent_id}>
+                <span><Link to={`/agents/${encodeURIComponent(agent.agent_id)}`}>{agent.agent_id}</Link></span>
+                <span>{agent.description}</span>
+                <span>{agent.read_count}</span>
+                <span>{agent.write_count}</span>
+                <span>{agent.execute_count}</span>
+                <span><StatusPill label={String(agent.denied_count)} tone={agent.denied_count ? 'warning' : 'healthy'} /></span>
+              </div>
+            ))}
+            {(data?.permission_agents.length ?? 0) === 0 ? <div className="empty-state">No agent permissions loaded.</div> : null}
+          </div>
+        </section>
+
+        <section className="ops-panel">
+          <h2>Domains</h2>
+          <div className="domain-chip-list">
+            {(data?.domains ?? []).map((domain) => <StatusPill key={domain} label={domain} tone="network" />)}
+            {(data?.domains.length ?? 0) === 0 ? <div className="empty-state">No shared domains detected.</div> : null}
+          </div>
+        </section>
+      </section>
+    </main>
   )
 }

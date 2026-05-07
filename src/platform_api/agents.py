@@ -2,23 +2,80 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import httpx
 import yaml
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from agent_runner.registry import list_agents, load_registry, _REGISTRY_PATH
 from platform_api.audit import audit, AuditEvent
-from platform_api.auth import get_current_user, require_admin
-from platform_api.models import AgentCreateRequest, AgentStatus
+from platform_api.models import AgentCreateRequest
 from platform_api.supervisord_rpc import SupervisorClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agents", tags=["agents"])
+_security = HTTPBearer()
 
 _supervisor = SupervisorClient()
 _AGENTS_YAML = _REGISTRY_PATH
 _WORKSPACE_ROOT = Path("/app/workspace")
+
+
+async def _get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(_security),
+) -> dict[str, Any]:
+    from platform_api.auth import decode_access_token
+
+    return decode_access_token(credentials.credentials)
+
+
+async def _require_admin(user: dict[str, Any] = Depends(_get_current_user)) -> dict[str, Any]:
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+    return user
+
+
+def _dashboard_status(supervisord_state: str | None) -> str:
+    if not supervisord_state:
+        return "unknown"
+    state = supervisord_state.lower()
+    if state == "running":
+        return "running"
+    if state in {"stopped", "exited", "fatal", "backoff"}:
+        return "stopped"
+    return "unknown"
+
+
+def normalize_agent_status(
+    entry: dict[str, Any],
+    *,
+    supervisord_state: str | None,
+    health: str | None,
+) -> dict[str, Any]:
+    uptime_s = entry.get("uptime_s")
+    agent_id = entry.get("id")
+    return {
+        "id": agent_id,
+        "name": entry.get("name") or agent_id,
+        "role": entry.get("role") or "Agent",
+        "port": entry.get("port"),
+        "workspace": entry.get("workspace", ""),
+        "domains": list(entry.get("domains") or []),
+        "capabilities": list(entry.get("capabilities") or []),
+        "supervisord_state": supervisord_state,
+        "status": _dashboard_status(supervisord_state),
+        "health": health or "unknown",
+        "uptime_s": uptime_s,
+        "uptime_seconds": uptime_s,
+        "context_usage": entry.get("context_usage"),
+        "links": {
+            "detail": f"/agents/{agent_id}",
+            "chat": f"/agents/{agent_id}/chat",
+            "cockpit": f"/agents/{agent_id}/cockpit",
+        },
+    }
 
 
 def _safe_workspace(raw: str) -> Path:
@@ -57,19 +114,12 @@ async def _check_agent_health(port: int) -> str:
 # ---------------------------------------------------------------------------
 
 @router.get("")
-async def list_all_agents(_user=Depends(get_current_user)):
+async def list_all_agents(_user=Depends(_get_current_user)):
     agents = list_agents()
     result = []
     for a in agents:
         state = _get_process_state(a["id"])
-        result.append(AgentStatus(
-            id=a["id"],
-            port=a["port"],
-            workspace=a.get("workspace", ""),
-            domains=a.get("domains", []),
-            capabilities=a.get("capabilities", []),
-            supervisord_state=state,
-        ))
+        result.append(normalize_agent_status(a, supervisord_state=state, health=None))
     return result
 
 
@@ -78,7 +128,7 @@ async def list_all_agents(_user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 
 @router.get("/{agent_id}")
-async def get_agent(agent_id: str, _user=Depends(get_current_user)):
+async def get_agent(agent_id: str, _user=Depends(_get_current_user)):
     agents = list_agents()
     entry = next((a for a in agents if a["id"] == agent_id), None)
     if not entry:
@@ -86,15 +136,7 @@ async def get_agent(agent_id: str, _user=Depends(get_current_user)):
 
     state = _get_process_state(agent_id)
     health = await _check_agent_health(entry["port"])
-    return AgentStatus(
-        id=entry["id"],
-        port=entry["port"],
-        workspace=entry.get("workspace", ""),
-        domains=entry.get("domains", []),
-        capabilities=entry.get("capabilities", []),
-        supervisord_state=state,
-        health=health,
-    )
+    return normalize_agent_status(entry, supervisord_state=state, health=health)
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +144,7 @@ async def get_agent(agent_id: str, _user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 
 @router.post("", status_code=201)
-async def create_agent(req: AgentCreateRequest, _user=Depends(require_admin)):
+async def create_agent(req: AgentCreateRequest, _user=Depends(_require_admin)):
     data = load_registry()
     if any(a["id"] == req.id for a in data.get("agents", [])):
         raise HTTPException(status_code=409, detail=f"Agent '{req.id}' already exists")
@@ -151,7 +193,7 @@ async def create_agent(req: AgentCreateRequest, _user=Depends(require_admin)):
 # ---------------------------------------------------------------------------
 
 @router.delete("/{agent_id}", status_code=204)
-async def delete_agent(agent_id: str, _user=Depends(require_admin)):
+async def delete_agent(agent_id: str, _user=Depends(_require_admin)):
     data = load_registry()
     agents = data.get("agents", [])
     if not any(a["id"] == agent_id for a in agents):
@@ -179,7 +221,7 @@ async def delete_agent(agent_id: str, _user=Depends(require_admin)):
 # ---------------------------------------------------------------------------
 
 @router.post("/{agent_id}/restart")
-async def restart_agent(agent_id: str, _user=Depends(require_admin)):
+async def restart_agent(agent_id: str, _user=Depends(_require_admin)):
     agents = list_agents()
     if not any(a["id"] == agent_id for a in agents):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
@@ -204,7 +246,7 @@ async def restart_agent(agent_id: str, _user=Depends(require_admin)):
 # ---------------------------------------------------------------------------
 
 @router.post("/{agent_id}/chat")
-async def chat_proxy(agent_id: str, body: dict, _user=Depends(get_current_user)):
+async def chat_proxy(agent_id: str, body: dict, _user=Depends(_get_current_user)):
     agents = list_agents()
     entry = next((a for a in agents if a["id"] == agent_id), None)
     if not entry:

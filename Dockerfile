@@ -1,3 +1,16 @@
+FROM node:20-alpine AS dashboard-build
+
+WORKDIR /app/dashboard
+
+RUN corepack enable
+
+COPY dashboard/package.json dashboard/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY dashboard/ ./
+RUN pnpm build
+
+
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -62,6 +75,7 @@ RUN pip install /tmp/mailctl
 
 # Source code
 COPY src/ ./src/
+COPY --from=dashboard-build /app/dashboard/dist /app/dashboard/dist
 COPY agents.yaml .
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 COPY scripts/ ./scripts/
