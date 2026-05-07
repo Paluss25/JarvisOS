@@ -1,6 +1,6 @@
 # JarvisOS Plugin Live Forward-Port Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Forward-port the useful plugin runtime and tool-plugin upgrades from the old plugin branches onto the current live `main` image without regressing WHOOP, Plane, email, CHRO/COH schema, or finance fixes.
 
@@ -74,7 +74,7 @@ Do not remove:
 - Test: `tests/test_plugin_manifest.py`
 - Test: `tests/test_plugin_tool_spec.py`
 
-- [ ] **Step 1: Write manifest validation tests**
+- [x] **Step 1: Write manifest validation tests**
 
 Add `tests/test_plugin_manifest.py`:
 
@@ -122,7 +122,7 @@ allowed_agents: [ceo]
         )
 ```
 
-- [ ] **Step 2: Implement manifest parser**
+- [x] **Step 2: Implement manifest parser**
 
 Create `src/plugin_runtime/errors.py`:
 
@@ -194,7 +194,7 @@ def _required_str_list(raw: dict[str, Any], key: str) -> list[str]:
     return out
 ```
 
-- [ ] **Step 3: Write ToolSpec tests**
+- [x] **Step 3: Write ToolSpec tests**
 
 Add `tests/test_plugin_tool_spec.py`:
 
@@ -217,7 +217,7 @@ def test_tool_spec_keeps_name_description_schema_and_handler():
     assert spec.handler({"value": "x"}) == {"ok": "x"}
 ```
 
-- [ ] **Step 4: Implement runtime skeleton**
+- [x] **Step 4: Implement runtime skeleton**
 
 Create `src/plugin_runtime/tools.py`:
 
@@ -266,7 +266,7 @@ from plugin_runtime.tools import ToolSpec
 __all__ = ["PluginContext", "PluginManifest", "ToolSpec"]
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -276,7 +276,7 @@ PYTHONPATH=. pytest tests/test_plugin_manifest.py tests/test_plugin_tool_spec.py
 
 Expected: both tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/plugin_runtime tests/test_plugin_manifest.py tests/test_plugin_tool_spec.py
@@ -292,7 +292,7 @@ git commit -m "feat(plugin): add runtime contract skeleton"
 - Test: `tests/test_plugin_loader.py`
 - Test: `tests/test_plugin_registry.py`
 
-- [ ] **Step 1: Write loader tests**
+- [x] **Step 1: Write loader tests**
 
 Add tests that create a temporary plugin directory with `plugin.yaml` and `plugin.py`; assert the loader returns one `ToolSpec` named `echo`.
 
@@ -303,15 +303,15 @@ def register(context):
     return [ToolSpec(...)]
 ```
 
-- [ ] **Step 2: Implement loader**
+- [x] **Step 2: Implement loader**
 
 Load only from explicit directories under the configured plugin root. Use `importlib.util.spec_from_file_location`; reject entrypoints that escape the plugin directory.
 
-- [ ] **Step 3: Write registry tests**
+- [x] **Step 3: Write registry tests**
 
 Assert that a plugin with `allowed_agents: [mt]` is visible for `mt` and hidden for `cfo`.
 
-- [ ] **Step 4: Implement registry**
+- [x] **Step 4: Implement registry**
 
 Expose:
 
@@ -320,7 +320,7 @@ def discover_plugins(root: Path) -> list[LoadedPlugin]
 def tools_for_agent(root: Path, agent_id: str, context: PluginContext) -> list[ToolSpec]
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -328,7 +328,7 @@ Run:
 PYTHONPATH=. pytest tests/test_plugin_loader.py tests/test_plugin_registry.py
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/plugin_runtime tests/test_plugin_loader.py tests/test_plugin_registry.py
@@ -345,11 +345,11 @@ git commit -m "feat(plugin): load trusted local plugins"
 - Test: `tests/test_agent_plugin_settings.py`
 - Test: `tests/test_plugin_client_integration.py`
 
-- [ ] **Step 1: Add config tests**
+- [x] **Step 1: Add config tests**
 
 Assert plugin root defaults to `/app/plugins`, plugin loading can be disabled, and agent-specific plugin names can be configured.
 
-- [ ] **Step 2: Add plugin defaults**
+- [x] **Step 2: Add plugin defaults**
 
 Create a mapping like:
 
@@ -363,11 +363,11 @@ DEFAULT_AGENT_PLUGINS = {
 
 Keep the list conservative. Do not enable plugins for all agents in the first pass.
 
-- [ ] **Step 3: Integrate after built-ins**
+- [x] **Step 3: Integrate after built-ins**
 
 Append plugin `ToolSpec`s after existing direct tool registrations. If a plugin tool name duplicates a built-in, keep the built-in and log a warning; do not replace direct tools in this task.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -375,7 +375,7 @@ Run:
 PYTHONPATH=. pytest tests/test_agent_plugin_settings.py tests/test_plugin_client_integration.py tests/test_agent_runner_config.py
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/agent_runner tests/test_agent_plugin_settings.py tests/test_plugin_client_integration.py
@@ -402,19 +402,19 @@ git commit -m "feat(plugin): register plugin tools in shadow-safe mode"
 - Test: `tests/test_report_issue_tools_plugin.py`
 - Test: `tests/test_cron_tools_plugin.py`
 
-- [ ] **Step 1: Extract clients without changing direct wrappers**
+- [x] **Step 1: Extract clients without changing direct wrappers**
 
 Move reusable HTTP/file operations into client modules, but keep existing direct tool behavior unchanged.
 
-- [ ] **Step 2: Implement plugin wrappers**
+- [x] **Step 2: Implement plugin wrappers**
 
 Each plugin must expose `register(context)` and return `ToolSpec` objects using the new clients.
 
-- [ ] **Step 3: Test plugin allowlists**
+- [x] **Step 3: Test plugin allowlists**
 
 Use `PluginContext(agent_id="cio", ...)` and assert only allowed agents receive tools.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -426,7 +426,7 @@ PYTHONPATH=. pytest \
   tests/test_cron_tools_plugin.py
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugins src/agent_runner/tools tests/test_*_tools_plugin.py
@@ -450,15 +450,15 @@ git commit -m "feat(plugin): add core operational tool plugins"
 - Test: `tests/test_contacts_tools_plugin.py`
 - Test: `tests/test_email_digest_tools_plugin.py`
 
-- [ ] **Step 1: Extract clients from existing MT wrappers**
+- [x] **Step 1: Extract clients from existing MT wrappers**
 
 Preserve existing MT behavior and imports. Plugin clients should call the same underlying CalDAV, contacts, and email digest code paths.
 
-- [ ] **Step 2: Add MT-only plugin manifests**
+- [x] **Step 2: Add MT-only plugin manifests**
 
 Use `allowed_agents: [mt]`.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -472,7 +472,7 @@ PYTHONPATH=. pytest \
   tests/test_mt_tools.py
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add plugins src/agent_runner/tools tests/test_calendar_tools_plugin.py tests/test_contacts_tools_plugin.py tests/test_email_digest_tools_plugin.py
@@ -489,15 +489,15 @@ git commit -m "feat(plugin): add MT productivity plugins"
 - Modify: `src/agent_runner/tools/perplexity_search.py`
 - Test: `tests/test_perplexity_tools_plugin.py`
 
-- [ ] **Step 1: Extract Perplexity client**
+- [x] **Step 1: Extract Perplexity client**
 
 Keep the existing direct search tool working. The plugin should call the same client module.
 
-- [ ] **Step 2: Add plugin tests**
+- [x] **Step 2: Add plugin tests**
 
 Mock the HTTP call and assert the plugin returns a `ToolSpec` named consistently with the existing direct tool.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -505,7 +505,7 @@ Run:
 PYTHONPATH=. pytest tests/test_perplexity_tools_plugin.py
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add plugins/perplexity-tools src/agent_runner/tools/perplexity_client.py src/agent_runner/tools/perplexity_search.py tests/test_perplexity_tools_plugin.py
@@ -523,7 +523,7 @@ git commit -m "feat(plugin): add Perplexity search plugin"
 - Test: `tests/test_plugin_directory_contract.py`
 - Test: `tests/test_plugin_tool_inventory.py`
 
-- [ ] **Step 1: Package plugins**
+- [x] **Step 1: Package plugins**
 
 Add to `Dockerfile`:
 
@@ -533,11 +533,11 @@ COPY plugins/ ./plugins/
 
 Do not remove any existing `COPY` for current source, vendor, mailctl, html-text, migrations, or skills.
 
-- [ ] **Step 2: Add inventory tests**
+- [x] **Step 2: Add inventory tests**
 
 Assert plugin manifests are valid and no plugin attempts to shadow a direct tool unless explicitly allowlisted.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -548,7 +548,7 @@ PYTHONPATH=. pytest \
   tests/test_plugin_tool_inventory.py
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Dockerfile plugins/README.md docs/jarvisos-plugin-layout.md tests/test_docker_plugin_packaging.py tests/test_plugin_directory_contract.py tests/test_plugin_tool_inventory.py
@@ -561,7 +561,7 @@ git commit -m "chore(plugin): package plugins and document inventory"
 
 - No production source changes unless tests expose a specific bug.
 
-- [ ] **Step 1: Run focused plugin suite**
+- [x] **Step 1: Run focused plugin suite**
 
 ```bash
 PYTHONPATH=. pytest \
@@ -583,7 +583,7 @@ PYTHONPATH=. pytest \
 
 Expected: all pass.
 
-- [ ] **Step 2: Run live-regression guard suite**
+- [x] **Step 2: Run live-regression guard suite**
 
 ```bash
 PYTHONPATH=. pytest \
@@ -602,7 +602,7 @@ PYTHONPATH=. pytest \
 
 Expected: all pass. Any failure here blocks merge because it indicates a live regression.
 
-- [ ] **Step 3: Build image locally**
+- [x] **Step 3: Build image locally**
 
 ```bash
 docker build -t 10.10.200.61:5000/jarvios-platform:plugin-forward-port .
@@ -610,7 +610,7 @@ docker build -t 10.10.200.61:5000/jarvios-platform:plugin-forward-port .
 
 Expected: build succeeds and `python scripts/gen_supervisord.py` still includes all live agents and workers.
 
-- [ ] **Step 4: Smoke plugin presence in image**
+- [x] **Step 4: Smoke plugin presence in image**
 
 ```bash
 docker run --rm -e PYTHONPATH=/app/src \
@@ -630,7 +630,7 @@ plugin_runtime True
 plugins True
 ```
 
-- [ ] **Step 5: Commit verification docs if needed**
+- [x] **Step 5: Commit verification docs if needed**
 
 If verification reveals no source changes, do not create an empty commit. If a small compatibility fix is needed, commit it with:
 
