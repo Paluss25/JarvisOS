@@ -18,6 +18,7 @@ from agent_runner.memory.open_loop_registry import (
     FRESHNESS_GUARD,
     render_open_loop_context,
 )
+from agent_runner.memory.watchpoint_registry import render_watchpoint_context
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +234,7 @@ def load_workspace_context(workspace_path: str | Path, skills_allowlist: list[st
         - architecture — ARCHITECTURE.md (optional; technical self-knowledge)
         - memory_guard — global instructions for resolving stale memory
         - open_loops   — authoritative structured open-loop state
+        - watchpoints  — strategic non-action watchpoints with decision gates
     """
     root = Path(workspace_path)
 
@@ -245,6 +247,7 @@ def load_workspace_context(workspace_path: str | Path, skills_allowlist: list[st
         "soul":      _read(root / "SOUL.md"),
         "memory_guard": FRESHNESS_GUARD,
         "open_loops": render_open_loop_context(root),
+        "watchpoints": render_watchpoint_context(root),
         "agents":    _read(root / "AGENTS.md"),
         "user":      _read(root / "USER.md"),
         "tools_md":  _read(root / "TOOLS.md"),

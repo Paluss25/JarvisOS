@@ -651,6 +651,7 @@ def _build_system_prompt(ctx: dict) -> str:
         ("soul", "Identity & Soul"),
         ("memory_guard", "Memory Freshness Guard"),
         ("open_loops", "Open Loop Registry"),
+        ("watchpoints", "Watchpoint Registry"),
         ("agents", "Operating Manual"),
         ("user", "About Your User"),
         ("identity", "Self-Image"),
