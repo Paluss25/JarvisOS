@@ -257,6 +257,16 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "panel_type": ("panel_name", "lab_panels"),
     }
 
+    def _references_table(sql_lower: str, table: str) -> bool:
+        return bool(re.search(r"\b(?:from|join)\s+" + re.escape(table) + r"\b", sql_lower))
+
+    def _selects_column(sql_lower: str, column: str) -> bool:
+        select_part = re.split(r"\bfrom\b", sql_lower, maxsplit=1)[0]
+        return bool(
+            re.search(r"(?<![.\w])" + re.escape(column) + r"\b", select_part)
+            or re.search(r"\b\w+\." + re.escape(column) + r"\b", select_part)
+        )
+
     @sdk_tool(
         "health_query",
         "Execute a read-only SELECT query against health databases. "
@@ -283,6 +293,11 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "  activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT session/lap/record/field data linked by activity_id and fit_file_id. "
         "  daily_fit_files, daily_fit_fields, daily_wellness_records, daily_stress_records, daily_respiration_records, daily_sleep_levels, daily_hrv_values, daily_skin_temp_overnight: Garmin daily fitness FIT data linked by date and user_id. "
         "  daily_fitness_enriched (VIEW — use for daily recovery/sleep/HRV queries): date, user_id, daily_fit_file_count, body_battery_am, body_battery_pm, stress_avg, stress_max, hrv_overnight_avg, hrv_status, sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, rhr_overnight, steps, distance_km, active_kcal, active_min, data_quality, min_wellness_hr, avg_wellness_hr, skin_average_deviation_c, skin_average_7_day_deviation_c, skin_nightly_value_c. CRITICAL: the HRV column is hrv_overnight_avg — NEVER use hrv_overnight (does not exist), NEVER use hrv_overnight_ms, NEVER use hrv_overnight_status. Sleep duration column is sleep_duration_min — NEVER use sleep_total_min or total_sleep_min. Status column is hrv_status. rhr_overnight exists. Always alias hrv_overnight_avg in SELECT. "
+        "  whoop_workouts: workout_id, user_id, whoop_user_id, v1_id, sport_name, start_at, end_at, timezone_offset, score_state, strain, average_heart_rate, max_heart_rate, kilojoule, distance_meter, altitude_gain_meter, raw_json, imported_at, updated_at. CRITICAL: use workout_id; id does not exist. "
+        "  whoop_sync_runs: id, user_id, date_from, date_to, started_at, completed_at, status, recoveries_seen, sleeps_seen, cycles_seen, workouts_seen, error_message. CRITICAL: source does not exist; items_synced does not exist. To estimate synced items, sum recoveries_seen + sleeps_seen + cycles_seen + workouts_seen. "
+        "  whoop_sleeps: sleep_id, cycle_id, user_id, whoop_user_id, start_at, end_at, timezone_offset, nap, score_state, sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, respiratory_rate, raw_json, imported_at, updated_at. "
+        "  whoop_cycles: cycle_id, user_id, whoop_user_id, start_at, end_at, timezone_offset, score_state, strain, average_heart_rate, max_heart_rate, kilojoule, raw_json, imported_at, updated_at. "
+        "  whoop_recoveries: cycle_id, sleep_id, user_id, whoop_user_id, score_state, recovery_score, resting_heart_rate, hrv_rmssd_milli, spo2_percentage, skin_temp_celsius, raw_json, imported_at, updated_at. "
         "Only SELECT statements are permitted — DrHouse has read-only access to both databases.",
         {
             "type": "object",
@@ -345,6 +360,18 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             corrections.append(
                 "  'meal_id' on table 'meals' → use 'meals.id' "
                 "(meal_id exists only on meal_items as FK to meals.id)"
+            )
+        if _references_table(sql_lower, "whoop_workouts") and _selects_column(sql_lower, "id"):
+            corrections.append("  'id' on table 'whoop_workouts' → use 'workout_id'")
+        if _references_table(sql_lower, "whoop_sync_runs") and _selects_column(sql_lower, "source"):
+            corrections.append(
+                "  'source' on table 'whoop_sync_runs' → column does not exist "
+                "(use status/error_message, or join/source-specific tables when needed)"
+            )
+        if _references_table(sql_lower, "whoop_sync_runs") and _selects_column(sql_lower, "items_synced"):
+            corrections.append(
+                "  'items_synced' on table 'whoop_sync_runs' → use recoveries_seen, sleeps_seen, cycles_seen, workouts_seen "
+                "(or sum them as items_synced)"
             )
         if corrections:
             return {"content": [{"type": "text", "text": (

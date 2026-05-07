@@ -96,6 +96,18 @@ def test_health_tool_describes_lab_public_schema(tmp_path):
     assert "coh.lab" not in combined
 
 
+def test_health_tool_describes_whoop_schema(tmp_path):
+    server = create_drhouse_mcp_server(tmp_path)
+
+    health_query = next(tool for tool in server._tools if tool.name == "health_query")
+
+    assert "whoop_workouts" in health_query.description
+    assert "workout_id" in health_query.description
+    assert "id does not exist" in health_query.description
+    assert "whoop_sync_runs" in health_query.description
+    assert "items_synced does not exist" in health_query.description
+
+
 @pytest.mark.asyncio
 async def test_health_query_preflights_sleep_total_min_alias(tmp_path):
     server = create_drhouse_mcp_server(tmp_path)
@@ -111,3 +123,37 @@ async def test_health_query_preflights_sleep_total_min_alias(tmp_path):
     text = result["content"][0]["text"]
     assert "'sleep_total_min' → 'sleep_duration_min'" in text
     assert "daily_fitness_enriched" in text
+
+
+@pytest.mark.asyncio
+async def test_health_query_preflights_whoop_workout_id_alias(tmp_path):
+    server = create_drhouse_mcp_server(tmp_path)
+    health_query = next(tool for tool in server._tools if tool.name == "health_query")
+
+    result = await health_query.fn({
+        "database": "sport",
+        "query": "SELECT id, start_at, end_at, sport_name FROM whoop_workouts ORDER BY start_at DESC LIMIT 1",
+        "params": [],
+    })
+
+    assert result["is_error"] is True
+    text = result["content"][0]["text"]
+    assert "'id' on table 'whoop_workouts' → use 'workout_id'" in text
+    assert "whoop_workouts" in text
+
+
+@pytest.mark.asyncio
+async def test_health_query_preflights_whoop_sync_run_columns(tmp_path):
+    server = create_drhouse_mcp_server(tmp_path)
+    health_query = next(tool for tool in server._tools if tool.name == "health_query")
+
+    result = await health_query.fn({
+        "database": "sport",
+        "query": "SELECT started_at, status, source, items_synced FROM whoop_sync_runs ORDER BY started_at DESC LIMIT 1",
+        "params": [],
+    })
+
+    assert result["is_error"] is True
+    text = result["content"][0]["text"]
+    assert "'source' on table 'whoop_sync_runs' → column does not exist" in text
+    assert "'items_synced' on table 'whoop_sync_runs' → use recoveries_seen, sleeps_seen, cycles_seen, workouts_seen" in text
