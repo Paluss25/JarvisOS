@@ -56,6 +56,8 @@ _UNIT_TEST_FILES = {
     "test_plane_client.py",
     "test_plane_plan_parser.py",
     "test_plane_service.py",
+    "test_plugin_manifest.py",
+    "test_plugin_tool_spec.py",
     "test_redaction_engine.py",
     "test_telegram_webhook.py",
     "test_telegram_closure_guard.py",
