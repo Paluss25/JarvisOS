@@ -94,3 +94,20 @@ def test_health_tool_describes_lab_public_schema(tmp_path):
     assert "panel_name" in combined
     assert "panel_type does not exist" in combined
     assert "coh.lab" not in combined
+
+
+@pytest.mark.asyncio
+async def test_health_query_preflights_sleep_total_min_alias(tmp_path):
+    server = create_drhouse_mcp_server(tmp_path)
+    health_query = next(tool for tool in server._tools if tool.name == "health_query")
+
+    result = await health_query.fn({
+        "database": "sport",
+        "query": "SELECT date, sleep_total_min FROM daily_fitness_enriched ORDER BY date DESC LIMIT 1",
+        "params": [],
+    })
+
+    assert result["is_error"] is True
+    text = result["content"][0]["text"]
+    assert "'sleep_total_min' → 'sleep_duration_min'" in text
+    assert "daily_fitness_enriched" in text

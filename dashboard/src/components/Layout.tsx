@@ -2,8 +2,18 @@ import { NavLink, Outlet, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const navItems = [
+  { to: '/control-center', label: 'Control' },
   { to: '/agents', label: 'Agents' },
-  { to: '/missions', label: 'Missions' },
+  { to: '/chat', label: 'Chat' },
+  { to: '/tasks', label: 'Tasks' },
+  { to: '/traces', label: 'Traces' },
+  { to: '/logs', label: 'Logs' },
+  { to: '/incidents', label: 'Incidents' },
+  { to: '/costs', label: 'Costs' },
+  { to: '/decisions', label: 'Decisions' },
+  { to: '/memory', label: 'Memory' },
+  { to: '/plugins', label: 'Plugins' },
+  { to: '/a2a', label: 'A2A' },
   { to: '/activity', label: 'Activity' },
   { to: '/audit', label: 'Audit' },
   { to: '/settings', label: 'Settings' },
@@ -47,7 +57,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className="px-4 py-4 border-t border-gray-800">
-          <p className="text-xs text-gray-500 mb-2">{user.username}</p>
+          <p className="text-xs text-gray-500 mb-2">{user.name || user.email}</p>
           <button
             onClick={logout}
             className="text-xs text-gray-400 hover:text-white transition-colors"
