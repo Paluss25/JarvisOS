@@ -61,6 +61,14 @@ def _mock_response(status_code: int, body: dict):
     return resp
 
 
+def _mock_completed_process(returncode: int, stdout: str = "", stderr: str = ""):
+    proc = MagicMock()
+    proc.returncode = returncode
+    proc.stdout = stdout
+    proc.stderr = stderr
+    return proc
+
+
 def test_sort_email_returns_result():
     payload = {
         "sender": "noreply@example.com",
@@ -69,14 +77,24 @@ def test_sort_email_returns_result():
         "classification": {"primary_domain": "newsletter"},
     }
     expected = {"sorted": True, "folder": "INBOX/Archive"}
-    with patch.object(sorter_mod.httpx, "post", return_value=_mock_response(200, expected)):
+    with patch.object(
+        sorter_mod.subprocess,
+        "run",
+        return_value=_mock_completed_process(0, json.dumps(expected)),
+    ) as run_mock:
         result = sort_email("42", payload)
+    run_mock.assert_called_once()
+    assert run_mock.call_args.args[0][:5] == ["mailctl", "sort", "--account", "protonmail", "--uid"]
     assert result["sorted"] is True
     assert result["folder"] == "INBOX/Archive"
 
 
 def test_sort_email_raises_on_http_error():
     payload = {"sender": "", "subject": "", "body_redacted": "", "classification": {}}
-    with patch.object(sorter_mod.httpx, "post", return_value=_mock_response(500, {})):
-        with pytest.raises(Exception, match="HTTP error"):
+    with patch.object(
+        sorter_mod.subprocess,
+        "run",
+        return_value=_mock_completed_process(1, stderr="mailctl failed"),
+    ):
+        with pytest.raises(RuntimeError, match="mailctl sort failed"):
             sort_email("bad", payload)

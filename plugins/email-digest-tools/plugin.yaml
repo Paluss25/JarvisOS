@@ -1,0 +1,7 @@
+name: email-digest-tools
+version: 1
+entrypoint: plugin.py
+tools:
+  - read_email_digest
+allowed_agents:
+  - mt

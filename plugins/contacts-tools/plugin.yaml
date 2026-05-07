@@ -1,0 +1,11 @@
+name: contacts-tools
+version: 1
+entrypoint: plugin.py
+tools:
+  - contacts_list
+  - contacts_search
+  - contacts_get
+  - contacts_update
+  - contacts_delete
+allowed_agents:
+  - mt

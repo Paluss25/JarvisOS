@@ -1,0 +1,11 @@
+name: calendar-tools
+version: 1
+entrypoint: plugin.py
+tools:
+  - calendar_list
+  - calendar_get_events
+  - calendar_create_event
+  - calendar_update_event
+  - calendar_delete_event
+allowed_agents:
+  - mt
