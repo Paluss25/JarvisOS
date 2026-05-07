@@ -3,7 +3,7 @@
 Tools (P1 skeleton):
   daily_log      — append entry to today's memory log
   memory_search  — text search across MEMORY.md + memory/*.md
-  query_db       — SELECT on chro.* tables
+  query_db       — SELECT on human_res.* tables
 
 Tools (added in P2):
   receive_document  — save uploaded file to NAS /hr-docs/inbox/
@@ -12,7 +12,7 @@ Tools (added in P2):
   classify_document — LLM (Haiku) document type classification
   extract_fields    — LLM (Haiku) structured field extraction with it-IT glossary
   validate_schema   — chro_cpo schema validation
-  save_to_db        — INSERT into chro.* tables
+  save_to_db        — INSERT into human_res.* tables
   archive_doc       — move from inbox/ to archive/YYYY/tipo/
 """
 
@@ -41,6 +41,30 @@ def _parse_args(args) -> dict:
 
 def _text(s: str) -> dict:
     return {"content": [{"type": "text", "text": str(s)}]}
+
+
+_HUMAN_RES_TABLES = (
+    "payslips",
+    "payslip_items",
+    "leave_snapshots",
+    "pension_extracts",
+    "expense_items",
+    "business_trips",
+    "hr_audit_log",
+)
+
+
+def _normalize_chro_sql(sql: str) -> str:
+    """Map legacy schema-qualified CHRO table names to current human_res search_path."""
+    normalized = sql
+    for table in _HUMAN_RES_TABLES:
+        normalized = re.sub(
+            rf"\b(?:human_res|chro)\.{re.escape(table)}\b",
+            table,
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    return normalized
 
 
 try:
@@ -80,15 +104,40 @@ def _coerce_params(params: list | None) -> list | None:
 
 async def _pg_query(sql: str, params: list | None = None) -> list[dict]:
     import asyncpg
-    url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
+    url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("CHRO_DATABASE_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
     if not url:
-        raise RuntimeError("CHRO_POSTGRES_URL (or JARVIOS_POSTGRES_URL) not configured")
+        raise RuntimeError("CHRO_POSTGRES_URL/CHRO_DATABASE_URL (or JARVIOS_POSTGRES_URL) not configured")
     conn = await asyncpg.connect(url)
     try:
-        rows = await conn.fetch(sql, *(_coerce_params(params) or []))
+        rows = await conn.fetch(_normalize_chro_sql(sql), *(_coerce_params(params) or []))
         return [dict(r) for r in rows]
     finally:
         await conn.close()
+
+
+async def _chro_schema(table: str | None = None) -> dict[str, list[str]]:
+    table_filter = "AND table_name = $1" if table else ""
+    params = [table] if table else None
+    rows = await _pg_query(
+        f"""SELECT table_name, column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' {table_filter}
+            ORDER BY table_name, ordinal_position""",
+        params,
+    )
+    schema: dict[str, list[str]] = {}
+    for row in rows:
+        schema.setdefault(row["table_name"], []).append(row["column_name"])
+    return schema
+
+
+def _format_chro_schema(schema: dict[str, list[str]]) -> str:
+    if not schema:
+        return "No human_res tables found in the current database."
+    return "\n".join(
+        f"{table}({', '.join(columns)})"
+        for table, columns in sorted(schema.items())
+    )
 
 
 def _make_audit_entry(
@@ -113,16 +162,16 @@ def _make_audit_entry(
 
 
 async def _write_audit(entry: dict) -> None:
-    """Write one audit log entry to chro.hr_audit_log."""
+    """Write one audit log entry to hr_audit_log."""
     import asyncpg
-    url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
+    url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("CHRO_DATABASE_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
     if not url:
         return
     try:
         conn = await asyncpg.connect(url)
         try:
             await conn.execute(
-                """INSERT INTO chro.hr_audit_log
+                """INSERT INTO hr_audit_log
                    (case_id, agent_id, action, input_hash, output_schema_version, confidence, escalation)
                    VALUES ($1,$2,$3,$4,$5,$6,$7)""",
                 entry["case_id"], entry["agent_id"], entry["action"],
@@ -298,9 +347,17 @@ def archive_document(
 async def _run_payroll_specialist(case) -> dict:
     """Payroll Intelligence Agent — queries payslips DB for the case."""
     rows = await _pg_query(
-        "SELECT id, period_from, period_to, employer, gross_pay, net_pay, irpef_withheld, "
-        "inps_employee, tfr_accrued, leave_residual_days, rol_residual_hours "
-        "FROM chro.payslips ORDER BY period_to DESC LIMIT 6"
+        "SELECT id, "
+        "COALESCE(period_from, make_date(year, month, 1)) AS period_from, "
+        "COALESCE(period_to, (make_date(year, month, 1) + INTERVAL '1 month - 1 day')::date) AS period_to, "
+        "employer, COALESCE(gross_pay, gross_amount) AS gross_pay, "
+        "COALESCE(net_pay, net_amount) AS net_pay, "
+        "COALESCE(irpef_withheld, tax_amount) AS irpef_withheld, "
+        "COALESCE(inps_employee, contribution_amount) AS inps_employee, "
+        "tfr_accrued, leave_residual_days, rol_residual_hours "
+        "FROM payslips "
+        "ORDER BY COALESCE(period_to, (make_date(year, month, 1) + INTERVAL '1 month - 1 day')::date) DESC "
+        "LIMIT 6"
     )
     if not rows:
         return {"agent_id": "payroll_intelligence", "confidence": 0.5,
@@ -341,7 +398,7 @@ async def _run_leave_specialist(case) -> dict:
     rows = await _pg_query(
         "SELECT snapshot_date, ferie_accrued, ferie_used, ferie_remaining, "
         "rol_accrued, rol_used, rol_remaining "
-        "FROM chro.leave_snapshots ORDER BY snapshot_date DESC LIMIT 3"
+        "FROM leave_snapshots ORDER BY snapshot_date DESC LIMIT 3"
     )
     if not rows:
         return {"agent_id": "leave_time_travel", "confidence": 0.5,
@@ -363,7 +420,7 @@ async def _run_pension_specialist(case) -> dict:
     rows = await _pg_query(
         "SELECT document_date, contribution_period, total_contributions, "
         "projected_pension_age, projected_monthly_pension "
-        "FROM chro.pension_extracts ORDER BY document_date DESC LIMIT 2"
+        "FROM pension_extracts ORDER BY document_date DESC LIMIT 2"
     )
     if not rows:
         return {"agent_id": "pension_benefits", "confidence": 0.5,
@@ -462,9 +519,9 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "query_db",
-        "Execute a read-only SELECT query against the chro PostgreSQL schema. "
-        "Tables: chro.payslips, chro.leave_snapshots, chro.pension_extracts, chro.expense_items, chro.hr_audit_log. "
-        "Only SELECT statements are allowed.",
+        "Execute a read-only SELECT query against the human_res PostgreSQL database. "
+        "Only SELECT statements are allowed. Use schema_db first when you are unsure about columns. "
+        "Use live columns from schema_db; expense_items includes amount_eur, currency, description, metadata, reimbursed, and employer_reference where available.",
         {
             "query": str,
             "params": {"type": "array", "items": {}, "default": []},
@@ -484,14 +541,36 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No query provided.")
         if not re.match(r'\s*SELECT\b', sql, re.IGNORECASE):
             return _text("query_db only accepts SELECT statements.")
-        if not re.search(r'\bchro\.', sql, re.IGNORECASE):
-            return _text("query_db only allows queries against the chro schema.")
         try:
             rows = await _pg_query(sql, params or None)
             return {"content": [{"type": "text", "text": json.dumps(rows, default=str, indent=2)}]}
         except Exception as exc:
             logger.error("query_db: error — %s", exc)
-            return {"content": [{"type": "text", "text": f"Query error: {exc}"}], "is_error": True}
+            message = f"Query error: {exc}"
+            if "does not exist" in str(exc).lower():
+                try:
+                    message += "\n\nLive human_res tables:\n" + _format_chro_schema(await _chro_schema())
+                except Exception as schema_exc:
+                    message += f"\n\nCould not load live schema: {schema_exc}"
+            return {"content": [{"type": "text", "text": message}], "is_error": True}
+
+    @sdk_tool(
+        "schema_db",
+        "Return the live PostgreSQL columns for the human_res database. "
+        "Call before query_db if a requested field name is not already known from this output.",
+        {
+            "table": {"type": "string", "default": ""},
+        },
+    )
+    async def schema_db(args: dict) -> dict:
+        args = _parse_args(args)
+        table = (args.get("table") or "").strip().lower() or None
+        try:
+            schema = await _chro_schema(table)
+            return _text(_format_chro_schema(schema))
+        except Exception as exc:
+            logger.error("schema_db: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"Schema error: {exc}"}], "is_error": True}
 
     # ---- Memory read tool ---------------------------------------------------
 
@@ -752,7 +831,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "save_to_db",
-        "INSERT validated extracted fields into the appropriate chro.* table. "
+        "INSERT validated extracted fields into the appropriate human_res.* table. "
         "doc_type: payslip | leave_statement | inps_extract | expense_report | business_trip."
         "fields: the validated JSON object. case_id: UUID string for audit log grouping. "
         "source_file: the NAS path of the original document.",
@@ -796,9 +875,9 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             except (ValueError, TypeError):
                 return uuid.uuid4()
 
-        url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
+        url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("CHRO_DATABASE_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
         if not url:
-            return _text("CHRO_POSTGRES_URL not configured.")
+            return _text("CHRO_POSTGRES_URL/CHRO_DATABASE_URL not configured.")
 
         try:
             conn = await asyncpg.connect(url)
@@ -806,7 +885,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                 async with conn.transaction():
                     if doc_type == "payslip":
                         row = await conn.fetchrow(
-                            """INSERT INTO chro.payslips
+                            """INSERT INTO payslips
                                (period_from, period_to, employer, gross_pay, net_pay,
                                 inps_employee, irpef_withheld, tfr_accrued,
                                 leave_residual_days, rol_residual_hours, raw_json, source_file)
@@ -823,7 +902,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
                     elif doc_type == "leave_statement":
                         row = await conn.fetchrow(
-                            """INSERT INTO chro.leave_snapshots
+                            """INSERT INTO leave_snapshots
                                (snapshot_date, ferie_accrued, ferie_used, ferie_remaining,
                                 rol_accrued, rol_used, rol_remaining)
                                VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -836,7 +915,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
                     elif doc_type == "inps_extract":
                         row = await conn.fetchrow(
-                            """INSERT INTO chro.pension_extracts
+                            """INSERT INTO pension_extracts
                                (document_date, contribution_period, total_contributions,
                                 projected_pension_age, projected_monthly_pension, raw_json, source_file)
                                VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -850,7 +929,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
                     elif doc_type == "expense_report":
                         row = await conn.fetchrow(
-                            """INSERT INTO chro.expense_items
+                            """INSERT INTO expense_items
                                (expense_date, category, amount_eur, reimbursed, employer_reference, trip_id)
                                VALUES ($1,$2,$3,$4,$5,$6)
                                RETURNING id""",
@@ -863,7 +942,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
                     elif doc_type == "business_trip":
                         row = await conn.fetchrow(
-                            """INSERT INTO chro.business_trips
+                            """INSERT INTO business_trips
                                (period_from, period_to, destination, country, project,
                                 aircraft, purpose, notes, raw_json, source_file)
                                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
@@ -880,7 +959,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                         return _text(f"Unknown doc_type: {doc_type}")
 
                     await conn.execute(
-                        """INSERT INTO chro.hr_audit_log
+                        """INSERT INTO hr_audit_log
                            (case_id, agent_id, action, output_schema_version, confidence)
                            VALUES ($1, $2, $3, $4, $5)""",
                         _to_uuid(case_id or record_id), "chro", f"save_to_db:{doc_type}", "1.0",
@@ -927,12 +1006,12 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "write_db",
-        "Unified write tool for chro.* tables — performs INSERT, UPDATE, or DELETE on a single row. "
+        "Unified write tool for human_res.* tables — performs INSERT, UPDATE, or DELETE on a single row. "
         "action: 'insert' | 'update' | 'delete'. "
         "table: payslips | leave_snapshots | pension_extracts | expense_items | business_trips. "
         "id: UUID of the row (REQUIRED for update and delete; optional for insert — when provided on insert, the row is upserted on id). "
         "fields: object {column: value} — REQUIRED for insert and update; ignored for delete. Only writable columns are accepted. "
-        "Returns the affected row id and the operation performed. Auditable: every call writes a chro.hr_audit_log entry.",
+        "Returns the affected row id and the operation performed. Auditable: every call writes a hr_audit_log entry.",
         {
             "type": "object",
             "properties": {
@@ -1000,9 +1079,9 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                 return bool(val)
             return val
 
-        url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
+        url = os.environ.get("CHRO_POSTGRES_URL", "") or os.environ.get("CHRO_DATABASE_URL", "") or os.environ.get("JARVIOS_POSTGRES_URL", "")
         if not url:
-            return _text("CHRO_POSTGRES_URL not configured.")
+            return _text("CHRO_POSTGRES_URL/CHRO_DATABASE_URL not configured.")
 
         whitelist = _WRITABLE_COLUMNS[table]
         rejected = [k for k in fields.keys() if k not in whitelist]
@@ -1014,7 +1093,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                 async with conn.transaction():
                     if action == "delete":
                         result = await conn.execute(
-                            f"DELETE FROM chro.{table} WHERE id = $1",
+                            f"DELETE FROM {table} WHERE id = $1",
                             _to_uuid(row_id),
                         )
                         affected = int(result.split()[-1]) if result else 0
@@ -1025,10 +1104,10 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                             return {"content": [{"type": "text", "text": f"No writable columns in fields. Allowed: {sorted(whitelist)}. Rejected: {rejected}"}], "is_error": True}
                         cols = list(accepted.keys())
                         set_clause = ", ".join(f"{c}=${i+2}" for i, c in enumerate(cols))
-                        sql = f"UPDATE chro.{table} SET {set_clause} WHERE id = $1 RETURNING id"
+                        sql = f"UPDATE {table} SET {set_clause} WHERE id = $1 RETURNING id"
                         row = await conn.fetchrow(sql, _to_uuid(row_id), *[accepted[c] for c in cols])
                         if row is None:
-                            return {"content": [{"type": "text", "text": f"No row in chro.{table} with id={row_id}"}], "is_error": True}
+                            return {"content": [{"type": "text", "text": f"No row in {table} with id={row_id}"}], "is_error": True}
                         record_id = str(row["id"])
                         affected = 1
 
@@ -1042,7 +1121,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                             placeholders_with_id = ", ".join(f"${i+1}" for i in range(len(cols_with_id)))
                             update_clause = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols)
                             sql = (
-                                f"INSERT INTO chro.{table} ({', '.join(cols_with_id)}) "
+                                f"INSERT INTO {table} ({', '.join(cols_with_id)}) "
                                 f"VALUES ({placeholders_with_id}) "
                                 f"ON CONFLICT (id) DO UPDATE SET {update_clause} "
                                 f"RETURNING id"
@@ -1050,7 +1129,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                             row = await conn.fetchrow(sql, _to_uuid(row_id), *[accepted[c] for c in cols])
                         else:
                             sql = (
-                                f"INSERT INTO chro.{table} ({', '.join(cols)}) "
+                                f"INSERT INTO {table} ({', '.join(cols)}) "
                                 f"VALUES ({placeholders}) "
                                 f"RETURNING id"
                             )
@@ -1059,7 +1138,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                         affected = 1
 
                     await conn.execute(
-                        """INSERT INTO chro.hr_audit_log
+                        """INSERT INTO hr_audit_log
                            (case_id, agent_id, action, output_schema_version, confidence)
                            VALUES ($1, $2, $3, $4, $5)""",
                         _to_uuid(case_id or record_id), "chro",
@@ -1204,7 +1283,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         send_message = None
 
     all_tools = [
-        daily_log, memory_search, memory_get, query_db,
+        daily_log, memory_search, memory_get, query_db, schema_db,
         receive_document, extract_text,
         sanitize_pii_tool, classify_document, extract_fields,
         validate_schema, save_to_db, write_db, archive_doc,

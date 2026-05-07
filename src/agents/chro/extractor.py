@@ -5,7 +5,7 @@ JSON schema located at /app/memory/schemas/<doc_type>.json (override via
 CHRO_SCHEMA_DIR).
 
 The LLM call is injected as a coroutine so this module stays independent
-from any specific model wrapper. See `agents.chro.api._llm_call` for the
+from any specific model wrapper. See `agents.human_res.api._llm_call` for the
 production binding.
 """
 from __future__ import annotations

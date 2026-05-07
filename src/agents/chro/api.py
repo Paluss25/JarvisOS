@@ -7,7 +7,7 @@ Pipeline:
     2. Forward to memory-box (/ingest/pdf) for archive + redact (hr profile)
        + embed.
     3. LLM-extract structured fields from the redacted text.
-    4. INSERT into the matching chro.* table (idempotent on file_hash).
+    4. INSERT into the matching human_res.* table (idempotent on file_hash).
     5. Detect anomalies and write hr_audit_log.
 
 The LLM call is performed via the local `claude` CLI in subprocess form

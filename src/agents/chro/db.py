@@ -1,4 +1,4 @@
-"""Async Postgres helpers for chro.* schema.
+"""Async Postgres helpers for the human_res database.
 
 Connection DSN comes from CHRO_DATABASE_URL (preferred) or DATABASE_URL.
 The pool is process-singleton and lazily created on first use.
@@ -19,6 +19,10 @@ import asyncpg
 
 _DSN = os.environ.get("CHRO_DATABASE_URL") or os.environ.get("DATABASE_URL", "")
 _pool: asyncpg.Pool | None = None
+DEFAULT_HR_USER_ID = os.environ.get(
+    "CHRO_DEFAULT_HR_USER_ID",
+    "75f9a1ac-e4ca-41cd-8d2b-1f393db7e732",
+)
 
 
 async def pool() -> asyncpg.Pool:
@@ -33,6 +37,14 @@ async def pool() -> asyncpg.Pool:
     return _pool
 
 
+def resolve_hr_user_id(user_id: str) -> str:
+    """Map friendly CHRO aliases to the UUID used by human_res payslip rows."""
+    normalized = (user_id or "").strip()
+    if normalized.lower() in {"", "paluss", "me", "default"}:
+        return DEFAULT_HR_USER_ID
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # Inserts
 # ---------------------------------------------------------------------------
@@ -41,7 +53,7 @@ async def pool() -> asyncpg.Pool:
 async def insert_payslip(
     fields: dict, archive_path: str, file_hash: str, user_id: str
 ) -> UUID:
-    """Insert a payslip + items into the migrated chro.payslips schema.
+    """Insert a payslip + items into the migrated payslips schema.
 
     Schema (post-migration 002): user_id (UUID), document_id (UUID, optional),
     month, year, employer, employee_name, employee_code, gross_amount,
@@ -52,10 +64,11 @@ async def insert_payslip(
     Idempotent on (user_id, file_hash).
     """
     p = await pool()
+    resolved_user_id = resolve_hr_user_id(user_id)
     async with p.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO chro.payslips
+            INSERT INTO payslips
               (user_id, month, year, employer, employee_name, employee_code,
                gross_amount, net_amount, tax_amount, contribution_amount,
                status, extraction_confidence, extraction_metadata, notes,
@@ -64,7 +77,7 @@ async def insert_payslip(
             ON CONFLICT (user_id, file_hash) DO NOTHING
             RETURNING id
             """,
-            user_id,
+            resolved_user_id,
             fields["month"], fields["year"],
             fields.get("employer"), fields.get("employee_name"), fields.get("employee_code"),
             fields.get("gross_amount"), fields["net_amount"],
@@ -77,8 +90,8 @@ async def insert_payslip(
         )
         if row is None:
             existing = await conn.fetchrow(
-                "SELECT id FROM chro.payslips WHERE user_id = $1 AND file_hash = $2",
-                user_id, file_hash,
+                "SELECT id FROM payslips WHERE user_id = $1 AND file_hash = $2",
+                resolved_user_id, file_hash,
             )
             return existing["id"]
 
@@ -89,7 +102,7 @@ async def insert_payslip(
         for item in fields.get("items", []):
             await conn.execute(
                 """
-                INSERT INTO chro.payslip_items
+                INSERT INTO payslip_items
                   (payslip_id, item_type, item_category, description, amount,
                    quantity, rate, metadata)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -106,12 +119,13 @@ async def insert_payslip(
 async def insert_expense(
     fields: dict, archive_path: str, file_hash: str, user_id: str
 ) -> UUID:
-    """Insert into chro.expense_items. Idempotent on (user_id, file_hash)."""
+    """Insert into expense_items. Idempotent on (user_id, file_hash)."""
     p = await pool()
+    resolved_user_id = resolve_hr_user_id(user_id)
     async with p.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO chro.expense_items
+            INSERT INTO expense_items
               (user_id, expense_date, category, amount_eur,
                reimbursement_status, employer_ref, notes,
                archive_path, file_hash)
@@ -119,7 +133,7 @@ async def insert_expense(
             ON CONFLICT (user_id, file_hash) DO NOTHING
             RETURNING id
             """,
-            user_id,
+            resolved_user_id,
             fields["expense_date"], fields.get("category"),
             fields["amount_eur"], fields.get("reimbursement_status", "pending"),
             fields.get("employer_ref"), fields.get("notes"),
@@ -127,8 +141,8 @@ async def insert_expense(
         )
         if row is None:
             existing = await conn.fetchrow(
-                "SELECT id FROM chro.expense_items WHERE user_id = $1 AND file_hash = $2",
-                user_id, file_hash,
+                "SELECT id FROM expense_items WHERE user_id = $1 AND file_hash = $2",
+                resolved_user_id, file_hash,
             )
             return existing["id"]
         return row["id"]
@@ -137,12 +151,13 @@ async def insert_expense(
 async def insert_contract(
     fields: dict, archive_path: str, file_hash: str, user_id: str
 ) -> UUID:
-    """Insert into chro.contracts. Idempotent on (user_id, file_hash)."""
+    """Insert into contracts. Idempotent on (user_id, file_hash)."""
     p = await pool()
+    resolved_user_id = resolve_hr_user_id(user_id)
     async with p.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO chro.contracts
+            INSERT INTO contracts
               (user_id, contract_type, employer, role,
                start_date, end_date, gross_yearly,
                archive_path, file_hash, extracted_metadata)
@@ -150,7 +165,7 @@ async def insert_contract(
             ON CONFLICT (user_id, file_hash) DO NOTHING
             RETURNING id
             """,
-            user_id,
+            resolved_user_id,
             fields.get("contract_type"), fields.get("employer"),
             fields.get("role"), fields.get("start_date"), fields.get("end_date"),
             fields.get("gross_yearly"),
@@ -159,8 +174,8 @@ async def insert_contract(
         )
         if row is None:
             existing = await conn.fetchrow(
-                "SELECT id FROM chro.contracts WHERE user_id = $1 AND file_hash = $2",
-                user_id, file_hash,
+                "SELECT id FROM contracts WHERE user_id = $1 AND file_hash = $2",
+                resolved_user_id, file_hash,
             )
             return existing["id"]
         return row["id"]
@@ -169,27 +184,28 @@ async def insert_contract(
 async def insert_leonardo_doc(
     fields: dict, archive_path: str, file_hash: str, user_id: str
 ) -> UUID:
-    """Insert into chro.leonardo_docs. Idempotent on (user_id, file_hash)."""
+    """Insert into leonardo_docs. Idempotent on (user_id, file_hash)."""
     p = await pool()
+    resolved_user_id = resolve_hr_user_id(user_id)
     async with p.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO chro.leonardo_docs
+            INSERT INTO leonardo_docs
               (user_id, title, doc_date, tags,
                archive_path, file_hash, qdrant_collection)
             VALUES ($1,$2,$3,$4,$5,$6,$7)
             ON CONFLICT (user_id, file_hash) DO NOTHING
             RETURNING id
             """,
-            user_id,
+            resolved_user_id,
             fields.get("title"), fields.get("doc_date"),
             fields.get("tags", []),
             archive_path, file_hash, "documentazione-leonardo",
         )
         if row is None:
             existing = await conn.fetchrow(
-                "SELECT id FROM chro.leonardo_docs WHERE user_id = $1 AND file_hash = $2",
-                user_id, file_hash,
+                "SELECT id FROM leonardo_docs WHERE user_id = $1 AND file_hash = $2",
+                resolved_user_id, file_hash,
             )
             return existing["id"]
         return row["id"]
@@ -207,12 +223,12 @@ async def write_audit(
     archive_path: str | None,
     metadata: dict,
 ) -> None:
-    """Append-only insert into chro.hr_audit_log."""
+    """Append-only insert into hr_audit_log."""
     p = await pool()
     async with p.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO chro.hr_audit_log
+            INSERT INTO hr_audit_log
               (agent, action, document_hash, archive_path, metadata)
             VALUES ($1, $2, $3, $4, $5)
             """,
@@ -223,18 +239,19 @@ async def write_audit(
 async def fetch_recent_payslips(user_id: str, limit: int = 6) -> list[dict[str, Any]]:
     """Return the most recent N payslips for a user, newest first."""
     p = await pool()
+    resolved_user_id = resolve_hr_user_id(user_id)
     async with p.acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT id, month, year, employer, employee_name,
                    gross_amount, net_amount, tax_amount, contribution_amount,
                    status, archive_path
-            FROM chro.payslips
+            FROM payslips
             WHERE user_id = $1
             ORDER BY year DESC, month DESC
             LIMIT $2
             """,
-            user_id, limit,
+            resolved_user_id, limit,
         )
         return [dict(r) for r in rows]
 
@@ -243,17 +260,18 @@ async def fetch_recent_expenses(
     user_id: str, limit: int = 24
 ) -> list[dict[str, Any]]:
     p = await pool()
+    resolved_user_id = resolve_hr_user_id(user_id)
     async with p.acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT id, expense_date, category, amount_eur,
                    reimbursement_status, employer_ref, notes, archive_path
-            FROM chro.expense_items
+            FROM expense_items
             WHERE user_id = $1
             ORDER BY expense_date DESC
             LIMIT $2
             """,
-            user_id, limit,
+            resolved_user_id, limit,
         )
         return [dict(r) for r in rows]
 
@@ -262,17 +280,18 @@ async def fetch_recent_contracts(
     user_id: str, limit: int = 24
 ) -> list[dict[str, Any]]:
     p = await pool()
+    resolved_user_id = resolve_hr_user_id(user_id)
     async with p.acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT id, contract_type, employer, role,
                    start_date, end_date, gross_yearly, archive_path
-            FROM chro.contracts
+            FROM contracts
             WHERE user_id = $1
             ORDER BY start_date DESC NULLS LAST
             LIMIT $2
             """,
-            user_id, limit,
+            resolved_user_id, limit,
         )
         return [dict(r) for r in rows]
 
@@ -281,15 +300,16 @@ async def fetch_recent_leonardo_docs(
     user_id: str, limit: int = 24
 ) -> list[dict[str, Any]]:
     p = await pool()
+    resolved_user_id = resolve_hr_user_id(user_id)
     async with p.acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT id, title, doc_date, tags, archive_path
-            FROM chro.leonardo_docs
+            FROM leonardo_docs
             WHERE user_id = $1
             ORDER BY doc_date DESC NULLS LAST
             LIMIT $2
             """,
-            user_id, limit,
+            resolved_user_id, limit,
         )
         return [dict(r) for r in rows]

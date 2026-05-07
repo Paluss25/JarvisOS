@@ -2,7 +2,7 @@
 
 Each detector is a pure function that returns a list of
 {severity, code, message[, escalate_to]} dicts. Persisted into
-chro.hr_audit_log.metadata['anomalies'] by the API layer.
+hr_audit_log.metadata['anomalies'] by the API layer.
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def detect_payslip_anomalies(
 ) -> list[dict]:
     """Compare the freshly-extracted payslip against the most recent prior.
 
-    Field names follow the new chro.payslips schema (net_amount,
+    Field names follow the new payslips schema (net_amount,
     contribution_amount). For backward-compatibility we also accept the
     legacy aliases (net_pay, inps_employee).
     """
