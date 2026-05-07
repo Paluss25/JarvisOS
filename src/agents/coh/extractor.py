@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -26,12 +27,17 @@ _PROMPT_LAB_PANEL = (
     "You are extracting structured lab panel data from an Italian referto di "
     "analisi cliniche. PII (patient name, CF) is already redacted as "
     "[*_REDACTED]. Doctor name, lab name, and clinical values are intact. "
+    "All human-facing names MUST be in Italiano. Non tradurre i nomi degli "
+    "esami/parametri in inglese: when the source label is Italian, preserve "
+    "that Italian label; when the source is ambiguous, prefer the standard "
+    "Italian clinical name. "
     "Extract JSON with these fields: "
-    "panel_name (string, e.g. 'Emocromo completo'), "
+    "panel_name (string in Italian, e.g. 'Emocromo completo'), "
     "lab_name (string), physician (string|null), "
     "collection_date (YYYY-MM-DD, prelievo), "
     "report_date (YYYY-MM-DD, referto emesso), "
-    "values: array of {{parameter_name, value (number or null), "
+    "values: array of {{parameter_name (Italian display name), "
+    "value (number or null), "
     "value_text (string for non-numeric like 'Negativo'), "
     "unit (string), ref_range_low (number|null), ref_range_high (number|null), "
     "notes (string|null)}}.\n\n"
@@ -54,6 +60,82 @@ _PROMPT_MEDICAL_REPORT = (
 LlmCallable = Callable[[str], Awaitable[str]]
 
 
+_PANEL_NAME_IT = {
+    "comprehensive hematology and chemistry panel": (
+        "Pannello ematologico e chimico completo"
+    ),
+    "hematology and chemistry panel": "Pannello ematologico e chimico",
+    "blood chemistry panel": "Pannello ematochimico",
+    "blood panel": "Esami del sangue",
+    "blood test": "Esami del sangue",
+    "complete blood count": "Emocromo completo",
+    "cbc": "Emocromo completo",
+    "lipid panel": "Profilo lipidico",
+    "thyroid panel": "Profilo tiroideo",
+    "liver function panel": "Funzionalita epatica",
+    "renal function panel": "Funzionalita renale",
+    "urinalysis": "Esame urine",
+    "urine test": "Esame urine",
+}
+
+_PARAMETER_NAME_IT = {
+    "white blood cells": "Leucociti",
+    "wbc": "Leucociti",
+    "red blood cells": "Eritrociti",
+    "rbc": "Eritrociti",
+    "hemoglobin": "Emoglobina",
+    "haemoglobin": "Emoglobina",
+    "hematocrit": "Ematocrito",
+    "haematocrit": "Ematocrito",
+    "platelets": "Piastrine",
+    "neutrophils": "Neutrofili",
+    "lymphocytes": "Linfociti",
+    "monocytes": "Monociti",
+    "eosinophils": "Eosinofili",
+    "basophils": "Basofili",
+    "glucose": "Glicemia",
+    "fasting glucose": "Glicemia",
+    "total cholesterol": "Colesterolo totale",
+    "hdl cholesterol": "Colesterolo HDL",
+    "ldl cholesterol": "Colesterolo LDL",
+    "triglycerides": "Trigliceridi",
+    "creatinine": "Creatinina",
+    "estimated glomerular filtration rate": "eGFR",
+    "egfr": "eGFR",
+    "urea": "Urea",
+    "blood urea nitrogen": "Azotemia",
+    "bun": "Azotemia",
+    "uric acid": "Acido urico",
+    "ast": "AST",
+    "alt": "ALT",
+    "ggt": "Gamma GT",
+    "gamma gt": "Gamma GT",
+    "alkaline phosphatase": "Fosfatasi alcalina",
+    "total bilirubin": "Bilirubina totale",
+    "direct bilirubin": "Bilirubina diretta",
+    "indirect bilirubin": "Bilirubina indiretta",
+    "tsh": "TSH",
+    "ft3": "FT3",
+    "ft4": "FT4",
+    "vitamin d": "Vitamina D",
+    "25-oh vitamin d": "Vitamina D",
+    "25 oh vitamin d": "Vitamina D",
+    "25-hydroxyvitamin d": "Vitamina D",
+    "ferritin": "Ferritina",
+    "iron": "Sideremia",
+    "transferrin": "Transferrina",
+    "sodium": "Sodio",
+    "potassium": "Potassio",
+    "calcium": "Calcio",
+    "magnesium": "Magnesio",
+    "c-reactive protein": "Proteina C reattiva",
+    "crp": "Proteina C reattiva",
+    "erythrocyte sedimentation rate": "VES",
+    "esr": "VES",
+    "psa": "PSA",
+}
+
+
 def load_schema(name: str) -> dict[str, Any]:
     return json.loads((SCHEMA_DIR / f"{name}.json").read_text(encoding="utf-8"))
 
@@ -71,6 +153,35 @@ def _strip_code_fences(raw: str) -> str:
     return raw
 
 
+def _canonical_label(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value).strip().lower().replace("_", " "))
+
+
+def _normalize_lab_panel_names(fields: dict[str, Any]) -> dict[str, Any]:
+    """Keep Gestionale clinical labels in Italian despite LLM translation."""
+    panel_name = fields.get("panel_name")
+    if panel_name is not None:
+        fields["panel_name"] = _PANEL_NAME_IT.get(
+            _canonical_label(panel_name),
+            panel_name,
+        )
+
+    values = fields.get("values")
+    if isinstance(values, list):
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            parameter_name = item.get("parameter_name")
+            if parameter_name is None:
+                continue
+            item["parameter_name"] = _PARAMETER_NAME_IT.get(
+                _canonical_label(parameter_name),
+                parameter_name,
+            )
+
+    return fields
+
+
 async def extract_lab_panel(
     redacted_text: str, llm_call: LlmCallable
 ) -> dict[str, Any]:
@@ -79,6 +190,7 @@ async def extract_lab_panel(
     raw = await llm_call(prompt)
     raw = _strip_code_fences(raw)
     fields = json.loads(raw)
+    fields = _normalize_lab_panel_names(fields)
 
     try:
         import jsonschema  # type: ignore

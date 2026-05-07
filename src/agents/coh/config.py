@@ -12,7 +12,7 @@ DRHOUSE_BUILTIN_CRONS = [
         "prompt": (
             "Morning infrastructure check for COH. Verify: "
             "1. NutritionDirector (DON) is reachable — send_message(to='don', message='ping') and check response. "
-            "2. COH database connections (run a health_query to confirm nutrition_data is accessible). "
+            "2. COH database connections (run a health_query to confirm health is accessible). "
             "3. Yesterday's COH activity log — any errors or anomalies? "
             "Produce a concise status (under 100 words)."
         ),
@@ -26,8 +26,8 @@ DRHOUSE_BUILTIN_CRONS = [
         "prompt": (
             "Morning health briefing. Aggregate and synthesize a concise integrated health brief (under 200 words):\n"
             "1. Today's training plan from Roger (use send_message to ask Roger for today's session)\n"
-            "2. Nutrition targets for the day (query nutrition_data for active goals and today's macro targets)\n"
-            "3. Body composition trend — last 7 days (query sport_metrics body_measurements)\n"
+            "2. Nutrition targets for the day (query health for active goals and today's macro targets)\n"
+            "3. Body composition trend — last 7 days (query sport body_measurements)\n"
             "4. Any active health flags or medical notes from MEMORY.md\n"
             "Highlight conflicts between training load and nutrition (e.g. deficit on high-intensity day). "
             "Be directive and concise. "
@@ -42,7 +42,7 @@ DRHOUSE_BUILTIN_CRONS = [
         "schedule": "daily@23:30",
         "prompt": (
             "End-of-day health consolidation. Review today's data across all domains:\n"
-            "1. Meals logged (query nutrition_data meals for today)\n"
+            "1. Meals logged (query health meals for today)\n"
             "2. Training completed or skipped (use send_message to Roger for today's activity)\n"
             "3. Recovery indicators — sleep, HRV, readiness if available\n"
             "4. Cross-domain conflicts or flags (e.g. insufficient protein on training day)\n"

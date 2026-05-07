@@ -4,7 +4,7 @@ Tools:
   daily_log              — Append entry to today's memory log
   memory_search          — Text search across MEMORY.md + memory/*.md
   memory_get             — Read a specific memory file from workspace
-  health_query           — Arbitrary SELECT queries against nutrition_data OR sport_metrics
+  health_query           — Arbitrary SELECT queries against health OR sport
   get_meals              — Typed: meals by date range + optional meal_type filter
   get_body_measurements  — Typed: body measurements by date range
   get_daily_nutrition    — Typed: daily_summaries by date range
@@ -250,19 +250,23 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "end_date": ("active_to", "nutrition_goals"),
         "valid_from": ("active_from", "nutrition_goals"),
         "valid_to": ("active_to", "nutrition_goals"),
+        # health DB — lab_panels (medical lab schema)
+        "panel_type": ("panel_name", "lab_panels"),
     }
 
     @sdk_tool(
         "health_query",
         "Execute a read-only SELECT query against health databases. "
-        "database: 'nutrition' — queries nutrition_data PostgreSQL. "
+        "database: 'nutrition' — queries health PostgreSQL public schema. "
         "  meals: id, date (DATE), meal_type, description, calories_est, protein_g, carbs_g, fat_g, confidence_score, image_ref, notes, created_at, user_id. "
         "  food_library: id, name, brand, category, serving_size, serving_unit, kcal_per_100, protein_per_100, carbs_per_100, fat_per_100, fiber_per_100, sugar_per_100. "
         "  meal_items: item_id (UUID), meal_id, food_name, canonical_name, portion_g, calories, protein, carbs, fat, match_confidence. "
         "  daily_summaries: date (DATE), total_calories, total_protein, total_carbs, total_fat, meals_logged, training_day. "
         "  nutrition_goals: goal_id (UUID), target_calories, target_protein, target_carbs, target_fat, goal_type, active_from, active_to. "
         "  user_corrections: correction_id (UUID), meal_id, original_food, corrected_food, original_portion_g, corrected_portion_g. "
-        "database: 'sport' — queries sport_metrics PostgreSQL. "
+        "  lab_panels: id (UUID), user_id, panel_name, lab_name, physician, collection_date, report_date, archive_path, file_hash, qdrant_collection, extracted_metadata, created_at. CRITICAL: use panel_name; panel_type does not exist. "
+        "  lab_values: id (UUID), panel_id, parameter_name, value, value_text, unit, ref_range_low, ref_range_high, abnormal_flag, notes, created_at. Join lab_values.panel_id to lab_panels.id. Do not schema-qualify lab tables with legacy schema names; medical tables live in the public schema. "
+        "database: 'sport' — queries sport PostgreSQL. "
         "  activities: id, source, type, date (DATE), duration_min, distance_km, avg_hr, max_hr, calories, load_score, elevation_gain_m, avg_cadence, suffer_score, strava_activity_id. "
         "  body_measurements: id, date (DATE), weight_kg, bmi, body_fat_pct, muscle_rate_pct, fat_free_weight_kg, subcutaneous_fat_pct, visceral_fat, body_water_pct, skeletal_muscle_pct, muscle_mass_kg, bone_mass_kg, protein_pct, bmr_kcal, body_age. "
         "  waist_measurements: id, date (DATE), waist_cm, notes, user_id. "
@@ -275,7 +279,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "  activity_fit_files: id, activity_id, user_id, source_path, file_sha256, manufacturer, product, serial_number, time_created, imported_at, raw_summary_json. "
         "  activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT session/lap/record/field data linked by activity_id and fit_file_id. "
         "  daily_fit_files, daily_fit_fields, daily_wellness_records, daily_stress_records, daily_respiration_records, daily_sleep_levels, daily_hrv_values, daily_skin_temp_overnight: Garmin daily fitness FIT data linked by date and user_id. "
-        "  daily_fitness_enriched (VIEW — use for daily recovery/sleep/HRV queries): date, user_id, daily_fit_file_count, body_battery_am, body_battery_pm, stress_avg, stress_max, hrv_overnight_avg, hrv_status, sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, rhr_overnight, steps, distance_km, active_kcal, active_min, data_quality, min_wellness_hr, avg_wellness_hr, skin_average_deviation_c, skin_average_7_day_deviation_c, skin_nightly_value_c. NOTE: hrv column is hrv_overnight_avg (integer ms), status column is hrv_status — no _ms suffix, no hrv_overnight_status. "
+        "  daily_fitness_enriched (VIEW — use for daily recovery/sleep/HRV queries): date, user_id, daily_fit_file_count, body_battery_am, body_battery_pm, stress_avg, stress_max, hrv_overnight_avg, hrv_status, sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, rhr_overnight, steps, distance_km, active_kcal, active_min, data_quality, min_wellness_hr, avg_wellness_hr, skin_average_deviation_c, skin_average_7_day_deviation_c, skin_nightly_value_c. CRITICAL: the HRV column is hrv_overnight_avg — NEVER use hrv_overnight (does not exist), NEVER use hrv_overnight_ms, NEVER use hrv_overnight_status. Status column is hrv_status. rhr_overnight exists. Always alias hrv_overnight_avg in SELECT. "
         "Only SELECT statements are permitted — DrHouse has read-only access to both databases.",
         {
             "type": "object",
@@ -752,7 +756,8 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "lab_query",
-        "Deterministic SQL query of lab values from coh.lab_panels and coh.lab_values. "
+        "Deterministic SQL query of lab values from public.lab_panels and public.lab_values. "
+        "Use panel_name for panel metadata; panel_type does not exist. "
         "Use this when the user asks for a specific parameter trend or current value. "
         "Returns time series sorted by collection_date DESC.",
         {

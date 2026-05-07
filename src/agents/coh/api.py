@@ -7,11 +7,11 @@ Pipeline:
     2. Forward to memory-box (/ingest/pdf) for archive + redact (medical
        profile) + embed.
     3. LLM-extract structured fields from the redacted text.
-    4. INSERT into the matching coh.* table (idempotent on file_hash).
-    5. Write coh.medical_audit_log.
+    4. INSERT into the matching public medical table (idempotent on file_hash).
+    5. Write public.medical_audit_log.
 
 The LLM call is performed via the local `claude` CLI in subprocess form
-(same pattern used by agents.chro.api and
+(same pattern used by agents.human_res.api and
 agent_runner.memory.pipeline.extractor) — no agent_runner.llm wrapper
 exists in this codebase.
 """
@@ -50,7 +50,7 @@ DEFAULT_ARCHIVE_DIRS = {
 async def _llm_call(prompt: str) -> str:
     """Run extraction through the local `claude` CLI (OAuth, no API cost).
 
-    Mirrors the subprocess pattern used by agents.chro.api._llm_call. The
+    Mirrors the subprocess pattern used by agents.human_res.api._llm_call. The
     schema-bounded JSON extraction does not need the agent-class model, so
     we pick the haiku-class fallback by default. Override via
     COH_EXTRACTOR_MODEL → CLAUDE_FALLBACK_MODEL → claude-haiku-4-5-20251001.
@@ -139,7 +139,7 @@ async def coh_ingest(
     redacted_text = mb.get("redacted_text", "")
     archive_path = mb.get("archive_path")
 
-    # Step 2 + 3: extract structured fields, insert into coh.*
+    # Step 2 + 3: extract structured fields, insert into public medical tables.
     document_id: Any
     if collection == "analisi-cliniche":
         try:

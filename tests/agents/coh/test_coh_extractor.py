@@ -59,6 +59,43 @@ async def test_extract_lab_panel_strips_code_fences():
 
 
 @pytest.mark.asyncio
+async def test_extract_lab_panel_normalizes_english_exam_names_to_italian():
+    """Clinical exam labels stored for Gestionale must be Italian, even if
+    the LLM translates them to English."""
+    sample = (
+        "{"
+        '"panel_name": "Comprehensive Hematology and Chemistry Panel",'
+        '"lab_name": "Ce.Di.S.",'
+        '"physician": null,'
+        '"collection_date": "2026-05-04",'
+        '"report_date": "2026-05-05",'
+        '"values": ['
+        '{"parameter_name": "White blood cells", "value": 5.9, "unit": "K/uL",'
+        '"ref_range_low": 4, "ref_range_high": 11},'
+        '{"parameter_name": "Total cholesterol", "value": 218, "unit": "mg/dL",'
+        '"ref_range_low": null, "ref_range_high": 200},'
+        '{"parameter_name": "Vitamin D", "value": 26.3, "unit": "ng/mL",'
+        '"ref_range_low": 30, "ref_range_high": 100}'
+        "]"
+        "}"
+    )
+
+    async def fake_llm(prompt: str) -> str:
+        assert "Italiano" in prompt
+        assert "Non tradurre" in prompt
+        return sample
+
+    out = await extractor.extract_lab_panel("dummy", fake_llm)
+
+    assert out["panel_name"] == "Pannello ematologico e chimico completo"
+    assert [v["parameter_name"] for v in out["values"]] == [
+        "Leucociti",
+        "Colesterolo totale",
+        "Vitamina D",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_extract_medical_report():
     """Plain JSON output must validate against the medical_report schema."""
     sample = (
