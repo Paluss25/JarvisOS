@@ -1,29 +1,22 @@
-"""Direct Anthropic claude-haiku calls for hybrid worker sub-agents."""
+"""Claude CLI completions for hybrid worker sub-agents (uses OAuth, no API key needed)."""
 
-import os
-
-import anthropic
-
-_MODEL = "claude-haiku-4-5-20251001"
-_client: anthropic.AsyncAnthropic | None = None
-
-
-def _get_client() -> anthropic.AsyncAnthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    return _client
+import asyncio
+import subprocess
 
 
 async def complete(prompt: str, system: str = "") -> str:
-    """Single-turn completion with haiku. Returns the text response."""
-    client = _get_client()
-    kwargs: dict = {
-        "model": _MODEL,
-        "max_tokens": 1024,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    if system:
-        kwargs["system"] = system
-    msg = await client.messages.create(**kwargs)
-    return msg.content[0].text if msg.content else ""
+    """Single-turn completion via the claude CLI. Returns the text response."""
+    full_prompt = f"{system}\n\n{prompt}" if system else prompt
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: subprocess.run(
+            ["claude", "-p", full_prompt, "--output-format", "text"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        ),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"claude CLI error (rc={result.returncode}): {result.stderr.strip()[:300]}")
+    return result.stdout.strip()
