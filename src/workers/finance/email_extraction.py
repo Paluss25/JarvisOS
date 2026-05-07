@@ -5,6 +5,7 @@ Writes extracted transactions to YNAB (whitelist-routed) and the CFO ledger.
 """
 
 import hashlib
+import html as html_lib
 import logging
 import os
 import re
@@ -12,6 +13,7 @@ import subprocess
 import time
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from html.parser import HTMLParser
 
 import httpx
 from fastapi import APIRouter
@@ -28,6 +30,28 @@ _YNAB_TIMEOUT = 15.0
 
 # Italian bank email patterns
 _MONTHS_IT = r"(?:gen|feb|mar|apr|mag|giu|lug|ago|set|ott|nov|dic|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+_MONTH_NUMBERS = {
+    "gen": "01",
+    "jan": "01",
+    "feb": "02",
+    "mar": "03",
+    "apr": "04",
+    "mag": "05",
+    "may": "05",
+    "giu": "06",
+    "jun": "06",
+    "lug": "07",
+    "jul": "07",
+    "ago": "08",
+    "aug": "08",
+    "set": "09",
+    "sep": "09",
+    "ott": "10",
+    "oct": "10",
+    "nov": "11",
+    "dic": "12",
+    "dec": "12",
+}
 
 # Each entry: (pattern, direction, amount_group_index, payee_group_index)
 _PATTERNS: list[tuple[re.Pattern, str, int, int]] = [
@@ -103,6 +127,19 @@ _PAYPAL_PREFIX_RE = re.compile(r"paypal\s{2,}(.+)", re.I)
 _FAVORE_DI_RE = re.compile(r"(?:pagamento\s+a\s+)?favore\s+di\s+", re.I)
 
 
+class _TextNodeParser(HTMLParser):
+    """Collect text nodes from transactional email templates."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.nodes: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        text = re.sub(r"\s+", " ", html_lib.unescape(str(data or ""))).strip()
+        if text:
+            self.nodes.append(text)
+
+
 def _normalize_payee(raw: str) -> str:
     # PayPal pass-through: extract merchant from "PAYPAL  MERCHANT" suffix
     pp = _PAYPAL_PREFIX_RE.match(raw)
@@ -137,6 +174,7 @@ def _strip_html(text: str) -> str:
     """Convert HTML to plain text via html-text CLI if body looks like HTML."""
     if not re.search(r"<(?:html|body|div|p|table|td|span)\b", text, re.I):
         return text
+    amex_transaction = _extract_amex_transaction_from_html(text)
     try:
         result = subprocess.run(
             ["html-text", "extract", "-", "--format", "text"],
@@ -145,10 +183,49 @@ def _strip_html(text: str) -> str:
             timeout=10,
         )
         if result.returncode == 0:
-            return result.stdout.decode("utf-8", errors="replace").strip()
+            stdout = result.stdout.decode("utf-8", errors="replace") if isinstance(result.stdout, bytes) else str(result.stdout)
+            stripped = stdout.strip()
+            if amex_transaction and amex_transaction not in stripped:
+                return f"{amex_transaction}\n\n{stripped}".strip()
+            return stripped
     except Exception as exc:
         logger.warning("html-text conversion failed: %s", exc)
+    if amex_transaction:
+        return amex_transaction
     return text
+
+
+def _extract_amex_transaction_from_html(text: str) -> str:
+    """Recover AmEx transaction details from templates that html-text flattens poorly."""
+    raw_html = str(text or "")
+    if "american express" not in raw_html.lower() and "conferma operazione" not in raw_html.lower():
+        return ""
+
+    parser = _TextNodeParser()
+    try:
+        parser.feed(raw_html)
+    except Exception as exc:
+        logger.warning("AmEx HTML text-node parsing failed: %s", exc)
+        return ""
+
+    date_payee = ""
+    amount = ""
+    date_payee_re = re.compile(r"^\d{1,2}\s+[A-Za-zÀ-ÿ]{3,}\s+\d{4}\s+.+")
+    amount_re = re.compile(r"^€\s*[0-9.]+,[0-9]{2}$")
+
+    for idx, node in enumerate(parser.nodes):
+        if not date_payee and date_payee_re.match(node):
+            date_payee = node
+            for following in parser.nodes[idx + 1 : idx + 6]:
+                if amount_re.match(following):
+                    amount = following.replace(" ", "")
+                    break
+        if date_payee and amount:
+            break
+
+    if not date_payee or not amount:
+        return ""
+    return f"Conferma Operazione\n{date_payee} {amount}"
 
 
 def _parse_amount(s: str) -> float:
@@ -158,6 +235,18 @@ def _parse_amount(s: str) -> float:
         return float(cleaned)
     except ValueError:
         return 0.0
+
+
+def _parse_date_from_text(text: str) -> str | None:
+    """Parse a date-line prefix such as '6 mag 2026' to YYYY-MM-DD."""
+    match = re.search(rf"\b(\d{{1,2}})\s+({_MONTHS_IT})\s+(\d{{4}})\b", text, re.I)
+    if not match:
+        return None
+    day, month_token, year = match.groups()
+    month = _MONTH_NUMBERS.get(month_token.lower()[:3])
+    if not month:
+        return None
+    return f"{year}-{month}-{int(day):02d}"
 
 
 def _email_to_ledger_payload(
@@ -487,7 +576,7 @@ async def analyze(task: TaskEnvelope) -> dict:
                     "amount": _parse_amount(amount_str),
                     "direction": direction,
                     "currency": "EUR",
-                    "date": None,
+                    "date": _parse_date_from_text(match.group(0)),
                     "method": "regex",
                 })
     transactions = _dedupe_transactions(transactions)

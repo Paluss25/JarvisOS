@@ -307,6 +307,35 @@ def test_regex_amex_pattern_extracts_merchant_and_amount():
     assert direction == "outflow"
 
 
+def test_strip_html_preserves_amex_details_when_html_text_drops_template(monkeypatch):
+    """Direct finance-worker ingestion of AmEx HTML must still expose the date-line."""
+    from workers.finance import email_extraction
+
+    amex_html = """
+    <html><body>
+      <table><tr><td>Conferma Operazione</td></tr></table>
+      <table>
+        <tr><td>Dettagli operazione</td></tr>
+        <tr><td>6 mag 2026 EASYPARKITA</td></tr>
+        <tr><td>EUR</td><td>€1,41</td></tr>
+      </table>
+      <p>Attenzione: Questa mail e una comunicazione di servizio.</p>
+    </body></html>
+    """
+
+    class _Process:
+        returncode = 0
+        stdout = "Attenzione: Questa mail e una comunicazione di servizio.\n"
+        stderr = ""
+
+    monkeypatch.setattr(email_extraction.subprocess, "run", lambda *_args, **_kwargs: _Process())
+
+    text = email_extraction._strip_html(amex_html)
+
+    assert "Conferma Operazione" in text
+    assert "6 mag 2026 EASYPARKITA €1,41" in text
+
+
 def test_normalize_payee_amazon_variants():
     from workers.finance.email_extraction import _normalize_payee
 
@@ -442,6 +471,7 @@ async def test_analyze_amex_email_extracts_amazon_payee(monkeypatch):
     assert tx["payee"] == "Amazon"
     assert tx["amount"] == pytest.approx(28.19)
     assert tx["direction"] == "outflow"
+    assert tx["date"] == "2026-04-21"
     assert result["ynab_inserted"] == 1
     ynab_args = ynab_call.call_args
     assert ynab_args.kwargs["ynab_account_id"] == "2609b853-bc94-4e26-bd97-6e1b81d17ead"

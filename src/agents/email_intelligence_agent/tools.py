@@ -18,11 +18,15 @@ Domain-specific tools:
 """
 
 import asyncio
+import html as html_lib
 import json
 import logging
 import os
+import re
+import subprocess
 import uuid
 import fcntl
+from html.parser import HTMLParser
 from pathlib import Path
 
 import httpx
@@ -39,6 +43,19 @@ from security.audit_writer import AuditWriter
 from security.config_loader import load_all
 
 logger = logging.getLogger(__name__)
+
+
+class _TextNodeParser(HTMLParser):
+    """Collect text nodes from transactional email templates."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.nodes: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        text = re.sub(r"\s+", " ", html_lib.unescape(str(data or ""))).strip()
+        if text:
+            self.nodes.append(text)
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +80,78 @@ def _text(s: str) -> dict:
     so every tool MUST return a dict — never a bare string.
     """
     return {"content": [{"type": "text", "text": str(s)}]}
+
+
+def _html_to_text(html: str) -> str:
+    """Convert HTML email body to text with the JarvisOS html-text CLI."""
+    html = str(html or "").strip()
+    if not html:
+        return ""
+    try:
+        result = subprocess.run(
+            ["html-text", "extract", "-", "--format", "text"],
+            input=html.encode("utf-8"),
+            capture_output=True,
+            timeout=float(os.environ.get("EIA_HTML_TEXT_TIMEOUT_S", "10")),
+        )
+    except Exception as exc:
+        logger.warning("html-text conversion failed — %s", exc)
+        return ""
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else str(result.stderr)
+        logger.warning("html-text conversion failed with code %s — %s", result.returncode, stderr[:200])
+        return ""
+    stdout = result.stdout.decode("utf-8", errors="replace") if isinstance(result.stdout, bytes) else str(result.stdout)
+    return stdout.strip()
+
+
+def _extract_amex_transaction_from_html(html: str) -> str:
+    """Recover AmEx transaction details from templates that html-text flattens poorly."""
+    raw_html = str(html or "")
+    if "american express" not in raw_html.lower() and "conferma operazione" not in raw_html.lower():
+        return ""
+
+    parser = _TextNodeParser()
+    try:
+        parser.feed(raw_html)
+    except Exception as exc:
+        logger.warning("AmEx HTML text-node parsing failed — %s", exc)
+        return ""
+
+    date_payee = ""
+    amount = ""
+    date_payee_re = re.compile(r"^\d{1,2}\s+[A-Za-zÀ-ÿ]{3,}\s+\d{4}\s+.+")
+    amount_re = re.compile(r"^€\s*[0-9.]+,[0-9]{2}$")
+
+    for idx, node in enumerate(parser.nodes):
+        if not date_payee and date_payee_re.match(node):
+            date_payee = node
+            for following in parser.nodes[idx + 1 : idx + 6]:
+                if amount_re.match(following):
+                    amount = following.replace(" ", "")
+                    break
+        if date_payee and amount:
+            break
+
+    if not date_payee or not amount:
+        return ""
+    return f"Conferma Operazione\n{date_payee} {amount}"
+
+
+def _email_text_from_parts(body: str = "", html: str = "") -> str:
+    """Return best available plain text for an email.
+
+    mailctl often returns transactional templates with empty text body and a
+    populated HTML body. Prefer explicit body, then fall back to html-text.
+    """
+    body = str(body or "").strip()
+    if body and body != "(empty body)":
+        return body
+    extracted = _html_to_text(html)
+    amex_transaction = _extract_amex_transaction_from_html(html)
+    if amex_transaction and amex_transaction not in extracted:
+        return f"{amex_transaction}\n\n{extracted}".strip()
+    return extracted or body
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +427,11 @@ async def _dispatch_to_cfo_worker(
     if enabled not in {"1", "true", "yes"}:
         return
 
-    base_url = os.environ.get("CFO_FINANCE_WORKER_URL", "http://cfo-finance-workers:8000").rstrip("/")
+    base_url = (
+        os.environ.get("CFO_FINANCE_WORKER_URL")
+        or os.environ.get("CFO_FINANCE_WORKERS_URL")
+        or "http://cfo-finance-workers:8000"
+    ).rstrip("/")
     token = os.environ.get("CFO_CLI_TOKEN", "")
     timeout = float(os.environ.get("EIA_FINANCE_AUTOFORWARD_TIMEOUT_S", "20"))
 
@@ -662,9 +755,23 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
         "then pass them here. Returns a full EmailIntelligencePayload with classification, "
         "security signals, routing decision, policy decision, and redaction metadata. "
         "'account' must be 'protonmail' or 'gmx'. "
+        "If the text body is empty, pass the raw HTML body in 'html' so EIA can convert it with html-text. "
         "Optional sender and received_at fields are propagated into the payload. "
         "'attachments_json' is an optional JSON array of {filename, mime_type, size_bytes} objects.",
-        {"email_id": str, "account": str, "subject": str, "body": str, "attachments_json": str, "sender": str, "received_at": str},
+        {
+            "type": "object",
+            "properties": {
+                "email_id": {"type": "string"},
+                "account": {"type": "string"},
+                "subject": {"type": "string"},
+                "body": {"type": "string"},
+                "html": {"type": "string"},
+                "attachments_json": {"type": "string"},
+                "sender": {"type": "string"},
+                "received_at": {"type": "string"},
+            },
+            "required": ["email_id", "account"],
+        },
     )
     async def process_email(args: dict) -> dict:
         args = _parse_args(args)
@@ -674,7 +781,7 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("email_id and account are required.")
 
         subject = args.get("subject", "").strip() or ""
-        body = args.get("body", "").strip() or ""
+        body = _email_text_from_parts(args.get("body", ""), args.get("html", ""))
 
         attachments: list = []
         attachments_raw = (args.get("attachments_json") or "").strip()
@@ -732,6 +839,7 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
         "Use `mailctl list` and `mailctl read` to fetch unread emails first, "
         "then pass the result as a JSON array via 'emails_json'. Each item must have: "
         "email_id (str), account ('protonmail'|'gmx'), subject (str), body (str). "
+        "Items may include html (str); EIA converts html to text when body is empty. "
         "Optional sender and received_at fields are propagated. "
         "'max_emails' caps how many are processed (default 20). "
         "Successfully classified, allowed emails are appended to the MT digest "
@@ -759,7 +867,7 @@ def create_email_intelligence_mcp_server(workspace_path: Path, redis_a2a=None):
             email_id = str(item.get("email_id", "")).strip()
             account = str(item.get("account", "")).strip()
             subject = str(item.get("subject", "")).strip() or "(no subject)"
-            body = str(item.get("body", "")).strip() or "(empty body)"
+            body = _email_text_from_parts(item.get("body", ""), item.get("html", "")) or "(empty body)"
             sender = str(item.get("sender", "")).strip()
             received_at = str(item.get("received_at", "")).strip()
             if not email_id or not account:

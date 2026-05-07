@@ -21,9 +21,10 @@ async def _emailintel_a2a_fast_path(payload: dict) -> dict | None:
             _compute_action_hint,
             _write_to_digest,
             _dispatch_to_cfo_worker,
+            _email_text_from_parts,
         )
         email_id = payload.get("email_id", "")
-        body = payload.get("body", "(empty body)")
+        body = _email_text_from_parts(payload.get("body", ""), payload.get("html", "")) or "(empty body)"
         subject = payload.get("subject", "(no subject)")
         received_at = payload.get("received_at", "")
         result = await asyncio.to_thread(

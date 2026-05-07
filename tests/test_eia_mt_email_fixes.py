@@ -240,3 +240,107 @@ def test_quarantine_email_uses_mailctl_move(tmp_path, monkeypatch):
         "Quarantine",
         "--json",
     ]
+
+
+def test_process_email_uses_html_text_when_body_is_empty(tmp_path, monkeypatch):
+    """HTML-only AmEx messages must not enter the pipeline as '(empty body)'."""
+    from agents.email_intelligence_agent import tools as eia_tools
+    from agents.email_intelligence_agent.tools import create_email_intelligence_mcp_server
+
+    digest_path = tmp_path / "mt_digest.json"
+    monkeypatch.setenv("MT_DIGEST_PATH", str(digest_path))
+
+    class _Process:
+        returncode = 0
+        stdout = "Conferma Operazione\n6 mag 2026 ESSELUNGA €42,10\n"
+        stderr = ""
+
+    def _run(cmd, **kwargs):
+        assert cmd == ["html-text", "extract", "-", "--format", "text"]
+        assert b"ESSELUNGA" in kwargs["input"]
+        return _Process()
+
+    captured = {}
+
+    def _pipeline(**kwargs):
+        captured["pipeline_body"] = kwargs["body"]
+        return {
+            "email_id": kwargs["email_id"],
+            "account": kwargs["account"],
+            "sender": kwargs["sender"],
+            "received_at": kwargs["received_at"],
+            "subject": kwargs["subject"],
+            "body_redacted": kwargs["body"],
+            "classification": {
+                "primary_domain": "finance",
+                "sensitivity": "public",
+                "risk_level": "low",
+                "priority": "high",
+                "confidence": 1.0,
+                "ynab_account_id": "2609b853-bc94-4e26-bd97-6e1b81d17ead",
+                "ynab_account_source": "static",
+                "subject_must_match": "conferma operazione",
+                "body_account_map": None,
+            },
+            "policy": {"decision": "allow", "allow": True, "constraints": []},
+            "routing": {"route_to": "local", "reason": "test"},
+            "redaction": {"applied": False, "items_redacted": []},
+        }
+
+    async def _dispatch(**kwargs):
+        captured["dispatch_text"] = kwargs["email_text"]
+
+    monkeypatch.setattr(eia_tools.subprocess, "run", _run)
+    monkeypatch.setattr(eia_tools, "_run_security_pipeline", _pipeline)
+    monkeypatch.setattr(eia_tools, "_dispatch_to_cfo_worker", _dispatch)
+
+    server = create_email_intelligence_mcp_server(tmp_path)
+    process_email = _tool(server, "process_email").fn
+
+    response = asyncio.run(
+        process_email({
+            "email_id": "pm-amex-html",
+            "account": "protonmail",
+            "subject": "Conferma Operazione",
+            "body": "",
+            "html": "<html><body><p>6 mag 2026 ESSELUNGA €42,10</p></body></html>",
+            "sender": "AmericanExpress@welcome.americanexpress.com",
+            "received_at": "2026-05-06T18:00:00+00:00",
+        })
+    )
+
+    assert response["content"][0]["text"]
+    assert captured["pipeline_body"] == "Conferma Operazione\n6 mag 2026 ESSELUNGA €42,10"
+    assert captured["dispatch_text"] == "Conferma Operazione\n6 mag 2026 ESSELUNGA €42,10"
+    digest_entry = json.loads(digest_path.read_text(encoding="utf-8").splitlines()[0])
+    assert digest_entry["mt_action_hint"] == "forward_to_cfo"
+
+
+def test_email_text_from_parts_preserves_amex_details_when_html_text_drops_template(monkeypatch):
+    """AmEx templates can hide the transaction table from generic html-text extraction."""
+    from agents.email_intelligence_agent import tools as eia_tools
+    from agents.email_intelligence_agent.tools import _email_text_from_parts
+
+    amex_html = """
+    <html><body>
+      <table><tr><td>Conferma Operazione</td></tr></table>
+      <table>
+        <tr><td>Dettagli operazione</td></tr>
+        <tr><td>6 mag 2026 EASYPARKITA</td></tr>
+        <tr><td>EUR</td><td>€1,41</td></tr>
+      </table>
+      <p>Attenzione: Questa mail e una comunicazione di servizio.</p>
+    </body></html>
+    """
+
+    class _Process:
+        returncode = 0
+        stdout = "Attenzione: Questa mail e una comunicazione di servizio.\n"
+        stderr = ""
+
+    monkeypatch.setattr(eia_tools.subprocess, "run", lambda *_args, **_kwargs: _Process())
+
+    text = _email_text_from_parts("", amex_html)
+
+    assert "Conferma Operazione" in text
+    assert "6 mag 2026 EASYPARKITA €1,41" in text

@@ -156,6 +156,46 @@ async def test_dispatch_to_cfo_worker_posts_to_finance_worker(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dispatch_to_cfo_worker_uses_plural_live_env(monkeypatch):
+    """Live docker-compose exports CFO_FINANCE_WORKERS_URL, not the singular name."""
+    monkeypatch.delenv("CFO_FINANCE_WORKER_URL", raising=False)
+    monkeypatch.setenv("CFO_FINANCE_WORKERS_URL", "http://localhost:8010")
+    monkeypatch.setenv("EIA_FINANCE_AUTOFORWARD_ENABLED", "true")
+
+    from unittest.mock import AsyncMock, patch
+    from agents.email_intelligence_agent import tools as eia_tools
+
+    fake_response = AsyncMock()
+    fake_response.raise_for_status = lambda: None
+    fake_response.json = lambda: {"transaction_count": 1, "ynab_inserted": 1}
+
+    captured = {}
+
+    async def fake_post(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        return fake_response
+
+    fake_client = AsyncMock()
+    fake_client.post = fake_post
+    fake_client.__aenter__.return_value = fake_client
+    fake_client.__aexit__.return_value = None
+
+    with patch.object(eia_tools.httpx, "AsyncClient", return_value=fake_client):
+        await eia_tools._dispatch_to_cfo_worker(
+            email_id="email-live-env",
+            received_at="2026-05-06T10:00:00+00:00",
+            subject="Conferma Operazione",
+            email_text="6 mag 2026 EASYPARKITA €1,41",
+            ynab_account_id="2609b853-bc94-4e26-bd97-6e1b81d17ead",
+            ynab_account_source="static",
+            subject_must_match="conferma operazione",
+            body_account_map=None,
+        )
+
+    assert captured["url"] == "http://localhost:8010/email-transaction-extraction/analyze"
+
+
+@pytest.mark.asyncio
 async def test_dispatch_to_cfo_worker_disabled_when_env_false(monkeypatch):
     """When EIA_FINANCE_AUTOFORWARD_ENABLED=false, dispatch is a no-op."""
     monkeypatch.setenv("EIA_FINANCE_AUTOFORWARD_ENABLED", "false")
