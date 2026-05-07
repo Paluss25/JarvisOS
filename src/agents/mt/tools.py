@@ -958,7 +958,7 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "sync_training_week",
-        "Sync a week's training plan from sport_metrics DB to the TrainingPlan Radicale calendar. "
+        "Sync a week's training plan from sport DB to the TrainingPlan Radicale calendar. "
         "Reads rows from training_plan table, computes real dates, and upserts CalDAV events. "
         "week_number is the ISO week number (1-53). year defaults to current year if omitted.",
         {

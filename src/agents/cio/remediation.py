@@ -152,9 +152,9 @@ class RemediationEngine:
         import asyncpg
         env_map = {
             "sport": "SPORT_POSTGRES_URL",
-            "sport_metrics": "SPORT_POSTGRES_URL",
+            "sport": "SPORT_POSTGRES_URL",
             "nutrition": "NUTRITION_POSTGRES_URL",
-            "nutrition_data": "NUTRITION_POSTGRES_URL",
+            "health": "NUTRITION_POSTGRES_URL",
             "gestionale": "GESTIONALE_POSTGRES_URL",
             "cedolino": "CEDOLINO_POSTGRES_URL",
             "jarvios": "JARVIOS_POSTGRES_URL",

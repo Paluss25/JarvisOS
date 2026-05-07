@@ -4,9 +4,9 @@ Tools:
   daily_log          — Append entry to today's memory log
   memory_search      — Text search across MEMORY.md + memory/*.md
   memory_get         — Read a specific memory file from workspace
-  nutrition_query    — SELECT queries against nutrition_data PostgreSQL DB
-  nutrition_execute  — INSERT/UPDATE/DELETE operations on nutrition_data
-  nutrition_ddl      — CREATE/ALTER schema changes on nutrition_data (bootstrap only)
+  nutrition_query    — SELECT queries against health PostgreSQL DB
+  nutrition_execute  — INSERT/UPDATE/DELETE operations on health
+  nutrition_ddl      — CREATE/ALTER schema changes on health (bootstrap only)
   analyze_meal_image — Placeholder: delegates to Claude Vision API (P6)
   lookup_barcode     — Placeholder: delegates to Open Food Facts API (P5)
   search_fatsecret   — FatSecret Platform API food search (OAuth2)
@@ -88,7 +88,7 @@ def _coerce_params(params: list | None) -> list | None:
 
 
 async def _pg_query(sql: str, params: list | None = None) -> list[dict]:
-    """Run a SELECT query against nutrition_data and return rows as list of dicts."""
+    """Run a SELECT query against health and return rows as list of dicts."""
     import asyncpg
     url = os.environ.get("NUTRITION_POSTGRES_URL", "")
     if not url:
@@ -103,7 +103,7 @@ async def _pg_query(sql: str, params: list | None = None) -> list[dict]:
 
 
 async def _pg_run(sql: str, params: list | None = None) -> str:
-    """Run a DML/DDL statement against nutrition_data and return a status string."""
+    """Run a DML/DDL statement against health and return a status string."""
     import asyncpg
     url = os.environ.get("NUTRITION_POSTGRES_URL", "")
     if not url:
@@ -233,7 +233,7 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "nutrition_query",
-        "Execute a SELECT query against the nutrition_data PostgreSQL database. "
+        "Execute a SELECT query against the health PostgreSQL database. "
         "  meals: id, date (DATE), meal_type, description, calories_est, protein_g, carbs_g, fat_g, confidence_score, image_ref, notes, created_at, user_id. "
         "  food_library: id, name, brand, category, serving_size, serving_unit, kcal_per_100, protein_per_100, carbs_per_100, fat_per_100, fiber_per_100, sugar_per_100. "
         "  meal_items: item_id (UUID), meal_id, food_name, canonical_name, portion_g, calories, protein, carbs, fat, match_confidence. "
@@ -266,7 +266,7 @@ def create_nutrition_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "nutrition_execute",
-        "Execute an INSERT, UPDATE, or DELETE on the nutrition_data database. "
+        "Execute an INSERT, UPDATE, or DELETE on the health database. "
         "Use for logging meals and any custom nutrition tables. Returns affected row count.",
         {"sql": str, "params": {"type": "array", "items": {}, "default": []}},
     )

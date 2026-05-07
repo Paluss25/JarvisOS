@@ -4,7 +4,7 @@ Handles:
 - Automatic token refresh (writes new tokens back to .env)
 - Activity summary download via /activities/{id}
 - Raw streams download via /activities/{id}/streams
-- INSERT into sport_metrics.activities (PostgreSQL)
+- INSERT into sport.activities (PostgreSQL)
 - Parquet export to workspace/knowledge/strava_data/
 """
 
@@ -199,7 +199,7 @@ async def _fetch_streams(activity_id: int, token: str) -> dict:
 
 async def _save_to_postgres(summary: dict, user_id: int) -> tuple[int | None, str]:
     """
-    Insert activity into sport_metrics.activities.
+    Insert activity into sport.activities.
     Returns (db_id, status) where status is 'inserted' or 'already_exists'.
     """
     from agents.dos.tools import _pg_execute

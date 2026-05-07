@@ -1652,7 +1652,7 @@ async def _cmd_profilo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def _cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/adduser <telegram_chat_id> <name> — register a new user in sport_metrics."""
+    """/adduser <telegram_chat_id> <name> — register a new user in sport."""
     config = context.bot_data.get("config")
     if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
         return

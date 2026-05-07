@@ -1,4 +1,4 @@
-"""MealLogAgent — persists FusedResult to the nutrition_data PostgreSQL database."""
+"""MealLogAgent — persists FusedResult to the health PostgreSQL database."""
 
 import logging
 import os
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class MealLogAgent:
-    """Persists a FusedResult into PostgreSQL nutrition_data tables."""
+    """Persists a FusedResult into PostgreSQL health tables."""
 
     def __init__(self):
         self._dsn = os.environ.get("NUTRITION_POSTGRES_URL", "")

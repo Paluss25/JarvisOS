@@ -503,7 +503,7 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "pg_query",
         "Run a read-only SELECT query against a named PostgreSQL database. "
-        "db: one of 'sport_metrics', 'nutrition_data', 'gestionale', 'cedolino', 'jarvios'. "
+        "db: one of 'sport', 'health', 'gestionale', 'cedolino', 'jarvios'. "
         "sql: a SELECT statement. "
         "params: optional list of query parameters (for $1/$2 placeholders). "
         "Returns rows as JSON. Use this to check DB health, counts, or diagnose data issues.",
@@ -530,8 +530,8 @@ def create_timothy_mcp_server(workspace_path: Path, redis_a2a=None):
         params = raw_params if isinstance(raw_params, list) else []
 
         DB_URLS = {
-            "sport_metrics": os.environ.get("SPORT_POSTGRES_URL", ""),
-            "nutrition_data": os.environ.get("NUTRITION_POSTGRES_URL", ""),
+            "sport": os.environ.get("SPORT_POSTGRES_URL", ""),
+            "health": os.environ.get("NUTRITION_POSTGRES_URL", ""),
             "gestionale": os.environ.get("GESTIONALE_POSTGRES_URL", ""),
             "cedolino": os.environ.get("CEDOLINO_POSTGRES_URL", ""),
             "jarvios": os.environ.get("JARVIOS_POSTGRES_URL", ""),
