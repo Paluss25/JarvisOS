@@ -367,6 +367,32 @@ def _compute_action_hint(payload: dict) -> str:
     risk = str(classification.get("risk_level", "low")).lower()
     security = payload.get("security_signals", {})
 
+    # User-defined sender policy overrides must beat generic security words.
+    # WHOOP and routine Cloudflare/IO notifications are intentionally not COS work.
+    if "whoop.com" in sender:
+        return "archive"
+
+    if "cloudflare" in sender:
+        service_problem_markers = (
+            "incident", "outage", "degraded", "service problem", "problem detected",
+            "origin error", "error rate", "failed", "failure", "downtime",
+        )
+        if any(marker in text for marker in service_problem_markers):
+            return "forward_to_cio"
+        return "archive"
+
+    if "io.italia.it" in sender and "accesso sull'app io" in text:
+        return "archive"
+
+    if "gse.it" in sender and any(marker in text for marker in ("redditi diversi", "fiscale", "certificazione")):
+        return "create_task"
+
+    if "finecobank.com" in sender or "fineconews.com" in sender:
+        return "archive"
+
+    if "leonardo.com" in sender and any(marker in text for marker in ("esami", "referti", "analisi")):
+        return "create_task"
+
     security_auth_markers = (
         "sign-in", "sign in", "accesso", "spid", "password",
         "certificate transparency", "new login", "login alert",

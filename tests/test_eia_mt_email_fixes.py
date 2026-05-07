@@ -141,7 +141,7 @@ def test_action_hint_archives_known_marketing_even_when_classifier_overstates_ri
     assert _compute_action_hint(payload) == "archive"
 
 
-def test_action_hint_keeps_security_auth_events_for_cos():
+def test_action_hint_archives_whoop_security_alerts():
     from agents.email_intelligence_agent.tools import _compute_action_hint
 
     payload = {
@@ -156,6 +156,31 @@ def test_action_hint_keeps_security_auth_events_for_cos():
         },
         "classification": {
             "primary_domain": "general",
+            "sensitivity": "critical",
+            "risk_level": "critical",
+            "priority": "urgent",
+            "confidence": 0.0,
+        },
+    }
+
+    assert _compute_action_hint(payload) == "archive"
+
+
+def test_action_hint_keeps_aruba_spid_events_for_cos():
+    from agents.email_intelligence_agent.tools import _compute_action_hint
+
+    payload = {
+        "sender": "Aruba ID <comunicazioni@staff.aruba.it>",
+        "subject": "SPID Aruba ID - Modifica la tua password",
+        "body_redacted": "(empty body)",
+        "policy": {"decision": "allow", "allow": True},
+        "security_signals": {
+            "prompt_injection_risk": "none",
+            "suspicious_links": [],
+            "blocked_attachments": [],
+        },
+        "classification": {
+            "primary_domain": "notification",
             "sensitivity": "critical",
             "risk_level": "critical",
             "priority": "urgent",
@@ -189,6 +214,150 @@ def test_action_hint_does_not_create_task_for_unparsed_amex_confirmation():
     }
 
     assert _compute_action_hint(payload) == "archive"
+
+
+def test_action_hint_archives_io_login_notifications():
+    from agents.email_intelligence_agent.tools import _compute_action_hint
+
+    payload = {
+        "sender": "IO - l'app dei servizi pubblici <noreply@io.italia.it>",
+        "subject": "È stato eseguito l'accesso sull'app IO",
+        "body_redacted": "(empty body)",
+        "policy": {"decision": "allow", "allow": True},
+        "security_signals": {
+            "prompt_injection_risk": "none",
+            "suspicious_links": [],
+            "blocked_attachments": [],
+        },
+        "classification": {
+            "primary_domain": "notification",
+            "sensitivity": "public",
+            "risk_level": "low",
+            "priority": "normal",
+            "confidence": 0.0,
+        },
+    }
+
+    assert _compute_action_hint(payload) == "archive"
+
+
+def test_action_hint_archives_cloudflare_certificate_transparency_notifications():
+    from agents.email_intelligence_agent.tools import _compute_action_hint
+
+    payload = {
+        "sender": "Cloudflare <noreply@cloudflare.com>",
+        "subject": "Certificate transparency monitoring for prova9x.com",
+        "body_redacted": "A certificate has been logged for prova9x.com.",
+        "policy": {"decision": "allow", "allow": True},
+        "security_signals": {
+            "prompt_injection_risk": "none",
+            "suspicious_links": [],
+            "blocked_attachments": [],
+        },
+        "classification": {
+            "primary_domain": "notification",
+            "sensitivity": "public",
+            "risk_level": "low",
+            "priority": "normal",
+            "confidence": 0.0,
+        },
+    }
+
+    assert _compute_action_hint(payload) == "archive"
+
+
+def test_action_hint_routes_cloudflare_service_problems_to_cio():
+    from agents.email_intelligence_agent.tools import _compute_action_hint
+
+    payload = {
+        "sender": "Cloudflare <noreply@cloudflare.com>",
+        "subject": "Cloudflare service problem detected",
+        "body_redacted": "Origin error rate is elevated for prova9x.com.",
+        "policy": {"decision": "allow", "allow": True},
+        "security_signals": {
+            "prompt_injection_risk": "none",
+            "suspicious_links": [],
+            "blocked_attachments": [],
+        },
+        "classification": {
+            "primary_domain": "infrastructure",
+            "sensitivity": "internal",
+            "risk_level": "medium",
+            "priority": "high",
+            "confidence": 0.5,
+        },
+    }
+
+    assert _compute_action_hint(payload) == "forward_to_cio"
+
+
+def test_action_hint_creates_task_for_gse_fiscal_notice():
+    from agents.email_intelligence_agent.tools import _compute_action_hint
+
+    payload = {
+        "sender": "GSE <noreply@gse.it>",
+        "subject": "Comunicazione Redditi diversi 2025",
+        "body_redacted": "(empty body)",
+        "policy": {"decision": "allow", "allow": True},
+        "classification": {
+            "primary_domain": "general",
+            "sensitivity": "internal",
+            "risk_level": "low",
+            "priority": "normal",
+            "confidence": 0.0,
+        },
+    }
+
+    assert _compute_action_hint(payload) == "create_task"
+
+
+def test_action_hint_creates_task_for_health_exam_notice():
+    from agents.email_intelligence_agent.tools import _compute_action_hint
+
+    payload = {
+        "sender": "emiliano.paluzzi@leonardo.com",
+        "subject": "I: Esami Paluzzi",
+        "body_redacted": "In allegato referti esami del sangue.",
+        "policy": {"decision": "allow", "allow": True},
+        "classification": {
+            "primary_domain": "general",
+            "sensitivity": "confidential",
+            "risk_level": "medium",
+            "priority": "normal",
+            "confidence": 0.1,
+        },
+    }
+
+    assert _compute_action_hint(payload) == "create_task"
+
+
+def test_mt_digest_prompt_handles_forward_to_cio():
+    from agents.mt.config import MT_BUILTIN_CRONS
+
+    digest_prompt = next(cron["prompt"] for cron in MT_BUILTIN_CRONS if cron["name"] == "digest_poll")
+
+    assert "'forward_to_cio'" in digest_prompt
+    assert "send_message(to='cio'" in digest_prompt
+
+
+def test_sorting_rules_archive_deescalated_notification_senders():
+    sys.path.insert(0, str(Path(__file__).parent.parent / "vendor" / "mailctl" / "src"))
+    from mailctl.sorting import evaluate_rules
+
+    rules_path = Path(__file__).parent.parent / "src" / "agents" / "cos" / "sorting_rules.yaml"
+
+    assert evaluate_rules(
+        {"sender": "support@whoop.com", "subject": "New Sign-In Alert", "body": ""},
+        rules_path,
+    ) == "Archive"
+    assert evaluate_rules(
+        {"sender": "Cloudflare <noreply@cloudflare.com>", "subject": "Certificate transparency monitoring", "body": ""},
+        rules_path,
+    ) == "Archive"
+    assert evaluate_rules(
+        {"sender": "IO <noreply@io.italia.it>", "subject": "È stato eseguito l'accesso sull'app IO", "body": ""},
+        rules_path,
+    ) == "Archive"
 
 
 def test_write_to_digest_deduplicates_by_account_email_and_received_at(tmp_path):

@@ -1,8 +1,9 @@
 """Tests for MT agent helpers and email_sorter client."""
 import json
 import sys
+import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -24,6 +25,13 @@ def _tool(server, name):
         if entry.name == name:
             return entry
     raise AssertionError(f"tool not registered: {name}")
+
+
+class _RedisStub:
+    _config = None
+
+    def on_message(self, _callback):
+        return None
 
 
 def test_read_processed_ids_empty(tmp_path):
@@ -92,6 +100,31 @@ async def test_create_task_extracts_email_id_from_notes_when_missing(tmp_path):
     })
 
     assert "pm-339" in _read_processed_ids(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_forward_to_cos_sends_telegram_alert_for_aruba_spid(tmp_path, monkeypatch):
+    from agents.mt import tools as mt_tools
+
+    fake_send_message = types.SimpleNamespace(
+        create_send_message_tool=lambda *_args, **_kw: AsyncMock(return_value="cos-ok")
+    )
+    monkeypatch.setitem(sys.modules, "agent_runner.tools.send_message", fake_send_message)
+    notifier = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(mt_tools, "_send_cos_security_telegram_alert", notifier)
+
+    server = mt_tools.create_mt_mcp_server(tmp_path, redis_a2a=_RedisStub())
+    forward_to_cos = _tool(server, "forward_to_cos").fn
+    payload = {
+        "email_id": "pm-171",
+        "sender": "Aruba ID <comunicazioni@staff.aruba.it>",
+        "subject": "SPID Aruba ID - Modifica la tua password",
+        "received_at": "2026-04-25T13:07:47+02:00",
+    }
+
+    await forward_to_cos({"payload_json": json.dumps(payload), "reason": "SPID security alert"})
+
+    notifier.assert_awaited_once_with(payload)
 
 
 def _mock_response(status_code: int, body: dict):

@@ -18,6 +18,8 @@ MT_BUILTIN_CRONS = [
             "draft_reply creates a draft_pending item and must not be treated as sent or complete; "
             "'forward_to_cfo' → call sort_email with email_id and payload_json to archive the entry; "
             "the CFO worker has already ingested this email automatically — do NOT forward to COS. "
+            "'forward_to_cio' → call send_message(to='cio', message=<brief technical summary with payload_json>) "
+            "and then call sort_email with email_id and payload_json to archive the entry; do NOT forward to COS. "
             "'forward_to_cos' → call forward_to_cos with payload_json=<full entry as JSON> and a brief reason. "
             "COS is only reachable via forward_to_cos (A2A) — never write files to contact COS. "
             "After processing all entries, call report_issue with any technical issues observed "

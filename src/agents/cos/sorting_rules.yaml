@@ -21,6 +21,32 @@ defaults:
   on_no_match: keep
 
 rules:
+  - name: "WHOOP"
+    match: all
+    conditions:
+      sender: "*whoop.com*"
+    folder: "Archive"
+
+  - name: "Cloudflare"
+    match: all
+    conditions:
+      sender: "*cloudflare.com*"
+    folder: "Archive"
+
+  - name: "IO login notifications"
+    match: all
+    conditions:
+      sender: "*io.italia.it*"
+      subject_contains: "accesso sull'app IO"
+    folder: "Archive"
+
+  - name: "GMX app password notifications"
+    match: all
+    conditions:
+      sender: "*gmx*"
+      subject_contains: "Application-specific password created"
+    folder: "Archive"
+
   - name: "American Express"
     match: all
     conditions:

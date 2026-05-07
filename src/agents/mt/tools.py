@@ -31,6 +31,58 @@ def _text(s: str) -> dict:
     return {"content": [{"type": "text", "text": str(s)}]}
 
 
+def _is_aruba_spid_security_alert(payload: dict) -> bool:
+    sender = str(payload.get("sender", "")).lower()
+    subject = str(payload.get("subject", "")).lower()
+    if "aruba" not in sender and "aruba" not in subject:
+        return False
+    return "spid aruba id" in subject and (
+        "notifica autenticazione" in subject
+        or "modifica la tua password" in subject
+    )
+
+
+async def _send_cos_security_telegram_alert(payload: dict) -> dict:
+    token = os.environ.get("TELEGRAM_MARK_TOKEN") or os.environ.get("TELEGRAM_JARVIS_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_ALLOWED_CHAT_ID")
+    if not token or not chat_id:
+        logger.warning("COS security Telegram alert skipped: token/chat_id not configured")
+        return {"ok": False, "error": "telegram_not_configured"}
+
+    subject = str(payload.get("subject", "")).strip()
+    sender = str(payload.get("sender", "")).strip()
+    email_id = str(payload.get("email_id", "")).strip()
+    received_at = str(payload.get("received_at", "")).strip()
+    text = "\n".join(
+        part for part in (
+            "COS security alert: Aruba SPID",
+            f"Subject: {subject}" if subject else "",
+            f"Sender: {sender}" if sender else "",
+            f"Email: {email_id}" if email_id else "",
+            f"Received: {received_at}" if received_at else "",
+        )
+        if part
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text},
+            )
+        if response.status_code >= 400:
+            logger.warning(
+                "COS security Telegram alert failed: status=%s body=%s",
+                response.status_code,
+                response.text[:200],
+            )
+            return {"ok": False, "error": f"http_{response.status_code}"}
+        return response.json()
+    except Exception as exc:
+        logger.warning("COS security Telegram alert failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
 def _parse_iso_datetime(value: str) -> datetime.datetime:
     """Parse an ISO-8601 datetime, accepting a trailing 'Z' for UTC."""
     s = value.strip()
@@ -380,16 +432,20 @@ def create_mt_mcp_server(workspace_path: Path, redis_a2a=None):
             payload_raw = args.get("payload_json", "").strip()
             reason = args.get("reason", "escalation from MT").strip()
             email_id = args.get("email_id", "").strip()
+            payload_obj: dict | None = None
             if not payload_raw:
                 return _text("payload_json is required.")
             # Fallback: extract email_id from payload_json so legacy callers still advance the cursor.
-            if not email_id:
-                try:
-                    payload_obj = json.loads(payload_raw)
-                    if isinstance(payload_obj, dict):
+            try:
+                parsed_payload = json.loads(payload_raw)
+                if isinstance(parsed_payload, dict):
+                    payload_obj = parsed_payload
+                    if not email_id:
                         email_id = str(payload_obj.get("email_id", "")).strip()
-                except (json.JSONDecodeError, ValueError):
-                    pass
+            except (json.JSONDecodeError, ValueError):
+                payload_obj = None
+            if payload_obj is not None and _is_aruba_spid_security_alert(payload_obj):
+                await _send_cos_security_telegram_alert(payload_obj)
             message = f"MT escalation: {reason}\n\nPayload:\n{payload_raw}"
             result = await _send_message_fn({"to": "cos", "message": message})
             if email_id:
