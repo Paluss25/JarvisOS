@@ -38,11 +38,15 @@ email_overrides:
   # --- PayPal ---
   # Payment method is encoded in the body: "Hai pagato X con FINECO".
   # Resolved dynamically; no static ynab_account_id.
+  # subject_must_match filters out financing/contract/login notifications that are
+  # not transaction confirmations (e.g. "Paga in rate" welcome emails, device access alerts).
+  # Matches: receipts, payment confirmations, emails with amount in subject (X,XX €).
   "assistenza@paypal.it":
     domain: finance
     confidence: 1.0
     ynab_account_id: null
     ynab_account_source: body_extract
+    subject_must_match: "ricevut|pagamento|addebito|\\d+[,.]\\d+\\s*€|:\\s*\\d+[,.]\\d+"
     body_account_map:
       "FINECO":            "6a5f6142-31c7-43e9-bf0c-ebd8bd27a37a"
       "FINECO GOLD":       "d51958c6-1bc8-442b-8586-e155a7e55671"
@@ -51,7 +55,7 @@ email_overrides:
       "SATISPAY":          "b90599f6-17a5-4c93-bc7a-bf174adcde63"
       "REVOLUT":           "85e8e74e-f3d3-46f8-80a5-1a24438d6040"
       "MEDIOBANCA":        "e586d58c-bcac-48c6-848c-b219e00e0ea4"
-    note: "PayPal — extract payment method from body text"
+    note: "PayPal — transaction receipts and payment confirmations only; skip financing/contract/login emails"
 
   # --- Amazon: suppress finance misclassification ---
   # Payment provider (AMEX/Fineco) sends its own notification — Amazon emails would duplicate.

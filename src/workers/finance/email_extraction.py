@@ -8,7 +8,10 @@ import hashlib
 import logging
 import os
 import re
-from datetime import UTC, datetime
+import subprocess
+import time
+from collections import Counter
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from fastapi import APIRouter
@@ -29,13 +32,19 @@ _MONTHS_IT = r"(?:gen|feb|mar|apr|mag|giu|lug|ago|set|ott|nov|dic|jan|feb|mar|ap
 # Each entry: (pattern, direction, amount_group_index, payee_group_index)
 _PATTERNS: list[tuple[re.Pattern, str, int, int]] = [
     # "Pagamento di 45,90 EUR a Amazon"  → groups: (amount, currency, payee)
-    (re.compile(r"(?:pagamento|addebito|prelievo)\s+(?:di\s+)?([\d,.]+)\s*(EUR|€)\s+(?:a|da|presso)\s+(.+?)(?:\.|$)", re.I), "outflow", 0, 2),
+    (re.compile(r"(?:pagamento|addebito|prelievo)\s+(?:di\s+)?([\d,.]+)\s*(EUR|€)\s+(?:a|da|presso)\s+(.+?)(?:\.|[\n]|$)", re.I), "outflow", 0, 2),
     # "Accredito di 1.500,00 EUR da Stipendio"  → groups: (amount, currency, payee)
-    (re.compile(r"accredito\s+(?:di\s+)?([\d,.]+)\s*(EUR|€)\s+da\s+(.+?)(?:\.|$)", re.I), "inflow", 0, 2),
-    # "Hai speso 23.50€ da COOP"  → groups: (amount, payee)
-    (re.compile(r"(?:hai speso|spesa di)\s*([\d,.]+)\s*(?:EUR|€)\s+(?:da|presso|a)\s+(.+?)(?:\.|$)", re.I), "outflow", 0, 1),
-    # AMEX/Nexi alert: "21 apr 2026 AMAZON ITALY RETAIL €28,19"  → groups: (merchant, amount)
+    (re.compile(r"accredito\s+(?:di\s+)?([\d,.]+)\s*(EUR|€)\s+da\s+(.+?)(?:\.|[\n]|$)", re.I), "inflow", 0, 2),
+    # "Hai pagato / Hai speso / Hai autorizzato un pagamento di 23.50 € EUR da/a COOP"
+    # Covers Fineco generic, Satispay, PayPal (both "hai pagato" and "autorizzato" forms)
+    # Handles non-breaking spaces (\xa0) via \s and both "€ EUR" and single-symbol forms
+    (re.compile(r"(?:hai speso|hai pagato|spesa di|autorizzato\s+un\s+pagamento\s+di|pagamento\s+di)\s*([\d,.]+)\s*(?:€\s*EUR|EUR|€)\s+(?:da|presso|a)\s+(.+?)(?:\.|[\n]|$)", re.I), "outflow", 0, 1),
+    # AMEX/Nexi date-line: "21 apr 2026 AMAZON ITALY RETAIL €28,19"  → groups: (merchant, amount)
     (re.compile(rf"\d{{1,2}}\s+{_MONTHS_IT}\s+\d{{4}}\s+([A-Z][A-Z0-9 .&'*/-]{{2,}}?)\s+€\s*([\d,.]+)", re.I), "outflow", 1, 0),
+    # Nexi block format: "IMPORTO: € 45,90 … ESERCENTE: MERCHANT"
+    (re.compile(r"IMPORTO[:\s]*€?\s*([\d,.]+).*?ESERCENTE[:\s]+(.+?)(?:\n|$)", re.I | re.S), "outflow", 0, 1),
+    # PayPal subject / generic: "pagamento a EasyPark Italia Srl: 2,99 EUR"
+    (re.compile(r"pagamento\s+a\s+(.+?):\s*([\d,.]+)\s*(?:EUR|€)", re.I), "outflow", 1, 0),
     # Generic: "€ 99,99 - Netflix"  → groups: (amount, payee)
     (re.compile(r"(?:EUR|€)\s*([\d,.]+)\s*[-–]\s*(.+?)(?:\.|$)", re.I), "unknown", 0, 1),
 ]
@@ -122,6 +131,24 @@ _SYSTEM = (
 class TaskEnvelope(BaseModel):
     goal: str
     scope: dict = {}
+
+
+def _strip_html(text: str) -> str:
+    """Convert HTML to plain text via html-text CLI if body looks like HTML."""
+    if not re.search(r"<(?:html|body|div|p|table|td|span)\b", text, re.I):
+        return text
+    try:
+        result = subprocess.run(
+            ["html-text", "extract", "-", "--format", "text"],
+            input=text.encode("utf-8"),
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout.decode("utf-8", errors="replace").strip()
+    except Exception as exc:
+        logger.warning("html-text conversion failed: %s", exc)
+    return text
 
 
 def _parse_amount(s: str) -> float:
@@ -221,6 +248,119 @@ def _ynab_import_id(tx: dict, received_at: str) -> str:
     return f"EML:{digest}:{date_part}"
 
 
+def _dedupe_transactions(transactions: list[dict]) -> list[dict]:
+    """Collapse duplicate regex hits from overlapping provider patterns."""
+    deduped: list[dict] = []
+    seen: set[tuple] = set()
+    for tx in transactions:
+        key = (
+            str(tx.get("payee", "")).strip().lower(),
+            round(float(tx.get("amount", 0) or 0), 2),
+            str(tx.get("direction", "")),
+            str(tx.get("currency", "EUR")),
+            tx.get("date"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(tx)
+    return deduped
+
+
+_PAYEES_CACHE: dict = {"payees": None, "expires": 0.0}
+_PAYEES_TTL = 300  # seconds
+
+
+async def _fetch_ynab_payees(api_key: str, budget_id: str) -> list[dict]:
+    """Fetch all YNAB payees, cached for 5 minutes."""
+    now = time.monotonic()
+    if _PAYEES_CACHE["payees"] is not None and now < _PAYEES_CACHE["expires"]:
+        return _PAYEES_CACHE["payees"]
+    url = f"{_YNAB_BASE}/budgets/{budget_id}/payees"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=_YNAB_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+        if not resp.is_success:
+            return []
+        payees = resp.json().get("data", {}).get("payees", [])
+        _PAYEES_CACHE["payees"] = payees
+        _PAYEES_CACHE["expires"] = now + _PAYEES_TTL
+        return payees
+    except Exception as exc:
+        logger.warning("YNAB payees fetch error: %s", exc)
+        return []
+
+
+async def _infer_category_for_payee(
+    payee_name: str,
+    api_key: str,
+    budget_id: str,
+) -> str | None:
+    """Return the most-used category_id for a payee based on the last year of transactions.
+
+    Returns None if fewer than 2 past transactions share the same category (no clear pattern).
+    """
+    payees = await _fetch_ynab_payees(api_key, budget_id)
+    payee_lower = payee_name.lower()
+    payee_id = next(
+        (p["id"] for p in payees if (p.get("name") or "").lower() == payee_lower),
+        None,
+    )
+    if not payee_id:
+        return None
+
+    since = (datetime.now(UTC).date() - timedelta(days=365)).isoformat()
+    url = f"{_YNAB_BASE}/budgets/{budget_id}/payees/{payee_id}/transactions?since_date={since}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=_YNAB_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+        if not resp.is_success:
+            return None
+        txs = resp.json().get("data", {}).get("transactions", [])
+    except Exception as exc:
+        logger.warning("YNAB category inference fetch error: %s", exc)
+        return None
+
+    cat_counts: Counter = Counter()
+    for t in txs:
+        cat_id = t.get("category_id")
+        cat_name = t.get("category_name") or ""
+        if cat_id and "uncategorized" not in cat_name.lower():
+            cat_counts[cat_id] += 1
+
+    if not cat_counts:
+        return None
+    best_id, count = cat_counts.most_common(1)[0]
+    return best_id if count >= 2 else None
+
+
+async def _fetch_ynab_transactions_on_date(
+    account_id: str,
+    date_str: str,
+    api_key: str,
+    budget_id: str,
+) -> list[dict]:
+    """Fetch all YNAB transactions for an account on a specific date."""
+    url = (
+        f"{_YNAB_BASE}/budgets/{budget_id}/accounts/{account_id}/transactions"
+        f"?since_date={date_str}"
+    )
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=_YNAB_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+        if not resp.is_success:
+            logger.warning("YNAB dedup fetch failed: HTTP %s", resp.status_code)
+            return []
+        txs = resp.json().get("data", {}).get("transactions", [])
+        return [t for t in txs if t.get("date") == date_str]
+    except Exception as exc:
+        logger.warning("YNAB dedup fetch error: %s", exc)
+        return []
+
+
 async def _post_ynab_transaction(
     tx: dict,
     *,
@@ -229,8 +369,8 @@ async def _post_ynab_transaction(
 ) -> dict:
     """POST one transaction to YNAB for the given account.
 
-    Returns {'transaction_id': str} on success, {'error': str} on failure.
-    YNAB deduplicates by import_id, so re-posting the same email is safe.
+    Returns {'transaction_id': str} on success, {'skipped': True} if a duplicate
+    by (amount, payee, date) already exists, or {'error': str} on failure.
     """
     api_key = os.environ.get("YNAB_API_KEY", "")
     budget_id = os.environ.get("YNAB_BUDGET_ID", "")
@@ -247,19 +387,40 @@ async def _post_ynab_transaction(
     date_str = tx.get("date") or (
         received_at[:10] if received_at else datetime.now(UTC).strftime("%Y-%m-%d")
     )
+    payee_name = str(tx.get("payee", "unknown"))[:50]
 
-    body = {
-        "transaction": {
-            "account_id": ynab_account_id,
-            "date": date_str,
-            "amount": amount_ms,
-            "payee_name": str(tx.get("payee", "unknown"))[:50],
-            "memo": f"Auto-ingest from email ({tx.get('method', 'unknown')})"[:200],
-            "cleared": "uncleared",
-            "approved": False,
-            "import_id": _ynab_import_id(tx, received_at),
-        }
+    # Client-side dedup: skip if same (amount, payee, date) already in YNAB
+    existing = await _fetch_ynab_transactions_on_date(
+        ynab_account_id, date_str, api_key, budget_id
+    )
+    for existing_tx in existing:
+        if (
+            existing_tx.get("amount") == amount_ms
+            and (existing_tx.get("payee_name") or "").lower() == payee_name.lower()
+        ):
+            logger.info(
+                "YNAB dedup: skipping %s %s on %s (already exists as id=%s)",
+                payee_name, amount_ms, date_str, existing_tx.get("id"),
+            )
+            return {"skipped": True, "reason": "duplicate_by_amount_payee_date"}
+
+    # Infer category from past transactions for this payee
+    category_id = await _infer_category_for_payee(payee_name, api_key, budget_id)
+
+    tx_body: dict = {
+        "account_id": ynab_account_id,
+        "date": date_str,
+        "amount": amount_ms,
+        "payee_name": payee_name,
+        "memo": f"Auto-ingest from email ({tx.get('method', 'unknown')})"[:200],
+        "cleared": "uncleared",
+        "approved": False,
+        "import_id": _ynab_import_id(tx, received_at),
     }
+    if category_id:
+        tx_body["category_id"] = category_id
+
+    body = {"transaction": tx_body}
     headers = {"Authorization": f"Bearer {api_key}"}
     url = f"{_YNAB_BASE}/budgets/{budget_id}/transactions"
 
@@ -283,6 +444,12 @@ async def analyze(task: TaskEnvelope) -> dict:
     email_id = str(task.scope.get("email_id", "")).strip()
     received_at = str(task.scope.get("received_at", "")).strip()
     subject = str(task.scope.get("subject", "")).strip()
+
+    # Convert HTML body to clean plain text (html-text CLI, no-op on plain text)
+    email_text = _strip_html(email_text)
+    # Prepend subject so PayPal subject-encoded amounts/merchants are extractable
+    if subject:
+        email_text = f"Subject: {subject}\n\n{email_text}"
 
     # YNAB routing context from EIA classification (passed by _dispatch_to_cfo_worker)
     ynab_account_id: str = task.scope.get("ynab_account_id") or ""
@@ -323,6 +490,7 @@ async def analyze(task: TaskEnvelope) -> dict:
                     "date": None,
                     "method": "regex",
                 })
+    transactions = _dedupe_transactions(transactions)
 
     # If regex found nothing, use LLM
     if not transactions:
@@ -347,7 +515,7 @@ async def analyze(task: TaskEnvelope) -> dict:
     if not email_id or not transactions:
         return result
 
-    ynab_ok = ynab_failed = ledger_ok = ledger_failed = 0
+    ynab_ok = ynab_failed = ynab_skipped = ledger_ok = ledger_failed = 0
     write_errors: list[str] = []
 
     for tx in transactions:
@@ -360,6 +528,8 @@ async def analyze(task: TaskEnvelope) -> dict:
                 if "error" in ynab_res:
                     ynab_failed += 1
                     write_errors.append(f"ynab:{ynab_res['error']}")
+                elif ynab_res.get("skipped"):
+                    ynab_skipped += 1
                 else:
                     ynab_ok += 1
             except Exception as exc:
@@ -382,6 +552,7 @@ async def analyze(task: TaskEnvelope) -> dict:
             logger.exception("Ledger write failed for tx=%s", tx)
 
     result["ynab_inserted"] = ynab_ok
+    result["ynab_skipped"] = ynab_skipped
     result["ynab_failed"] = ynab_failed
     result["ledger_inserted"] = ledger_ok
     result["ledger_failed"] = ledger_failed
