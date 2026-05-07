@@ -157,3 +157,36 @@ async def test_health_query_preflights_whoop_sync_run_columns(tmp_path):
     text = result["content"][0]["text"]
     assert "'source' on table 'whoop_sync_runs' → column does not exist" in text
     assert "'items_synced' on table 'whoop_sync_runs' → use recoveries_seen, sleeps_seen, cycles_seen, workouts_seen" in text
+
+
+@pytest.mark.asyncio
+async def test_health_query_preflights_activities_event_columns(tmp_path):
+    server = create_drhouse_mcp_server(tmp_path)
+    health_query = next(tool for tool in server._tools if tool.name == "health_query")
+
+    result = await health_query.fn({
+        "database": "sport",
+        "query": "SELECT id, source, type, name, start_time, duration_min FROM activities ORDER BY start_time DESC LIMIT 5",
+        "params": [],
+    })
+
+    assert result["is_error"] is True
+    text = result["content"][0]["text"]
+    assert "'name' on table 'activities' → column does not exist" in text
+    assert "'start_time' on table 'activities' → use 'date'" in text
+
+
+@pytest.mark.asyncio
+async def test_health_query_preflights_whoop_start_time_alias(tmp_path):
+    server = create_drhouse_mcp_server(tmp_path)
+    health_query = next(tool for tool in server._tools if tool.name == "health_query")
+
+    result = await health_query.fn({
+        "database": "sport",
+        "query": "SELECT workout_id, sport_name, start_time FROM whoop_workouts ORDER BY start_time DESC LIMIT 5",
+        "params": [],
+    })
+
+    assert result["is_error"] is True
+    text = result["content"][0]["text"]
+    assert "'start_time' on table 'whoop_workouts' → use 'start_at'" in text
