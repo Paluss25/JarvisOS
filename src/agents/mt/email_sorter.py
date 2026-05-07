@@ -1,7 +1,14 @@
 """mailctl-backed email sorter for MT."""
 
 import json
+import re
 import subprocess
+
+
+_ACCOUNT_ALIASES = {
+    "protonmail": ("protonmail", "pm"),
+    "gmx": ("gmx",),
+}
 
 
 def _account_for(uid: str, payload: dict) -> str:
@@ -15,10 +22,15 @@ def _account_for(uid: str, payload: dict) -> str:
 
 
 def _imap_uid(uid: str, account: str) -> str:
-    prefix = f"{account}-"
-    if uid.lower().startswith(prefix):
-        return uid[len(prefix):]
-    return uid
+    raw = str(uid or "").strip()
+    lowered = raw.lower()
+    for alias in _ACCOUNT_ALIASES.get(account, (account,)):
+        prefix = f"{alias}-"
+        if lowered.startswith(prefix):
+            raw = raw[len(prefix):]
+            break
+    match = re.search(r"\d+", raw)
+    return match.group(0) if match else raw
 
 
 def sort_email(uid: str, payload: dict) -> dict:

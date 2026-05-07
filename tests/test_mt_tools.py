@@ -89,6 +89,50 @@ def test_sort_email_returns_result():
     assert result["folder"] == "INBOX/Archive"
 
 
+def test_sort_email_strips_protonmail_alias_and_ordinal_suffix():
+    payload = {"account": "protonmail", "subject": "Newsletter", "classification": {}}
+    expected = {"sorted": True, "folder": "INBOX/Archive"}
+    with patch.object(
+        sorter_mod.subprocess,
+        "run",
+        return_value=_mock_completed_process(0, json.dumps(expected)),
+    ) as run_mock:
+        result = sort_email("pm-374°", payload)
+
+    assert result["sorted"] is True
+    assert run_mock.call_args.args[0] == [
+        "mailctl",
+        "sort",
+        "--account",
+        "protonmail",
+        "--uid",
+        "374",
+        "--json",
+    ]
+
+
+def test_sort_email_strips_gmx_alias_and_ordinal_suffix():
+    payload = {"account": "gmx", "subject": "Newsletter", "classification": {}}
+    expected = {"sorted": True, "folder": "Archive"}
+    with patch.object(
+        sorter_mod.subprocess,
+        "run",
+        return_value=_mock_completed_process(0, json.dumps(expected)),
+    ) as run_mock:
+        result = sort_email("gmx-317°", payload)
+
+    assert result["sorted"] is True
+    assert run_mock.call_args.args[0] == [
+        "mailctl",
+        "sort",
+        "--account",
+        "gmx",
+        "--uid",
+        "317",
+        "--json",
+    ]
+
+
 def test_sort_email_raises_on_http_error():
     payload = {"sender": "", "subject": "", "body_redacted": "", "classification": {}}
     with patch.object(
