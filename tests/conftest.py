@@ -15,6 +15,7 @@ import pytest
 
 _UNIT_TEST_FILES = {
     "test_agent_runner_config.py",
+    "test_agent_plugin_settings.py",
     "test_agent_skills_loader.py",
     "test_audit_writer.py",
     "test_base_agent_client.py",
@@ -58,6 +59,7 @@ _UNIT_TEST_FILES = {
     "test_plane_service.py",
     "test_plugin_manifest.py",
     "test_plugin_loader.py",
+    "test_plugin_client_integration.py",
     "test_plugin_registry.py",
     "test_plugin_tool_spec.py",
     "test_redaction_engine.py",

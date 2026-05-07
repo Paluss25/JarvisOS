@@ -34,6 +34,9 @@ class AgentConfig:
     skills: list[str] | None = None          # None = unrestricted, [] = disabled, list = per-agent allowlist
     skills_watch_enabled: bool = True
     skills_watch_debounce_s: float = 1.0
+    plugin_root: Path = Path("/app/plugins")
+    plugins_enabled: bool = True
+    plugins: list[str] | None = None         # None = default per-agent allowlist, [] = disabled, list = explicit allowlist
     a2a_fast_path: Callable[..., Any] | None = None  # async fn(payload: dict) → dict | None — bypasses LLM for structured A2A actions
     builtin_crons: list[dict] = field(default_factory=list)
     default_image_caption: str = "Analyze this image."
@@ -179,6 +182,44 @@ class AgentConfig:
             except ValueError:
                 pass
         return self.skills_watch_debounce_s
+
+    @staticmethod
+    def _parse_plugin_list(raw: str) -> tuple[str, ...] | None:
+        value = raw.strip()
+        if not value:
+            return ()
+        if value.lower() in {"none", "disabled", "off", "false"}:
+            return ()
+        if value.lower() in {"all", "*"}:
+            return None
+        return tuple(item.strip() for item in value.split(",") if item.strip())
+
+    @property
+    def effective_plugin_root(self) -> Path:
+        value = os.environ.get("JARVIOS_PLUGIN_ROOT", "").strip()
+        return Path(value) if value else self.plugin_root
+
+    @property
+    def effective_plugins_enabled(self) -> bool:
+        value = os.environ.get("JARVIOS_PLUGINS_ENABLED", "").strip()
+        if value:
+            return value.lower() in {"1", "true", "yes", "on"}
+        return self.plugins_enabled
+
+    @property
+    def plugin_allowlist(self) -> tuple[str, ...] | None:
+        per_agent = os.environ.get(f"JARVIOS_PLUGINS_{self.id.upper()}", "")
+        if per_agent.strip():
+            return self._parse_plugin_list(per_agent)
+        global_value = os.environ.get("JARVIOS_PLUGINS", "")
+        if global_value.strip():
+            return self._parse_plugin_list(global_value)
+        if self.plugins is not None:
+            return tuple(self.plugins)
+
+        from agent_runner.plugin_defaults import DEFAULT_AGENT_PLUGINS
+
+        return DEFAULT_AGENT_PLUGINS.get(self.id, ())
 
     @property
     def agent_max_turn_s(self) -> float:

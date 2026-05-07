@@ -20,15 +20,23 @@ def discover_plugins(root: Path) -> list[PluginManifest]:
     return manifests
 
 
-def tools_for_agent(root: Path, agent_id: str, context: PluginContext) -> list[ToolSpec]:
+def tools_for_agent(
+    root: Path,
+    agent_id: str,
+    context: PluginContext,
+    plugin_names: tuple[str, ...] | None = None,
+) -> list[ToolSpec]:
     if not root.exists():
         return []
+    allowed_plugin_names = set(plugin_names) if plugin_names is not None else None
     tools: list[ToolSpec] = []
     for plugin_dir in sorted(path for path in root.iterdir() if path.is_dir()):
         manifest_path = plugin_dir / "plugin.yaml"
         if not manifest_path.exists():
             continue
         manifest = load_manifest_text(manifest_path.read_text(encoding="utf-8"))
+        if allowed_plugin_names is not None and manifest.name not in allowed_plugin_names:
+            continue
         if agent_id not in manifest.allowed_agents:
             continue
         plugin = load_plugin(plugin_dir, context)

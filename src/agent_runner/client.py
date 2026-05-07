@@ -7,6 +7,7 @@ streaming mode by default.
 """
 
 import asyncio
+import inspect
 import logging
 import time
 from pathlib import Path
@@ -27,6 +28,8 @@ from agent_runner.config import AgentConfig
 from agent_runner.memory.daily_logger import DailyLogger
 from agent_runner.memory.pipeline.queue import PipelineItem, PipelineQueue
 from agent_runner.telemetry import AGENT_BUSY, get_tracer, record_llm_turn
+from plugin_runtime.context import PluginContext
+from plugin_runtime.tools import ToolSpec
 from opentelemetry.trace import StatusCode
 
 logger = logging.getLogger(__name__)
@@ -215,24 +218,12 @@ class BaseAgentClient:
         (or get filtered out of the deferred-tool manifest entirely).
         Refreshing the factory output rebinds the bridge cleanly.
         """
-        if not self.config.mcp_server_factory:
-            return
-        try:
-            new_server = self.config.mcp_server_factory(
-                self.config.workspace_path, redis_a2a=self._redis_a2a
-            )
-        except Exception as exc:
-            logger.warning(
-                "agent[%s]: mcp_server_factory refresh failed — %s",
-                self.config.id, exc,
-            )
-            return
-        if new_server is None:
-            return
-        mcp_servers = {f"{self.config.id}-tools": new_server}
-        if self.config.extra_mcp_servers:
-            mcp_servers.update(self.config.extra_mcp_servers)
-        self._update_options({"mcp_servers": mcp_servers})
+        mcp_servers = _build_mcp_servers(
+            self.config,
+            self.config.workspace_path,
+            redis_a2a=self._redis_a2a,
+        )
+        self._update_options({"mcp_servers": mcp_servers if mcp_servers else None})
 
     async def connect(self) -> None:
         self._refresh_skill_snapshot_options(force=True)
@@ -594,14 +585,7 @@ def create_agent_client(config: AgentConfig, redis_a2a=None) -> "BaseAgentClient
     system_prompt = _build_system_prompt(ctx)
 
     # MCP servers
-    mcp_servers = {}
-    if config.mcp_server_factory:
-        try:
-            mcp_servers = {f"{config.id}-tools": config.mcp_server_factory(workspace_path, redis_a2a=redis_a2a)}
-        except Exception as exc:
-            logger.warning("agent[%s]: mcp_server_factory failed — %s", config.id, exc)
-    if config.extra_mcp_servers:
-        mcp_servers.update(config.extra_mcp_servers)
+    mcp_servers = _build_mcp_servers(config, workspace_path, redis_a2a=redis_a2a)
 
     # Permission hook + SDK hooks
     can_use_tool = None
@@ -643,6 +627,103 @@ def create_agent_client(config: AgentConfig, redis_a2a=None) -> "BaseAgentClient
         redis_a2a=redis_a2a,
         skills_signature=ctx.get("skills_signature", ""),
     )
+
+
+def _build_mcp_servers(
+    config: AgentConfig,
+    workspace_path: Path,
+    redis_a2a=None,
+) -> dict[str, object]:
+    """Build direct MCP servers first, then shadow-safe plugin MCP servers."""
+    mcp_servers: dict[str, object] = {}
+    direct_tool_names: set[str] = set()
+
+    if config.mcp_server_factory:
+        try:
+            direct_server = config.mcp_server_factory(workspace_path, redis_a2a=redis_a2a)
+            if direct_server is not None:
+                mcp_servers[f"{config.id}-tools"] = direct_server
+                direct_tool_names.update(_server_tool_names(direct_server))
+        except Exception as exc:
+            logger.warning("agent[%s]: mcp_server_factory failed — %s", config.id, exc)
+
+    if config.extra_mcp_servers:
+        mcp_servers.update(config.extra_mcp_servers)
+        for server in config.extra_mcp_servers.values():
+            direct_tool_names.update(_server_tool_names(server))
+
+    plugin_server = _create_plugin_mcp_server(config, workspace_path, direct_tool_names)
+    if plugin_server is not None:
+        mcp_servers[f"{config.id}-plugin-tools"] = plugin_server
+
+    return mcp_servers
+
+
+def _server_tool_names(server: object) -> set[str]:
+    return {
+        str(getattr(tool, "name", "")).strip()
+        for tool in (getattr(server, "_tools", None) or [])
+        if str(getattr(tool, "name", "")).strip()
+    }
+
+
+def _create_plugin_mcp_server(
+    config: AgentConfig,
+    workspace_path: Path,
+    direct_tool_names: set[str],
+) -> object | None:
+    if not config.effective_plugins_enabled:
+        return None
+    plugin_names = config.plugin_allowlist
+    if plugin_names == ():
+        return None
+
+    try:
+        from claude_agent_sdk import create_sdk_mcp_server, tool as sdk_tool
+        from plugin_runtime.registry import tools_for_agent
+
+        context = PluginContext(
+            agent_id=config.id,
+            workspace_path=workspace_path,
+            config={"plugins": plugin_names},
+        )
+        plugin_tools = tools_for_agent(
+            config.effective_plugin_root,
+            config.id,
+            context,
+            plugin_names=plugin_names,
+        )
+    except Exception as exc:
+        logger.warning("agent[%s]: plugin loading failed — %s", config.id, exc)
+        return None
+
+    sdk_tools = []
+    registered_names = set(direct_tool_names)
+    for spec in plugin_tools:
+        if spec.name in registered_names:
+            logger.warning(
+                "agent[%s]: plugin tool %s shadows a direct tool; keeping direct tool",
+                config.id,
+                spec.name,
+            )
+            continue
+        registered_names.add(spec.name)
+        sdk_tools.append(_sdk_tool_from_spec(spec, sdk_tool))
+
+    if not sdk_tools:
+        return None
+    return create_sdk_mcp_server(name=f"{config.id}-plugin-tools", tools=sdk_tools)
+
+
+def _sdk_tool_from_spec(spec: ToolSpec, sdk_tool):
+    @sdk_tool(spec.name, spec.description, spec.schema)
+    async def plugin_tool(args: dict | None = None):
+        result = spec.handler(args or {})
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    return plugin_tool
 
 
 def _build_system_prompt(ctx: dict) -> str:
