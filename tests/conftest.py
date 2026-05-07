@@ -52,6 +52,7 @@ _UNIT_TEST_FILES = {
     "test_fallback_model.py",
     "test_fatsecret.py",
     "test_flight_exposure_migration.py",
+    "test_flight_exposure_parser.py",
     "test_fusion.py",
     "test_garmin_fit_migration.py",
     "test_ingest_gate.py",
