@@ -355,6 +355,75 @@ def test_normalize_payee_esselunga():
     assert _normalize_payee("CONAD") == "CONAD"  # no normalization
 
 
+def test_resolve_ynab_payee_prefers_existing_similar_name():
+    from workers.finance.email_extraction import _resolve_ynab_payee_name
+
+    payees = [
+        {"id": "p1", "name": "Acqua e Sapone"},
+        {"id": "p2", "name": "Juparana"},
+        {"id": "p3", "name": "Ristorante"},
+        {"id": "p4", "name": "ACQUA SAPONE"},
+        {"id": "p5", "name": "Paypal"},
+        {"id": "p6", "name": "PayPal"},
+        {"id": "p7", "name": "OVIESSE"},
+    ]
+
+    assert _resolve_ynab_payee_name("ACQUA SAPONE", payees) == "Acqua e Sapone"
+    assert _resolve_ynab_payee_name("RISTORANTE BAR JUPARANA", payees) == "Juparana"
+    assert _resolve_ynab_payee_name("PayPal", payees) == "PayPal"
+    assert _resolve_ynab_payee_name("OVIESSE", payees) == "Oviesse"
+
+
+def test_resolve_ynab_payee_title_cases_new_all_caps_name():
+    from workers.finance.email_extraction import _resolve_ynab_payee_name
+
+    assert _resolve_ynab_payee_name("OVIESSE", []) == "Oviesse"
+    assert _resolve_ynab_payee_name("RISTORANTE BAR JUPARANA", []) == "Ristorante Bar Juparana"
+
+
+@pytest.mark.asyncio
+async def test_post_ynab_transaction_uses_existing_similar_payee(monkeypatch):
+    monkeypatch.setenv("YNAB_API_KEY", "ynab-test-key")
+    monkeypatch.setenv("YNAB_BUDGET_ID", "budget-123")
+
+    from workers.finance import email_extraction
+
+    monkeypatch.setattr(
+        email_extraction,
+        "_fetch_ynab_payees",
+        AsyncMock(return_value=[{"id": "p1", "name": "Acqua e Sapone"}]),
+    )
+    monkeypatch.setattr(email_extraction, "_fetch_ynab_transactions_on_date", AsyncMock(return_value=[]))
+    monkeypatch.setattr(email_extraction, "_infer_category_for_payee", AsyncMock(return_value=None))
+
+    captured = {}
+
+    fake_response = AsyncMock()
+    fake_response.is_success = True
+    fake_response.status_code = 201
+    fake_response.text = '{"data": {"transaction": {"id": "tx-payee"}}}'
+    fake_response.json = lambda: {"data": {"transaction": {"id": "tx-payee"}}}
+
+    async def fake_post(url, json=None, headers=None):
+        captured["body"] = json
+        return fake_response
+
+    fake_client = AsyncMock()
+    fake_client.post = fake_post
+    fake_client.__aenter__.return_value = fake_client
+    fake_client.__aexit__.return_value = None
+
+    with patch.object(email_extraction.httpx, "AsyncClient", return_value=fake_client):
+        result = await email_extraction._post_ynab_transaction(
+            {"payee": "ACQUA SAPONE", "amount": 34.45, "direction": "outflow", "date": "2026-05-06"},
+            received_at="2026-05-06T09:46:57Z",
+            ynab_account_id="amex-account",
+        )
+
+    assert result["transaction_id"] == "tx-payee"
+    assert captured["body"]["transaction"]["payee_name"] == "Acqua e Sapone"
+
+
 def test_normalize_payee_extended_brands():
     from workers.finance.email_extraction import _normalize_payee
 

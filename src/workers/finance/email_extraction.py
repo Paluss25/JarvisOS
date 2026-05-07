@@ -11,8 +11,10 @@ import os
 import re
 import subprocess
 import time
+import unicodedata
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 from html.parser import HTMLParser
 
 import httpx
@@ -125,6 +127,24 @@ _PAYPAL_PREFIX_RE = re.compile(r"paypal\s{2,}(.+)", re.I)
 
 # PayPal subject prefix "pagamento a favore di" / "favore di" → strip before normalization
 _FAVORE_DI_RE = re.compile(r"(?:pagamento\s+a\s+)?favore\s+di\s+", re.I)
+_PAYEE_MATCH_STOPWORDS = {
+    "a",
+    "and",
+    "bar",
+    "caffe",
+    "cafe",
+    "e",
+    "il",
+    "la",
+    "l",
+    "lo",
+    "presso",
+    "restaurant",
+    "ristorante",
+    "srl",
+    "spa",
+}
+_CANONICAL_ALL_CAPS_PAYEES = {"DAZN", "IKEA", "TIM"}
 
 
 class _TextNodeParser(HTMLParser):
@@ -154,6 +174,90 @@ def _normalize_payee(raw: str) -> str:
         if pattern.search(raw):
             return canonical
     return raw
+
+
+def _payee_words(name: str) -> list[str]:
+    normalized = unicodedata.normalize("NFKD", str(name or ""))
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.lower().replace("&", " e ")
+    words = re.findall(r"[a-z0-9]+", normalized)
+    return [word for word in words if word not in _PAYEE_MATCH_STOPWORDS]
+
+
+def _payee_match_key(name: str) -> str:
+    return "".join(_payee_words(name))
+
+
+def _is_all_caps_payee(name: str) -> bool:
+    letters = [ch for ch in str(name or "") if ch.isalpha()]
+    return bool(letters) and all(ch.isupper() for ch in letters)
+
+
+def _humanize_payee_name(name: str) -> str:
+    """Convert all-caps extracted merchant names into a YNAB-friendly display name."""
+    name = re.sub(r"\s+", " ", str(name or "").strip())
+    if name in _CANONICAL_ALL_CAPS_PAYEES:
+        return name[:50]
+    if not name or not _is_all_caps_payee(name):
+        return name[:50]
+
+    def _humanize_token(token: str) -> str:
+        if not any(ch.isalpha() for ch in token):
+            return token
+        return token[:1].upper() + token[1:].lower()
+
+    return " ".join(_humanize_token(token) for token in name.split())[:50]
+
+
+def _payee_candidate_quality(name: str, raw_name: str = "") -> float:
+    score = 0.0
+    if not _is_all_caps_payee(name):
+        score += 5.0
+    if name == raw_name:
+        score += 1.0
+    elif name.lower() == str(raw_name or "").lower() and not _is_all_caps_payee(name):
+        score += 0.5
+    score -= min(len(_payee_words(name)), 8) * 0.05
+    return score
+
+
+def _resolve_ynab_payee_name(raw_name: str, payees: list[dict]) -> str:
+    """Prefer an existing similar YNAB payee; otherwise return a humanized new name."""
+    raw_name = str(raw_name or "unknown").strip() or "unknown"
+    fallback = _humanize_payee_name(raw_name)
+    raw_key = _payee_match_key(raw_name)
+    raw_words = set(_payee_words(raw_name))
+    if not raw_key:
+        return fallback
+
+    candidates: list[tuple[float, str]] = []
+    for payee in payees or []:
+        name = str(payee.get("name") or "").strip()
+        if not name or name.startswith("Transfer :"):
+            continue
+        key = _payee_match_key(name)
+        words = set(_payee_words(name))
+        if not key or not words:
+            continue
+
+        score = 0.0
+        if key == raw_key:
+            score = 1.0
+        elif raw_words and words and (raw_words.issubset(words) or words.issubset(raw_words)):
+            score = 0.93
+        else:
+            score = SequenceMatcher(None, raw_key, key).ratio()
+
+        if score >= 0.86:
+            candidates.append((score + _payee_candidate_quality(name, raw_name), name))
+
+    if not candidates:
+        return fallback
+
+    best_name = max(candidates, key=lambda item: item[0])[1]
+    if _is_all_caps_payee(best_name) and best_name not in _CANONICAL_ALL_CAPS_PAYEES:
+        return fallback
+    return best_name[:50]
 
 _SYSTEM = (
     "You are a financial data extractor. Given an email text, extract all financial transactions. "
@@ -476,7 +580,8 @@ async def _post_ynab_transaction(
     date_str = tx.get("date") or (
         received_at[:10] if received_at else datetime.now(UTC).strftime("%Y-%m-%d")
     )
-    payee_name = str(tx.get("payee", "unknown"))[:50]
+    payees = await _fetch_ynab_payees(api_key, budget_id)
+    payee_name = _resolve_ynab_payee_name(str(tx.get("payee", "unknown")), payees)[:50]
 
     # Client-side dedup: skip if same (amount, payee, date) already in YNAB
     existing = await _fetch_ynab_transactions_on_date(
@@ -485,7 +590,10 @@ async def _post_ynab_transaction(
     for existing_tx in existing:
         if (
             existing_tx.get("amount") == amount_ms
-            and (existing_tx.get("payee_name") or "").lower() == payee_name.lower()
+            and (
+                (existing_tx.get("payee_name") or "").lower() == payee_name.lower()
+                or _payee_match_key(existing_tx.get("payee_name") or "") == _payee_match_key(payee_name)
+            )
         ):
             logger.info(
                 "YNAB dedup: skipping %s %s on %s (already exists as id=%s)",
