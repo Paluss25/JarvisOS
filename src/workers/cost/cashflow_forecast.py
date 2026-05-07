@@ -63,7 +63,7 @@ async def analyze(task: TaskEnvelope) -> dict[str, Any]:
     try:
         events = await fetch_ledger_events(from_date=since, limit=5000)
     except Exception as exc:
-        return {"error": str(exc), "method": "cfo_ledger"}
+        return {"error": str(exc), "method": "finance"}
 
     monthly: dict[str, float] = {}
     for event in events:

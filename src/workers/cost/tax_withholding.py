@@ -81,7 +81,7 @@ async def analyze(task: TaskEnvelope) -> dict[str, Any]:
     try:
         events = await fetch_ledger_events(from_date=since, limit=5000)
     except Exception as exc:
-        return {"error": str(exc), "method": "cfo_ledger"}
+        return {"error": str(exc), "method": "finance"}
 
     taxable_income = 0.0
     income_events = []
@@ -106,6 +106,6 @@ async def analyze(task: TaskEnvelope) -> dict[str, Any]:
         "estimated_irpef_ytd_eur": estimate["estimated_tax_eur"],
         "effective_rate_pct": estimate["effective_rate_pct"],
         "monthly_run_rate_eur": monthly_run_rate,
-        "method": "cfo_ledger",
+        "method": "finance",
         "brackets": brackets,
     }

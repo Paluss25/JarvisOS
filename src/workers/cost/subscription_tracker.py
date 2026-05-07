@@ -85,7 +85,7 @@ async def analyze(task: TaskEnvelope) -> dict[str, Any]:
     try:
         events = await fetch_ledger_events(from_date=since, limit=5000)
     except Exception as exc:
-        return {"error": str(exc), "method": "cfo_ledger"}
+        return {"error": str(exc), "method": "finance"}
 
     subscriptions = detect_recurring_merchants(events)
     monthly_total = round(sum(item["estimated_monthly_cost_eur"] for item in subscriptions), 2)
@@ -97,5 +97,5 @@ async def analyze(task: TaskEnvelope) -> dict[str, Any]:
         "estimated_monthly_total_eur": monthly_total,
         "estimated_annual_total_eur": annual_total,
         "subscriptions": subscriptions,
-        "method": "cfo_ledger",
+        "method": "finance",
     }

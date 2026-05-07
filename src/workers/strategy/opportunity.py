@@ -49,6 +49,7 @@ _RSI_OVERSOLD = 30.0
 _RSI_OVERBOUGHT = 70.0
 _DEFAULT_SENTIMENT_THRESHOLD = 0.8
 _DEFAULT_TOP_N = 5
+_DEFAULT_WATCHLIST = ("BTC", "ETH", "AMD", "RIOT", "XRP", "GLD")
 
 
 class TaskEnvelope(BaseModel):
@@ -218,19 +219,39 @@ async def _rank_with_opus(
     return parsed[:top_n]
 
 
+def _default_watchlist() -> list[str]:
+    raw = os.environ.get("CFO_OPPORTUNITY_DEFAULT_WATCHLIST", "")
+    if raw:
+        symbols = [part.strip().upper() for part in raw.split(",") if part.strip()]
+        if symbols:
+            return symbols
+    return list(_DEFAULT_WATCHLIST)
+
+
+def _dedupe_symbols(symbols: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for symbol in symbols:
+        normalized = symbol.strip().upper()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        out.append(normalized)
+    return out
+
+
 def _resolve_watchlist(holdings: list[dict[str, Any]], scope_watchlist: Any) -> list[str]:
     if isinstance(scope_watchlist, list) and scope_watchlist:
-        return [str(s).strip().upper() for s in scope_watchlist if s]
-    symbols: list[str] = []
-    seen: set[str] = set()
-    for h in holdings:
-        sym = (h.get("symbol") or "").strip().upper()
-        if sym and sym not in seen:
-            seen.add(sym)
-            symbols.append(sym)
-    if symbols:
-        return symbols
-    return ["BTC", "ETH"]  # sensible default when nothing else is known
+        return _dedupe_symbols([str(s) for s in scope_watchlist if s])
+
+    holding_symbols = _dedupe_symbols([
+        str(h.get("symbol") or "")
+        for h in holdings
+    ])
+    fallback_symbols = _default_watchlist()
+    if holding_symbols:
+        return _dedupe_symbols(holding_symbols + fallback_symbols)
+    return _dedupe_symbols(fallback_symbols)
 
 
 @router.post("/analyze")

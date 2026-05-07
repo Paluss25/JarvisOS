@@ -41,6 +41,98 @@ def _text(s: str) -> dict:
     return {"content": [{"type": "text", "text": str(s)}]}
 
 
+_WORKER_SUB_AGENT_ALLOWLIST = {
+    "finance": {
+        "ynab",
+        "btc-fiscal",
+        "fiscal-730",
+        "categorization",
+        "email-transaction-extraction",
+        "reconciliation",
+        "merchant",
+    },
+    "cost": {
+        "ai-cost",
+        "power-cost",
+        "budget-control",
+        "forecast",
+        "subscription-tracker",
+        "cashflow-forecast",
+        "tax-withholding",
+        "roi",
+    },
+    "market": {
+        "market-data",
+        "market-quotes",
+        "market-news",
+        "macro-indicators",
+        "risk",
+        "strategy",
+        "journal",
+        "position-sizing",
+    },
+    "strategy": {
+        "investment-research",
+        "macro-scenario",
+        "correlation-engine",
+        "rebalancing-advisor",
+        "opportunity-scanner",
+    },
+}
+
+_WORKER_DEFAULT_SUB_AGENTS = {
+    "finance": "ynab",
+    "cost": "ai-cost",
+    "market": "market-quotes",
+    "strategy": "investment-research",
+}
+
+_WORKER_SUB_AGENT_ALIASES = {
+    "finance": {
+        "finance-analyzer": "ynab",
+        "ynab-finance": "ynab",
+        "ynab-categorization": "categorization",
+        "btc-fiscal-analysis": "btc-fiscal",
+        "fiscal-730-agent": "fiscal-730",
+        "finance-reconciliation": "reconciliation",
+        "merchant-resolution": "merchant",
+    },
+    "cost": {
+        "cost-analyzer": "ai-cost",
+        "roi-procurement": "roi",
+    },
+    "market": {
+        "market-analyzer": "market-data",
+        "polymarket-market-data": "market-data",
+        "polymarket-risk": "risk",
+        "polymarket-position-sizing": "position-sizing",
+        "polymarket-strategy": "strategy",
+        "polymarket-trade-journal": "journal",
+    },
+}
+
+
+def _resolve_worker_sub_agent(runtime: str, sub_agent: str) -> tuple[str | None, str | None]:
+    """Return the mounted worker route for a runtime/sub-agent pair."""
+    if runtime not in _WORKER_SUB_AGENT_ALLOWLIST:
+        return None, "runtime must be one of: finance, cost, market, strategy"
+
+    target = (sub_agent or _WORKER_DEFAULT_SUB_AGENTS[runtime]).strip()
+    target = _WORKER_SUB_AGENT_ALIASES.get(runtime, {}).get(target, target)
+    if target not in _WORKER_SUB_AGENT_ALLOWLIST[runtime]:
+        allowed = sorted(
+            _WORKER_SUB_AGENT_ALLOWLIST[runtime]
+            | set(_WORKER_SUB_AGENT_ALIASES.get(runtime, {}))
+        )
+        return (
+            None,
+            f"sub_agent '{sub_agent or target}' is not allowed for runtime '{runtime}'. "
+            f"Allowed: {allowed}",
+        )
+
+    return target, None
+
+
 try:
     from claude_agent_sdk import create_sdk_mcp_server, tool as sdk_tool
     _SDK_AVAILABLE = True
@@ -210,27 +302,9 @@ def create_cfo_mcp_server(workspace_path: Path, redis_a2a=None):
                 f"Set CFO_{runtime.upper()}_WORKERS_URL in the environment to enable it."
             )
 
-        # Default + allowlisted sub-agent names per runtime — strict slug allowlist
-        # to prevent path/query injection via the sub_agent argument.
-        sub_agent_allowlist = {
-            "finance":  {"finance-analyzer", "email-transaction-extraction"},
-            "cost":     {"cost-analyzer"},
-            "market":   {"market-analyzer"},
-            "strategy": {"investment-research", "macro-scenario", "correlation-engine",
-                         "rebalancing-advisor", "opportunity-scanner"},
-        }
-        default_sub_agents = {
-            "finance":  "finance-analyzer",
-            "cost":     "cost-analyzer",
-            "market":   "market-analyzer",
-            "strategy": "investment-research",
-        }
-        target = sub_agent if sub_agent else default_sub_agents[runtime]
-        if target not in sub_agent_allowlist[runtime]:
-            return _text(
-                f"sub_agent '{target}' is not allowed for runtime '{runtime}'. "
-                f"Allowed: {sorted(sub_agent_allowlist[runtime])}"
-            )
+        target, error = _resolve_worker_sub_agent(runtime, sub_agent)
+        if error:
+            return _text(error)
         url = f"{base_url}/{target}/analyze"
 
         # Per-runtime timeout: strategy sub-agents do heavy LLM synthesis
