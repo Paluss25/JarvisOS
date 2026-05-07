@@ -62,6 +62,7 @@ RUN pip install /tmp/mailctl
 
 # Source code
 COPY src/ ./src/
+COPY plugins/ ./plugins/
 COPY agents.yaml .
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 COPY scripts/ ./scripts/
