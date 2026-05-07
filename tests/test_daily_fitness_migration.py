@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "007_daily_fitness_fit.sql"
 ACTIVITY_MIGRATION = ROOT / "migrations" / "008_recovery_metrics_activity.sql"
 WHOOP_MIGRATION = ROOT / "migrations" / "010_whoop_sync.sql"
+GARMIN_BRIDGE_MIGRATION = ROOT / "migrations" / "011_garmin_recovery_observation_bridge.sql"
 
 
 def test_daily_fitness_migration_creates_raw_tables_and_enriched_view():
@@ -72,3 +73,15 @@ def test_whoop_migration_creates_raw_observations_and_comparison_view():
     assert "source = 'whoop_api_v2'" in sql
     assert "major_delta" in sql
     assert "to_regrole('drhouse')" in sql
+
+
+def test_garmin_bridge_migration_mirrors_manual_recovery_metrics():
+    sql = GARMIN_BRIDGE_MIGRATION.read_text(encoding="utf-8")
+
+    assert "sync_garmin_recovery_observation" in sql
+    assert "AFTER INSERT OR UPDATE" in sql
+    assert "ON recovery_metrics" in sql
+    assert "'garmin_fit_daily'" in sql
+    assert "COALESCE(NEW.source, '') = 'whoop_api_v2'" in sql
+    assert "ON CONFLICT (date, user_id, source) DO UPDATE" in sql
+    assert "SELECT sync_garmin_recovery_observation_existing()" in sql
