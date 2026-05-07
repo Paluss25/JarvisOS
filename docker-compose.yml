@@ -67,7 +67,7 @@ services:
       DRHOUSE_CLAUDE_THINKING: "false"
       NUTRITION_CLAUDE_THINKING: "false"
       MAILCTL_CONFIG_DIR: "/home/paluss/docker/agents"
-      MAILCTL_SORTING_RULES_PATH: "/app/src/agents/cos/sorting_rules.yaml"
+      MAILCTL_SORTING_RULES_PATH: "/app/workspace/mt/sorting_rules.yaml"
     labels:
       # Jarvis API — jarvis.prova9x.com
       - "traefik.enable=true"
@@ -90,7 +90,6 @@ services:
       - /home/paluss/docker/.env:/app/.env:ro
       - /home/paluss/docker/.env:/home/paluss/docker/.env:rw
       - /home/paluss/docker/agents:/home/paluss/docker/agents:ro
-      - /home/paluss/docker/compose/jarvisOS/src/agents/cos/sorting_rules.yaml:/app/src/agents/cos/sorting_rules.yaml:ro
       - /home/paluss/Brains/HomeLab/operations/runbooks/jarvios:/app/runbooks:rw
       - /home/paluss/docker/compose/jarvisOS/var/audit:/app/var/audit:rw
       - /home/paluss/docker/compose/jarvisOS/memory/schemas:/app/memory/schemas:ro
