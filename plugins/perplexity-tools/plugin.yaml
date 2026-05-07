@@ -1,0 +1,7 @@
+name: perplexity-tools
+version: 1
+entrypoint: plugin.py
+tools:
+  - perplexity_search
+allowed_agents:
+  - ceo

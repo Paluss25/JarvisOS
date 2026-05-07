@@ -66,6 +66,7 @@ _UNIT_TEST_FILES = {
     "test_plugin_client_integration.py",
     "test_plugin_registry.py",
     "test_plugin_tool_spec.py",
+    "test_perplexity_tools_plugin.py",
     "test_memory_box_tools_plugin.py",
     "test_redaction_engine.py",
     "test_report_issue_tools_plugin.py",
