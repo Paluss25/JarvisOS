@@ -242,6 +242,9 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         # sport DB — training_plan
         "intensity": ("planned_intensity", "training_plan"),
         "intensity_level": ("planned_intensity", "training_plan"),
+        # sport DB — recovery/sleep views
+        "sleep_total_min": ("sleep_duration_min", "daily_fitness_enriched"),
+        "total_sleep_min": ("sleep_duration_min", "daily_fitness_enriched"),
         # nutrition DB — nutrition_goals (no _g suffix on goal targets)
         "target_protein_g": ("target_protein", "nutrition_goals"),
         "target_carbs_g": ("target_carbs", "nutrition_goals"),
@@ -279,7 +282,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "  activity_fit_files: id, activity_id, user_id, source_path, file_sha256, manufacturer, product, serial_number, time_created, imported_at, raw_summary_json. "
         "  activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT session/lap/record/field data linked by activity_id and fit_file_id. "
         "  daily_fit_files, daily_fit_fields, daily_wellness_records, daily_stress_records, daily_respiration_records, daily_sleep_levels, daily_hrv_values, daily_skin_temp_overnight: Garmin daily fitness FIT data linked by date and user_id. "
-        "  daily_fitness_enriched (VIEW — use for daily recovery/sleep/HRV queries): date, user_id, daily_fit_file_count, body_battery_am, body_battery_pm, stress_avg, stress_max, hrv_overnight_avg, hrv_status, sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, rhr_overnight, steps, distance_km, active_kcal, active_min, data_quality, min_wellness_hr, avg_wellness_hr, skin_average_deviation_c, skin_average_7_day_deviation_c, skin_nightly_value_c. CRITICAL: the HRV column is hrv_overnight_avg — NEVER use hrv_overnight (does not exist), NEVER use hrv_overnight_ms, NEVER use hrv_overnight_status. Status column is hrv_status. rhr_overnight exists. Always alias hrv_overnight_avg in SELECT. "
+        "  daily_fitness_enriched (VIEW — use for daily recovery/sleep/HRV queries): date, user_id, daily_fit_file_count, body_battery_am, body_battery_pm, stress_avg, stress_max, hrv_overnight_avg, hrv_status, sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, rhr_overnight, steps, distance_km, active_kcal, active_min, data_quality, min_wellness_hr, avg_wellness_hr, skin_average_deviation_c, skin_average_7_day_deviation_c, skin_nightly_value_c. CRITICAL: the HRV column is hrv_overnight_avg — NEVER use hrv_overnight (does not exist), NEVER use hrv_overnight_ms, NEVER use hrv_overnight_status. Sleep duration column is sleep_duration_min — NEVER use sleep_total_min or total_sleep_min. Status column is hrv_status. rhr_overnight exists. Always alias hrv_overnight_avg in SELECT. "
         "Only SELECT statements are permitted — DrHouse has read-only access to both databases.",
         {
             "type": "object",
