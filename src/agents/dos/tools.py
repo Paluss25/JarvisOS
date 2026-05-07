@@ -4,20 +4,21 @@ Tools:
   daily_log          — Append entry to today's memory log
   memory_search      — Text search across MEMORY.md + memory/*.md
   memory_get         — Read a specific memory file from workspace
-  sport_query          — Arbitrary SELECT queries against sport_metrics PostgreSQL DB
-  sport_execute        — INSERT/UPDATE/DELETE operations on sport_metrics
-  sport_ddl            — CREATE/ALTER schema changes on sport_metrics
+  sport_query          — Arbitrary SELECT queries against sport PostgreSQL DB
+  sport_execute        — INSERT/UPDATE/DELETE operations on sport
+  sport_ddl            — CREATE/ALTER schema changes on sport
   get_activities       — Typed: activities by date range + optional type filter
   get_body_measurements— Typed: body measurements by date range
   get_strength_sets    — Typed: strength sets by date range + optional exercise filter
   get_weekly_summaries — Typed: weekly summaries by date range
-  nutrition_query      — Arbitrary SELECT queries against nutrition_data PostgreSQL DB
-  nutrition_execute    — INSERT/UPDATE/DELETE operations on nutrition_data
-  nutrition_ddl        — CREATE/ALTER schema changes on nutrition_data
+  nutrition_query      — Arbitrary SELECT queries against health PostgreSQL DB
+  nutrition_execute    — INSERT/UPDATE/DELETE operations on health
+  nutrition_ddl        — CREATE/ALTER schema changes on health
   run_rules_engine     — Deterministic rules evaluation (load, adherence, plateau)
   send_message       — Send a message to another agent via Redis pub/sub
   strava_list_recent — List recent Strava activities
   strava_download    — Download + store a Strava activity
+  whoop_sync         — Import WHOOP API v2 recovery/sleep/cycle/workout data
   cron_create/list/update/delete — Scheduled task management
 """
 
@@ -89,7 +90,7 @@ def _coerce_params(params: list | None) -> list | None:
 
 
 async def _pg_execute(sql: str, params: list | None = None) -> list[dict]:
-    """Run a query against sport_metrics and return rows as list of dicts."""
+    """Run a query against sport and return rows as list of dicts."""
     import asyncpg
     url = os.environ.get("SPORT_POSTGRES_URL", "")
     if not url:
@@ -119,7 +120,7 @@ async def _pg_run(sql: str, params: list | None = None) -> str:
 
 
 async def _nutrition_execute(sql: str, params: list | None = None) -> list[dict]:
-    """Run a query against nutrition_data and return rows as list of dicts."""
+    """Run a query against health and return rows as list of dicts."""
     import asyncpg
     url = os.environ.get("NUTRITION_POSTGRES_URL", "")
     if not url:
@@ -134,7 +135,7 @@ async def _nutrition_execute(sql: str, params: list | None = None) -> list[dict]
 
 
 async def _nutrition_run(sql: str, params: list | None = None) -> str:
-    """Run a DML/DDL statement against nutrition_data and return a status string."""
+    """Run a DML/DDL statement against health and return a status string."""
     import asyncpg
     url = os.environ.get("NUTRITION_POSTGRES_URL", "")
     if not url:
@@ -178,7 +179,7 @@ def _load_thresholds(workspace_path: Path) -> dict:
 
 
 async def _evaluate_rules(check_type: str, workspace_path: Path) -> dict:
-    """Run deterministic rules against current sport_metrics data."""
+    """Run deterministic rules against current sport data."""
     th = _load_thresholds(workspace_path)
     flags: list[str] = []
     reason_codes: list[str] = []
@@ -439,7 +440,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "sport_query",
-        "Execute a SELECT query against the sport_metrics PostgreSQL database. "
+        "Execute a SELECT query against the sport PostgreSQL database. "
         "  activities: id, source, type, date (DATE), duration_min, distance_km, avg_hr, max_hr, calories, load_score, elevation_gain_m, avg_cadence, suffer_score, strava_activity_id. "
         "  body_measurements: id, date (DATE), weight_kg, bmi, body_fat_pct, muscle_rate_pct, fat_free_weight_kg, subcutaneous_fat_pct, visceral_fat, body_water_pct, skeletal_muscle_pct, muscle_mass_kg, bone_mass_kg, protein_pct, bmr_kcal, body_age. "
         "  waist_measurements: id, date (DATE), waist_cm, notes, user_id. "
@@ -452,6 +453,9 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         "  activity_metrics_enriched: read view with Strava values, FIT values, and canonical_* metrics. "
         "  daily_fit_files, daily_fit_fields, daily_wellness_records, daily_stress_records, daily_respiration_records, daily_sleep_levels, daily_hrv_values, daily_skin_temp_overnight: Garmin daily fitness FIT import tables linked by date and user_id. "
         "  daily_fitness_enriched: read view combining recovery_metrics with imported daily FIT wellness/sleep/HRV/skin-temperature data. "
+        "  whoop_recoveries, whoop_sleeps, whoop_cycles, whoop_workouts: raw WHOOP API v2 imports. "
+        "  daily_recovery_observations: normalized daily recovery metrics by source (garmin_fit_daily, whoop_api_v2). "
+        "  daily_recovery_source_comparison: read view comparing Garmin vs WHOOP by date during validation. "
         "Returns rows as JSON. For meal and nutrition data use nutrition_query instead.",
         {"sql": str, "params": {"type": "array", "items": {}, "default": []}},
     )
@@ -478,7 +482,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "sport_execute",
-        "Execute an INSERT, UPDATE, or DELETE on the sport_metrics database. "
+        "Execute an INSERT, UPDATE, or DELETE on the sport database. "
         "Use for logging activities, meals, measurements. Returns affected row count.",
         {"sql": str, "params": {"type": "array", "items": {}, "default": []}},
     )
@@ -533,7 +537,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "nutrition_query",
-        "Execute a SELECT query against the nutrition_data PostgreSQL database. "
+        "Execute a SELECT query against the health PostgreSQL database. "
         "  meals: id, date (DATE), meal_type, description, calories_est, protein_g, carbs_g, fat_g, confidence_score, image_ref, notes, created_at, user_id. "
         "  food_library: id, name, brand, category, serving_size, serving_unit, kcal_per_100, protein_per_100, carbs_per_100, fat_per_100, fiber_per_100, sugar_per_100. "
         "  meal_items: item_id (UUID), meal_id, food_name, canonical_name, portion_g, calories, protein, carbs, fat, match_confidence. "
@@ -565,7 +569,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "nutrition_execute",
-        "Execute an INSERT, UPDATE, or DELETE on the nutrition_data database. "
+        "Execute an INSERT, UPDATE, or DELETE on the health database. "
         "Use for logging meals and any custom nutrition tables. Returns affected row count.",
         {"sql": str, "params": {"type": "array", "items": {}, "default": []}},
     )
@@ -792,11 +796,11 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
     @sdk_tool(
         "strava_download",
         "Download a specific Strava activity by its numeric ID. "
-        "Fetches summary + raw sensor streams, saves to sport_metrics PostgreSQL (activities table) "
+        "Fetches summary + raw sensor streams, saves to sport PostgreSQL (activities table) "
         "and exports a Parquet file to workspace/knowledge/strava_data/. "
         "Handles token refresh automatically. "
         "activity_id: numeric Strava activity ID (find it in the Strava URL). "
-        "user_id: athlete user_id in sport_metrics (default 1 = Paluss).",
+        "user_id: athlete user_id in sport (default 1 = Paluss).",
         {"activity_id": int, "user_id": int},
     )
     async def strava_download(args: dict) -> dict:
@@ -827,7 +831,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
 
     @sdk_tool(
         "garmin_fit_import",
-        "Import a Garmin FIT file and link it to an existing sport_metrics activity. "
+        "Import a Garmin FIT file and link it to an existing sport activity. "
         "Provide file_path plus either activity_id or strava_activity_id. "
         "Stores FIT sessions, laps, records, and generic fields in dedicated tables. "
         "Duplicate metrics are preserved; use activity_metrics_enriched for canonical analysis.",
@@ -925,6 +929,35 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         except Exception as exc:
             logger.error("garmin_fitness_import: error — %s", exc)
             return {"content": [{"type": "text", "text": f"Fitness import error: {exc}"}], "is_error": True}
+
+    @sdk_tool(
+        "whoop_sync",
+        "Sync WHOOP API v2 data for a date or date range into sport. "
+        "During the first validation period, use this after Garmin daily import or when "
+        "the user sends Garmin recovery photos/screenshots. It stores raw WHOOP tables, "
+        "upserts daily_recovery_observations with source='whoop_api_v2', imports WHOOP "
+        "workouts as activities, and enables source comparison through "
+        "daily_recovery_source_comparison. date_from/date_to are ISO dates; omit date_to "
+        "for a single day.",
+        {"date_from": str, "date_to": str, "user_id": int},
+    )
+    async def whoop_sync(args: dict) -> dict:
+        args = _parse_args(args)
+        try:
+            from datetime import date as date_type
+            from agents.dos.whoop_sync import sync_whoop_data
+
+            today = date_type.today()
+            date_from = date_type.fromisoformat((args.get("date_from") or today.isoformat()).strip())
+            date_to = date_type.fromisoformat((args.get("date_to") or date_from.isoformat()).strip())
+            if date_to < date_from:
+                return {"content": [{"type": "text", "text": "date_to must be >= date_from."}], "is_error": True}
+            user_id = int(args.get("user_id") or os.environ.get("SPORT_USER_ID", "1"))
+            result = await sync_whoop_data(date_from=date_from, date_to=date_to, user_id=user_id)
+            return {"content": [{"type": "text", "text": json.dumps(result, default=str, indent=2)}]}
+        except Exception as exc:
+            logger.error("whoop_sync: error — %s", exc)
+            return {"content": [{"type": "text", "text": f"WHOOP sync error: {exc}"}], "is_error": True}
 
     # --- Cron tools ---------------------------------------------------------
 
@@ -1044,6 +1077,7 @@ def create_chief_mcp_server(workspace_path: Path, redis_a2a=None):
         nutrition_query, nutrition_execute, nutrition_ddl,
         run_rules_engine,
         strava_list_recent, strava_download, garmin_fit_import, garmin_fitness_import,
+        whoop_sync,
         cron_create, cron_list, cron_update, cron_delete, report_issue,
     ]
     if send_message is not None:

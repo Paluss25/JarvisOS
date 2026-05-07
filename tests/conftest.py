@@ -32,6 +32,7 @@ _UNIT_TEST_FILES = {
     "test_don_config.py",
     "test_don_fast_actions.py",
     "test_dos_daily_fitness_import.py",
+    "test_dos_whoop_sync.py",
     "test_drhouse_router.py",
     "test_eia_digest.py",
     "test_email_cli_config.py",

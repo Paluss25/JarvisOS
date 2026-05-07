@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "007_daily_fitness_fit.sql"
 ACTIVITY_MIGRATION = ROOT / "migrations" / "008_recovery_metrics_activity.sql"
+WHOOP_MIGRATION = ROOT / "migrations" / "010_whoop_sync.sql"
 
 
 def test_daily_fitness_migration_creates_raw_tables_and_enriched_view():
@@ -49,4 +50,25 @@ def test_recovery_metrics_activity_migration_adds_daily_activity_rollups():
     assert "ADD COLUMN IF NOT EXISTS" in sql
     assert "COALESCE(r.steps" in sql
     assert "latest_active_min" in sql
+    assert "to_regrole('drhouse')" in sql
+
+
+def test_whoop_migration_creates_raw_observations_and_comparison_view():
+    sql = WHOOP_MIGRATION.read_text(encoding="utf-8")
+
+    for name in (
+        "whoop_sync_runs",
+        "whoop_recoveries",
+        "whoop_sleeps",
+        "whoop_cycles",
+        "whoop_workouts",
+        "daily_recovery_observations",
+        "daily_recovery_source_comparison",
+    ):
+        assert name in sql
+
+    assert "PRIMARY KEY (date, user_id, source)" in sql
+    assert "source = 'garmin_fit_daily'" in sql
+    assert "source = 'whoop_api_v2'" in sql
+    assert "major_delta" in sql
     assert "to_regrole('drhouse')" in sql

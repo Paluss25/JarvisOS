@@ -88,6 +88,7 @@ services:
       - /home/paluss/docker/appdata/jarvios-shared:/app/shared
       - /home/paluss/docker/appdata/jarvios-dot-claude:/root/.claude
       - /home/paluss/docker/.env:/app/.env:ro
+      - /home/paluss/docker/.env:/home/paluss/docker/.env:rw
       - /home/paluss/docker/agents:/home/paluss/docker/agents:ro
       - /home/paluss/docker/compose/jarvisOS/src/agents/cos/sorting_rules.yaml:/app/src/agents/cos/sorting_rules.yaml:ro
       - /home/paluss/Brains/HomeLab/operations/runbooks/jarvios:/app/runbooks:rw

@@ -5,6 +5,15 @@ from pathlib import Path
 from agent_runner.config import AgentConfig
 
 
+WHOOP_VALIDATION_ROUTING = (
+    "WHOOP validation period: when the user asks to sync WHOOP data, or sends Garmin "
+    "recovery/sleep screenshots/photos for a dated day, call whoop_sync for the same "
+    "date/date range after any Garmin import. Do not treat WHOOP as canonical yet: "
+    "compare Garmin vs WHOOP through daily_recovery_source_comparison and report major "
+    "deltas instead of overwriting Garmin conclusions."
+)
+
+
 ROGER_BUILTIN_CRONS = [
     {
         "name": "morning_check",
@@ -15,6 +24,8 @@ ROGER_BUILTIN_CRONS = [
             "2. Today's planned training session (check training_plan table)\n"
             "3. Any pending body measurements (last measurement date)\n"
             "Direct, no fluff. "
+            "If WHOOP data exists, use daily_recovery_source_comparison for validation context; "
+            "do not promote WHOOP over Garmin automatically. "
             "Send the result to DrHouse via send_message(to='coh', message=<your briefing>). "
             "Also forward a copy to Timothy (CIO) via send_message(to='cio', message=<your briefing>). "        ),
         "session_id": "heartbeat-morning",
@@ -90,7 +101,7 @@ def build_dos_config(workspace_root: Path = Path("/app/workspace/dos")) -> Agent
         telegram_token_env="",
         telegram_chat_id_env="",
         domains=["sport", "fitness"],
-        capabilities=["sport-analysis", "training-planning", "body-composition", "strava-integration"],
+        capabilities=["sport-analysis", "training-planning", "body-composition", "strava-integration", "whoop-validation"],
         model_env="CLAUDE_MODEL",
         fallback_model_env="CLAUDE_FALLBACK_MODEL",
         budget_env="CLAUDE_MAX_BUDGET_USD",
@@ -102,6 +113,10 @@ def build_dos_config(workspace_root: Path = Path("/app/workspace/dos")) -> Agent
         memory_backend="filesystem",
         mcp_server_factory=create_chief_mcp_server,
         builtin_crons=ROGER_BUILTIN_CRONS,
+        default_image_caption=(
+            "Analyze this image. "
+            + WHOOP_VALIDATION_ROUTING
+        ),
         allowed_tools=[
             "Bash", "Read", "Write", "Edit",
             "WebSearch", "WebFetch", "Glob", "Grep",
