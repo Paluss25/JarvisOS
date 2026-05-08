@@ -34,6 +34,17 @@ def _looks_like_icao(token: str) -> bool:
     return token.isupper() or token.islower()
 
 
+def _normalize_icao(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().upper()
+    if not normalized:
+        return None
+    if not ICAO_RE.match(normalized):
+        raise ValueError(f"Invalid ICAO: {value}")
+    return normalized
+
+
 @dataclass(frozen=True)
 class ParsedFlightCommand:
     command: str
@@ -155,7 +166,7 @@ class FlightExposureService:
     async def _open_flight(self) -> dict[str, Any] | None:
         row = await self.sport_conn.fetchrow(
             """
-            SELECT id, source_ref, takeoff_at, aircraft_type, flight_type, experimental
+            SELECT id, source_ref, takeoff_at, landing_at, aircraft_type, flight_type, experimental, status
             FROM flight_exposures
             WHERE user_id = $1 AND status = 'open'
             ORDER BY takeoff_at DESC
@@ -163,6 +174,32 @@ class FlightExposureService:
             """,
             self.sport_user_id,
         )
+        return dict(row) if row else None
+
+    async def _latest_flight(self, flight_id: str | None = None) -> dict[str, Any] | None:
+        if flight_id:
+            row = await self.sport_conn.fetchrow(
+                """
+                SELECT id, source_ref, takeoff_at, landing_at, aircraft_type, flight_type, experimental, status
+                FROM flight_exposures
+                WHERE user_id = $1 AND id::text LIKE $2::text || '%'
+                ORDER BY COALESCE(landing_at, takeoff_at) DESC
+                LIMIT 1
+                """,
+                self.sport_user_id,
+                flight_id.strip(),
+            )
+        else:
+            row = await self.sport_conn.fetchrow(
+                """
+                SELECT id, source_ref, takeoff_at, landing_at, aircraft_type, flight_type, experimental, status
+                FROM flight_exposures
+                WHERE user_id = $1
+                ORDER BY (status = 'open') DESC, COALESCE(landing_at, takeoff_at) DESC
+                LIMIT 1
+                """,
+                self.sport_user_id,
+            )
         return dict(row) if row else None
 
     async def takeoff(self, parsed: ParsedFlightCommand) -> dict[str, Any]:
@@ -334,6 +371,95 @@ class FlightExposureService:
             note,
         )
         return {"status": "cancelled", "sport_id": str(open_row["id"])}
+
+    async def update(
+        self,
+        *,
+        flight_id: str | None = None,
+        takeoff_icao: str | None = None,
+        landing_icao: str | None = None,
+        aircraft_type: str | None = None,
+        flight_type: str | None = None,
+        experimental: bool | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        target = await self._latest_flight(flight_id)
+        if not target:
+            return {"status": "error", "code": "flight_not_found"}
+
+        try:
+            takeoff_icao = _normalize_icao(takeoff_icao)
+            landing_icao = _normalize_icao(landing_icao)
+        except ValueError as exc:
+            return {"status": "error", "code": "invalid_icao", "message": str(exc)}
+
+        aircraft_type = aircraft_type.strip().upper() if aircraft_type and aircraft_type.strip() else None
+        flight_type = flight_type.strip() if flight_type and flight_type.strip() else None
+        note = note.strip() if note and note.strip() else None
+
+        updates = {
+            "takeoff_icao": takeoff_icao,
+            "landing_icao": landing_icao,
+            "aircraft_type": aircraft_type,
+            "flight_type": flight_type,
+            "experimental": experimental,
+            "note": note,
+        }
+        updated_fields = [key for key, value in updates.items() if key != "note" and value is not None]
+        if not updated_fields and note is None:
+            return {"status": "error", "code": "no_update_fields"}
+
+        if self.chro_conn is not None and target.get("source_ref"):
+            await self.chro_conn.fetchrow(
+                """
+                UPDATE chro.flight_activities
+                SET takeoff_icao = COALESCE($2::text, takeoff_icao),
+                    landing_icao = COALESCE($3::text, landing_icao),
+                    aircraft_type = COALESCE($4::text, aircraft_type),
+                    flight_type = COALESCE($5::text, flight_type),
+                    experimental = COALESCE($6::boolean, experimental),
+                    notes = CASE
+                        WHEN $7::text IS NULL THEN notes
+                        ELSE CONCAT_WS(E'\n', notes, $7::text)
+                    END,
+                    updated_at = now()
+                WHERE id = $1
+                RETURNING id
+                """,
+                target["source_ref"],
+                takeoff_icao,
+                landing_icao,
+                aircraft_type,
+                flight_type,
+                experimental,
+                note,
+            )
+
+        await self.sport_conn.fetchrow(
+            """
+            UPDATE flight_exposures
+            SET takeoff_icao = COALESCE($2::text, takeoff_icao),
+                landing_icao = COALESCE($3::text, landing_icao),
+                aircraft_type = COALESCE($4::text, aircraft_type),
+                flight_type = COALESCE($5::text, flight_type),
+                experimental = COALESCE($6::boolean, experimental),
+                notes = CASE
+                    WHEN $7::text IS NULL THEN notes
+                    ELSE CONCAT_WS(E'\n', notes, $7::text)
+                END,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING id
+            """,
+            target["id"],
+            takeoff_icao,
+            landing_icao,
+            aircraft_type,
+            flight_type,
+            experimental,
+            note,
+        )
+        return {"status": "updated", "sport_id": str(target["id"]), "updated_fields": updated_fields}
 
 
 async def build_whoop_impact_report(

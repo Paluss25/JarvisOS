@@ -13,8 +13,9 @@ ROME = zoneinfo.ZoneInfo("Europe/Rome")
 
 
 class FakeConn:
-    def __init__(self, *, open_row=None, name="conn", events=None, fail_sport_insert=False):
+    def __init__(self, *, open_row=None, latest_row=None, name="conn", events=None, fail_sport_insert=False):
         self.open_row = open_row
+        self.latest_row = latest_row
         self.name = name
         self.events = events
         self.fail_sport_insert = fail_sport_insert
@@ -24,8 +25,10 @@ class FakeConn:
     async def _fetchrow(self, sql, *args):
         if self.events is not None:
             self.events.append((self.name, sql))
-        if "FROM flight_exposures" in sql and "status = 'open'" in sql:
+        if "FROM flight_exposures" in sql and "WHERE user_id = $1 AND status = 'open'" in sql:
             return self.open_row
+        if "FROM flight_exposures" in sql and "ORDER BY" in sql and "LIMIT 1" in sql:
+            return self.latest_row
         if "INSERT INTO flight_exposures" in sql:
             if self.fail_sport_insert:
                 raise RuntimeError("sport insert failed")
@@ -272,6 +275,40 @@ async def test_cancel_marks_open_flight_cancelled():
     assert "$2::text" in chro_cancel_sql
 
 
+@pytest.mark.asyncio
+async def test_update_corrects_latest_flight_in_sport_and_chro():
+    latest_row = {
+        "id": "sport-flight-1",
+        "source_ref": "chro-flight-1",
+        "takeoff_at": dt.datetime(2026, 5, 7, 11, 30, tzinfo=ROME),
+        "landing_at": dt.datetime(2026, 5, 7, 12, 30, tzinfo=ROME),
+        "status": "closed",
+    }
+    sport = FakeConn(latest_row=latest_row)
+    chro = FakeConn()
+    service = FlightExposureService(
+        sport_conn=sport,
+        chro_conn=chro,
+        sport_user_id=1,
+        chro_user_id="75f9",
+    )
+
+    result = await service.update(takeoff_icao="liln", flight_type="Demo Flight per Presidente ETPS")
+
+    assert result["status"] == "updated"
+    assert result["sport_id"] == "sport-flight-1"
+    assert result["updated_fields"] == ["takeoff_icao", "flight_type"]
+
+    chro_update = chro.fetchrow.await_args.args
+    sport_update = sport.fetchrow.await_args.args
+    assert "UPDATE chro.flight_activities" in chro_update[0]
+    assert "UPDATE flight_exposures" in sport_update[0]
+    assert chro_update[2] == "LILN"
+    assert sport_update[2] == "LILN"
+    assert chro_update[5] == "Demo Flight per Presidente ETPS"
+    assert sport_update[5] == "Demo Flight per Presidente ETPS"
+
+
 def _tool_names(server):
     return {entry.name for entry in server._tools}
 
@@ -286,6 +323,7 @@ def test_coh_registers_flight_tools(tmp_path):
     assert "flight_landing" in names
     assert "flight_status" in names
     assert "flight_cancel" in names
+    assert "flight_update" in names
     assert "flight_report" in names
 
 

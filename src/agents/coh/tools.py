@@ -945,6 +945,42 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
                 await chro_conn.close()
 
     @sdk_tool(
+        "flight_update",
+        "Correct missing or wrong metadata on the open or latest flight exposure without cancelling it.",
+        {
+            "type": "object",
+            "properties": {
+                "flight_id": {"type": "string", "description": "Optional full or prefix sport flight id."},
+                "takeoff_icao": {"type": "string"},
+                "landing_icao": {"type": "string"},
+                "aircraft_type": {"type": "string"},
+                "flight_type": {"type": "string"},
+                "experimental": {"type": "boolean"},
+                "note": {"type": "string"},
+            },
+            "required": [],
+        },
+    )
+    async def flight_update(args: dict) -> dict:
+        args = _parse_args(args)
+        service, sport_conn, chro_conn = await _flight_service()
+        try:
+            result = await service.update(
+                flight_id=args.get("flight_id"),
+                takeoff_icao=args.get("takeoff_icao"),
+                landing_icao=args.get("landing_icao"),
+                aircraft_type=args.get("aircraft_type"),
+                flight_type=args.get("flight_type"),
+                experimental=args.get("experimental"),
+                note=args.get("note"),
+            )
+            return _text(json.dumps(result, default=str, ensure_ascii=False))
+        finally:
+            await sport_conn.close()
+            if chro_conn is not None:
+                await chro_conn.close()
+
+    @sdk_tool(
         "flight_report",
         "Return WHOOP-based flight impact report for a flight exposure.",
         {"type": "object", "properties": {"flight_id": {"type": "string"}}, "required": []},
@@ -983,7 +1019,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
                  get_meals, get_body_measurements, get_daily_nutrition,
                  get_nutrition_goals, get_recent_activities, get_training_plan, get_waist_measurements,
                  medical_query, lab_query, lab_anomalies, report_issue,
-                 flight_takeoff, flight_landing, flight_status, flight_cancel, flight_report]
+                 flight_takeoff, flight_landing, flight_status, flight_cancel, flight_update, flight_report]
     if send_message is not None:
         all_tools.append(send_message)
     # ----- send_telegram_message (originator-authored Telegram feedback) -----
