@@ -53,6 +53,7 @@ _UNIT_TEST_FILES = {
     "test_fatsecret.py",
     "test_flight_exposure_migration.py",
     "test_flight_exposure_parser.py",
+    "test_flight_exposure_report.py",
     "test_flight_exposure_service.py",
     "test_flight_exposure_telegram.py",
     "test_fusion.py",

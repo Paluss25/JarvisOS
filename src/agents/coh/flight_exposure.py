@@ -324,3 +324,50 @@ class FlightExposureService:
             note,
         )
         return {"status": "cancelled", "sport_id": str(open_row["id"])}
+
+
+async def build_whoop_impact_report(
+    conn: Any,
+    *,
+    flight_id: str,
+    flight_user_id: str,
+    whoop_user_id: int,
+) -> dict[str, Any]:
+    flight = await conn.fetchrow(
+        """
+        SELECT id, takeoff_at, landing_at, duration, aircraft_type, flight_type, experimental
+        FROM flight_exposures
+        WHERE id = $1 AND user_id = $2
+        """,
+        flight_id,
+        flight_user_id,
+    )
+    if not flight:
+        return {"status": "error", "code": "flight_not_found", "flight_id": flight_id}
+
+    observations = await conn.fetch(
+        """
+        SELECT date, source, recovery_score, hrv_overnight_avg, rhr_overnight,
+               sleep_duration_min, sleep_score, strain
+        FROM daily_recovery_observations
+        WHERE user_id = $1
+          AND date BETWEEN ($2::timestamptz AT TIME ZONE 'Europe/Rome')::date
+                      AND (($2::timestamptz AT TIME ZONE 'Europe/Rome')::date + INTERVAL '2 days')::date
+          AND source = 'whoop_api_v2'
+        ORDER BY date
+        """,
+        whoop_user_id,
+        flight["takeoff_at"],
+    )
+    if not observations:
+        return {
+            "status": "insufficient_data",
+            "flight_id": flight_id,
+            "reason": "missing WHOOP recovery observations for flight day/D+1",
+        }
+    return {
+        "status": "ok",
+        "flight_id": flight_id,
+        "observations": [dict(row) for row in observations],
+        "label": "no_clear_effect",
+    }
