@@ -50,6 +50,7 @@ _HUMAN_RES_TABLES = (
     "pension_extracts",
     "expense_items",
     "business_trips",
+    "flight_activities",
     "hr_audit_log",
 )
 
@@ -997,18 +998,25 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             "period_from", "period_to", "destination", "country", "project",
             "aircraft", "purpose", "notes", "raw_json", "source_file",
         },
+        "flight_activities": {
+            "user_id", "takeoff_time", "landing_time", "takeoff_icao",
+            "landing_icao", "flight_duration", "flight_type",
+            "experimental", "aircraft_type", "status", "notes",
+            "source", "raw_command",
+        },
     }
     _DATE_COLUMNS = {
         "period_from", "period_to", "snapshot_date", "expense_date", "document_date",
     }
-    _UUID_COLUMNS = {"trip_id", "payslip_id"}
+    _DATETIME_COLUMNS = {"takeoff_time", "landing_time"}
+    _UUID_COLUMNS = {"trip_id", "payslip_id", "user_id"}
     _JSON_COLUMNS = {"raw_json"}
 
     @sdk_tool(
         "write_db",
         "Unified write tool for human_res.* tables — performs INSERT, UPDATE, or DELETE on a single row. "
         "action: 'insert' | 'update' | 'delete'. "
-        "table: payslips | leave_snapshots | pension_extracts | expense_items | business_trips. "
+        "table: payslips | leave_snapshots | pension_extracts | expense_items | business_trips | flight_activities. "
         "id: UUID of the row (REQUIRED for update and delete; optional for insert — when provided on insert, the row is upserted on id). "
         "fields: object {column: value} — REQUIRED for insert and update; ignored for delete. Only writable columns are accepted. "
         "Returns the affected row id and the operation performed. Auditable: every call writes a hr_audit_log entry.",
@@ -1071,6 +1079,10 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                 return None
             if col in _DATE_COLUMNS:
                 return _to_date(val)
+            if col in _DATETIME_COLUMNS:
+                if isinstance(val, _dt.datetime):
+                    return val
+                return _dt.datetime.fromisoformat(str(val).replace("Z", "+00:00"))
             if col in _UUID_COLUMNS:
                 return _to_uuid(val)
             if col in _JSON_COLUMNS:
