@@ -161,7 +161,7 @@ async def test_chro_write_db_coerces_flight_activity_uuid_and_datetimes(monkeypa
     })
 
     assert "OK action=insert table=flight_activities" in result["content"][0]["text"]
-    assert "INSERT INTO flight_activities" in captured["sql"]
+    assert "INSERT INTO chro.flight_activities" in captured["sql"]
     assert captured["args"][0] == uuid.UUID(user_id)
     assert captured["args"][1].isoformat() == "2026-05-07T11:30:00+02:00"
     assert captured["args"][2].isoformat() == "2026-05-07T12:30:00+02:00"

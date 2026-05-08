@@ -55,6 +55,11 @@ _HUMAN_RES_TABLES = (
 )
 
 
+_QUALIFIED_TABLES = {
+    "flight_activities": "chro.flight_activities",
+}
+
+
 def _normalize_chro_sql(sql: str) -> str:
     """Map legacy schema-qualified CHRO table names to current human_res search_path."""
     normalized = sql
@@ -66,6 +71,10 @@ def _normalize_chro_sql(sql: str) -> str:
             flags=re.IGNORECASE,
         )
     return normalized
+
+
+def _write_table_name(table: str) -> str:
+    return _QUALIFIED_TABLES.get(table, table)
 
 
 try:
@@ -1104,8 +1113,9 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             try:
                 async with conn.transaction():
                     if action == "delete":
+                        target_table = _write_table_name(table)
                         result = await conn.execute(
-                            f"DELETE FROM {table} WHERE id = $1",
+                            f"DELETE FROM {target_table} WHERE id = $1",
                             _to_uuid(row_id),
                         )
                         affected = int(result.split()[-1]) if result else 0
@@ -1116,7 +1126,8 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                             return {"content": [{"type": "text", "text": f"No writable columns in fields. Allowed: {sorted(whitelist)}. Rejected: {rejected}"}], "is_error": True}
                         cols = list(accepted.keys())
                         set_clause = ", ".join(f"{c}=${i+2}" for i, c in enumerate(cols))
-                        sql = f"UPDATE {table} SET {set_clause} WHERE id = $1 RETURNING id"
+                        target_table = _write_table_name(table)
+                        sql = f"UPDATE {target_table} SET {set_clause} WHERE id = $1 RETURNING id"
                         row = await conn.fetchrow(sql, _to_uuid(row_id), *[accepted[c] for c in cols])
                         if row is None:
                             return {"content": [{"type": "text", "text": f"No row in {table} with id={row_id}"}], "is_error": True}
@@ -1128,12 +1139,13 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                             return {"content": [{"type": "text", "text": f"No writable columns in fields. Allowed: {sorted(whitelist)}. Rejected: {rejected}"}], "is_error": True}
                         cols = list(accepted.keys())
                         placeholders = ", ".join(f"${i+1}" for i in range(len(cols)))
+                        target_table = _write_table_name(table)
                         if row_id:
                             cols_with_id = ["id"] + cols
                             placeholders_with_id = ", ".join(f"${i+1}" for i in range(len(cols_with_id)))
                             update_clause = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols)
                             sql = (
-                                f"INSERT INTO {table} ({', '.join(cols_with_id)}) "
+                                f"INSERT INTO {target_table} ({', '.join(cols_with_id)}) "
                                 f"VALUES ({placeholders_with_id}) "
                                 f"ON CONFLICT (id) DO UPDATE SET {update_clause} "
                                 f"RETURNING id"
@@ -1141,7 +1153,7 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
                             row = await conn.fetchrow(sql, _to_uuid(row_id), *[accepted[c] for c in cols])
                         else:
                             sql = (
-                                f"INSERT INTO {table} ({', '.join(cols)}) "
+                                f"INSERT INTO {target_table} ({', '.join(cols)}) "
                                 f"VALUES ({placeholders}) "
                                 f"RETURNING id"
                             )
