@@ -54,6 +54,7 @@ _UNIT_TEST_FILES = {
     "test_flight_exposure_migration.py",
     "test_flight_exposure_parser.py",
     "test_flight_exposure_service.py",
+    "test_flight_exposure_telegram.py",
     "test_fusion.py",
     "test_garmin_fit_migration.py",
     "test_ingest_gate.py",

@@ -1509,6 +1509,53 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 # ---------------------------------------------------------------------------
+# COH flight exposure shortcut commands
+# ---------------------------------------------------------------------------
+
+async def _cmd_decollo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """COH shortcut: /decollo [HH:MM] [ICAO] [aircraft] [flight type] [experimental yes/no]."""
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+    text = " ".join(context.args or [])
+    await _stream_to_agent(
+        update,
+        context,
+        f"Usa il tool flight_takeoff con text={text!r}. Rispondi in italiano con conferma sintetica.",
+    )
+
+
+async def _cmd_atterraggio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """COH shortcut: /atterraggio [HH:MM] [ICAO] [aircraft] [flight type] [experimental yes/no]."""
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+    text = " ".join(context.args or [])
+    await _stream_to_agent(
+        update,
+        context,
+        f"Usa il tool flight_landing con text={text!r}. Dopo la chiusura, segnala che la correlazione WHOOP sarà disponibile dopo sync D/D+1.",
+    )
+
+
+async def _cmd_volo_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """COH shortcut: /volo_status — show the open flight exposure, if present."""
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+    await _stream_to_agent(update, context, "Usa il tool flight_status e rispondi in italiano.")
+
+
+async def _cmd_volo_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """COH shortcut: /volo_cancel [reason] — cancel the open flight exposure."""
+    config = context.bot_data.get("config")
+    if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
+        return
+    reason = " ".join(context.args or [])
+    await _stream_to_agent(update, context, f"Usa il tool flight_cancel con reason={reason!r} e rispondi in italiano.")
+
+
+# ---------------------------------------------------------------------------
 # Roger-specific sport shortcut commands
 # ---------------------------------------------------------------------------
 
@@ -2147,6 +2194,12 @@ async def start_polling(agent: Any, session_manager: Any, config: Any, redis_a2a
                 app.add_handler(CommandHandler("listusers",   _cmd_listusers))
                 app.add_handler(CommandHandler("removeuser",  _cmd_removeuser))
 
+            if getattr(config, "id", "").lower() == "coh":
+                app.add_handler(CommandHandler("decollo",       _cmd_decollo))
+                app.add_handler(CommandHandler("atterraggio",   _cmd_atterraggio))
+                app.add_handler(CommandHandler("volo_status",   _cmd_volo_status))
+                app.add_handler(CommandHandler("volo_cancel",   _cmd_volo_cancel))
+
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
             app.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
             app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, _handle_voice))
@@ -2190,6 +2243,14 @@ async def start_polling(agent: Any, session_manager: Any, config: Any, redis_a2a
                     ("adduser",     "Admin: register a new user"),
                     ("listusers",   "Admin: list all users"),
                     ("removeuser",  "Admin: deactivate a user"),
+                ]
+
+            if getattr(config, "id", "").lower() == "coh":
+                _COMMANDS += [
+                    ("decollo",      "Registra decollo volo — /decollo 11:30 M-346 Handling Qualities"),
+                    ("atterraggio",  "Registra atterraggio volo — /atterraggio 12:30 LIRE"),
+                    ("volo_status",  "Mostra il volo aperto"),
+                    ("volo_cancel",  "Annulla il volo aperto"),
                 ]
 
             async with app:
@@ -2408,6 +2469,12 @@ async def start_webhook(
         app.add_handler(CommandHandler("listusers",   _cmd_listusers))
         app.add_handler(CommandHandler("removeuser",  _cmd_removeuser))
 
+    if getattr(config, "id", "").lower() == "coh":
+        app.add_handler(CommandHandler("decollo",       _cmd_decollo))
+        app.add_handler(CommandHandler("atterraggio",   _cmd_atterraggio))
+        app.add_handler(CommandHandler("volo_status",   _cmd_volo_status))
+        app.add_handler(CommandHandler("volo_cancel",   _cmd_volo_cancel))
+
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, _handle_voice))
@@ -2454,6 +2521,14 @@ async def start_webhook(
             ("adduser",     "Admin: register a new user"),
             ("listusers",   "Admin: list all users"),
             ("removeuser",  "Admin: deactivate a user"),
+        ]
+
+    if getattr(config, "id", "").lower() == "coh":
+        _COMMANDS += [
+            ("decollo",      "Registra decollo volo — /decollo 11:30 M-346 Handling Qualities"),
+            ("atterraggio",  "Registra atterraggio volo — /atterraggio 12:30 LIRE"),
+            ("volo_status",  "Mostra il volo aperto"),
+            ("volo_cancel",  "Annulla il volo aperto"),
         ]
 
     async with app:
