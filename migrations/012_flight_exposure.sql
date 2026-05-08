@@ -33,7 +33,8 @@ CREATE INDEX IF NOT EXISTS idx_flight_activities_open
 
 CREATE TABLE IF NOT EXISTS flight_exposures (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id),
+    user_id         INTEGER NOT NULL,
+    flight_user_id  UUID,
     takeoff_at      TIMESTAMPTZ NOT NULL,
     landing_at      TIMESTAMPTZ,
     duration        INTEGER,

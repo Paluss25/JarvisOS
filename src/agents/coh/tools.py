@@ -283,8 +283,8 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "  activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT session/lap/record/field data linked by activity_id and fit_file_id. "
         "  daily_fit_files, daily_fit_fields, daily_wellness_records, daily_stress_records, daily_respiration_records, daily_sleep_levels, daily_hrv_values, daily_skin_temp_overnight: Garmin daily fitness FIT data linked by date and user_id. "
         "  daily_fitness_enriched (VIEW — use for daily recovery/sleep/HRV queries): date, user_id, daily_fit_file_count, body_battery_am, body_battery_pm, stress_avg, stress_max, hrv_overnight_avg, hrv_status, sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, rhr_overnight, steps, distance_km, active_kcal, active_min, data_quality, min_wellness_hr, avg_wellness_hr, skin_average_deviation_c, skin_average_7_day_deviation_c, skin_nightly_value_c. CRITICAL: the HRV column is hrv_overnight_avg — NEVER use hrv_overnight (does not exist), NEVER use hrv_overnight_ms, NEVER use hrv_overnight_status. Sleep duration column is sleep_duration_min — NEVER use sleep_total_min or total_sleep_min. Status column is hrv_status. rhr_overnight exists. Always alias hrv_overnight_avg in SELECT. "
-        "  flight_exposures: id, user_id, takeoff_at, landing_at, duration, takeoff_icao, landing_icao, flight_type, experimental, aircraft_type, status, source, source_ref, notes, raw_context. Use this for WHOOP-only flight exposure correlation; do not use Garmin or activity FIT records for the MVP flight workflow. "
-        "  daily_recovery_observations: date, user_id (INTEGER), source, recovery_score, rhr_overnight, hrv_overnight_avg, sleep_duration_min, sleep_score, strain, avg_hr, max_hr, data_quality. For flight impact reports use source='whoop_api_v2' and SPORT_USER_ID for this integer user_id; flight_exposures.user_id is a separate UUID (FLIGHT_USER_ID/CHRO user id). "
+        "  flight_exposures: id, user_id (INTEGER, SPORT_USER_ID), flight_user_id (UUID, FLIGHT_USER_ID/CHRO user id), takeoff_at, landing_at, duration, takeoff_icao, landing_icao, flight_type, experimental, aircraft_type, status, source, source_ref, notes, raw_context. Use this for WHOOP-only flight exposure correlation; do not use Garmin or activity FIT records for the MVP flight workflow. "
+        "  daily_recovery_observations: date, user_id (INTEGER, SPORT_USER_ID), source, recovery_score, rhr_overnight, hrv_overnight_avg, sleep_duration_min, sleep_score, strain, avg_hr, max_hr, data_quality. For flight impact reports join conceptually on the integer SPORT_USER_ID and use source='whoop_api_v2'. "
         "Only SELECT statements are permitted — DrHouse has read-only access to both databases.",
         {
             "type": "object",
@@ -865,8 +865,9 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             FlightExposureService(
                 sport_conn=sport_conn,
                 chro_conn=chro_conn,
-                sport_user_id=os.environ.get("FLIGHT_USER_ID", default_user_id),
+                sport_user_id=int(os.environ.get("SPORT_USER_ID", "1")),
                 chro_user_id=default_user_id,
+                flight_user_id=os.environ.get("FLIGHT_USER_ID", default_user_id),
             ),
                 sport_conn,
                 chro_conn,
@@ -968,13 +969,11 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         try:
             from agents.chro.db import resolve_hr_user_id
 
-            flight_user_id = os.environ.get("FLIGHT_USER_ID", resolve_hr_user_id("default"))
-            whoop_user_id = int(os.environ.get("SPORT_USER_ID", "1"))
+            user_id = int(os.environ.get("SPORT_USER_ID", "1"))
             report = await build_whoop_impact_report(
                 conn,
                 flight_id=flight_id,
-                flight_user_id=flight_user_id,
-                whoop_user_id=whoop_user_id,
+                user_id=user_id,
             )
             return _text(json.dumps(report, default=str, ensure_ascii=False))
         finally:

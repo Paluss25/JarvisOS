@@ -134,13 +134,15 @@ class FlightExposureService:
         *,
         sport_conn: Any,
         chro_conn: Any | None,
-        sport_user_id: str,
+        sport_user_id: int,
         chro_user_id: str | None,
+        flight_user_id: str | None = None,
     ):
         self.sport_conn = sport_conn
         self.chro_conn = chro_conn
         self.sport_user_id = sport_user_id
         self.chro_user_id = chro_user_id
+        self.flight_user_id = flight_user_id or chro_user_id
         self.last_payload: dict[str, Any] = {}
 
     async def _open_flight(self) -> dict[str, Any] | None:
@@ -190,12 +192,13 @@ class FlightExposureService:
             sport_row = await self.sport_conn.fetchrow(
                 """
                 INSERT INTO flight_exposures
-                    (user_id, takeoff_at, takeoff_icao, aircraft_type, flight_type,
+                    (user_id, flight_user_id, takeoff_at, takeoff_icao, aircraft_type, flight_type,
                      experimental, status, source, source_ref, notes, raw_context)
-                VALUES ($1,$2,$3,$4,$5,$6,'open','telegram_coh',$7,$8,$9::jsonb)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,'open','telegram_coh',$8,$9,$10::jsonb)
                 RETURNING id
                 """,
                 self.sport_user_id,
+                self.flight_user_id,
                 parsed.event_time,
                 parsed.icao,
                 parsed.aircraft_type,
@@ -330,8 +333,7 @@ async def build_whoop_impact_report(
     conn: Any,
     *,
     flight_id: str,
-    flight_user_id: str,
-    whoop_user_id: int,
+    user_id: int,
 ) -> dict[str, Any]:
     flight = await conn.fetchrow(
         """
@@ -340,7 +342,7 @@ async def build_whoop_impact_report(
         WHERE id = $1 AND user_id = $2
         """,
         flight_id,
-        flight_user_id,
+        user_id,
     )
     if not flight:
         return {"status": "error", "code": "flight_not_found", "flight_id": flight_id}
@@ -356,7 +358,7 @@ async def build_whoop_impact_report(
           AND source = 'whoop_api_v2'
         ORDER BY date
         """,
-        whoop_user_id,
+        user_id,
         flight["takeoff_at"],
     )
     if not observations:

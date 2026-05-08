@@ -31,7 +31,8 @@ def test_flight_exposure_migration_creates_chro_and_sport_tables():
     assert "CHECK (landing_time IS NULL OR landing_time > takeoff_time)" in normalized
     assert "CHECK (flight_duration IS NULL OR flight_duration > 0)" in normalized
 
-    assert "user_id UUID NOT NULL REFERENCES users(id)" in normalized
+    assert "user_id INTEGER NOT NULL" in normalized
+    assert "flight_user_id UUID" in normalized
     assert "takeoff_at TIMESTAMPTZ NOT NULL" in normalized
     assert "landing_at TIMESTAMPTZ" in normalized
     assert "duration INTEGER" in normalized
@@ -57,6 +58,7 @@ def test_flight_exposure_migration_has_no_cross_database_foreign_keys():
 
     assert "references chro.flight_activities" not in sql
     assert "references flight_exposures" not in sql
+    assert "references users(id)" not in sql
 
 
 def test_flight_exposure_migration_grants_expected_roles():

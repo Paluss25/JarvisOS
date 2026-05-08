@@ -47,7 +47,7 @@ async def test_takeoff_creates_sport_then_chro_rows():
     service = FlightExposureService(
         sport_conn=sport,
         chro_conn=chro,
-        sport_user_id="75f9",
+        sport_user_id=1,
         chro_user_id="75f9",
     )
     parsed = parse_flight_command(
@@ -66,7 +66,9 @@ async def test_takeoff_creates_sport_then_chro_rows():
     assert [event[0] for event in events] == ["sport", "chro", "sport"]
     sport_insert = sport.fetchrow.await_args_list[1].args
     assert "source_ref" in sport_insert[0]
-    assert sport_insert[7] == "chro-flight-1"
+    assert sport_insert[1] == 1
+    assert sport_insert[2] == "75f9"
+    assert sport_insert[8] == "chro-flight-1"
     assert sport.execute.await_count == 0
 
 
@@ -77,7 +79,7 @@ async def test_takeoff_cancels_chro_row_when_sport_insert_fails():
     service = FlightExposureService(
         sport_conn=sport,
         chro_conn=chro,
-        sport_user_id="75f9",
+        sport_user_id=1,
         chro_user_id="75f9",
     )
     parsed = parse_flight_command(
@@ -99,7 +101,7 @@ async def test_takeoff_rejects_existing_open_flight():
     service = FlightExposureService(
         sport_conn=FakeConn(open_row=open_row),
         chro_conn=FakeConn(),
-        sport_user_id="75f9",
+        sport_user_id=1,
         chro_user_id="75f9",
     )
     parsed = parse_flight_command(
@@ -128,7 +130,7 @@ async def test_landing_closes_open_flight_and_computes_duration():
     service = FlightExposureService(
         sport_conn=FakeConn(open_row=open_row, name="sport", events=events),
         chro_conn=FakeConn(name="chro", events=events),
-        sport_user_id="75f9",
+        sport_user_id=1,
         chro_user_id="75f9",
     )
     parsed = parse_flight_command(
@@ -162,7 +164,7 @@ async def test_landing_preserves_existing_details_when_landing_command_has_new_v
     service = FlightExposureService(
         sport_conn=FakeConn(open_row=open_row),
         chro_conn=FakeConn(),
-        sport_user_id="75f9",
+        sport_user_id=1,
         chro_user_id="75f9",
     )
     parsed = parse_flight_command(
@@ -192,7 +194,7 @@ async def test_landing_explicit_experimental_can_correct_takeoff_default():
     service = FlightExposureService(
         sport_conn=FakeConn(open_row=open_row),
         chro_conn=FakeConn(),
-        sport_user_id="75f9",
+        sport_user_id=1,
         chro_user_id="75f9",
     )
     parsed = parse_flight_command(
@@ -212,7 +214,7 @@ async def test_landing_rejects_missing_open_flight():
     service = FlightExposureService(
         sport_conn=FakeConn(open_row=None),
         chro_conn=FakeConn(),
-        sport_user_id="75f9",
+        sport_user_id=1,
         chro_user_id="75f9",
     )
     parsed = parse_flight_command(
@@ -233,7 +235,7 @@ async def test_status_returns_open_flight():
     service = FlightExposureService(
         sport_conn=FakeConn(open_row=open_row),
         chro_conn=FakeConn(),
-        sport_user_id="75f9",
+        sport_user_id=1,
         chro_user_id="75f9",
     )
 
@@ -255,7 +257,7 @@ async def test_cancel_marks_open_flight_cancelled():
     service = FlightExposureService(
         sport_conn=sport,
         chro_conn=chro,
-        sport_user_id="75f9",
+        sport_user_id=1,
         chro_user_id="75f9",
     )
 

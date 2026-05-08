@@ -26,8 +26,7 @@ async def test_whoop_report_returns_insufficient_data_without_observations():
     result = await build_whoop_impact_report(
         FakeConn(),
         flight_id="flight-1",
-        flight_user_id="75f9a1ac-e4ca-41cd-8d2b-1f393db7e732",
-        whoop_user_id=1,
+        user_id=1,
     )
 
     assert result["status"] == "insufficient_data"
@@ -36,18 +35,16 @@ async def test_whoop_report_returns_insufficient_data_without_observations():
 
 
 @pytest.mark.asyncio
-async def test_whoop_report_uses_uuid_for_flight_and_integer_for_observations():
+async def test_whoop_report_uses_integer_user_id_for_flight_and_observations():
     conn = FakeConn()
     conn.fetchrow = AsyncMock(side_effect=conn.record_fetchrow)
     conn.fetch = AsyncMock(side_effect=conn.record_fetch)
-    flight_user_id = "75f9a1ac-e4ca-41cd-8d2b-1f393db7e732"
 
     await build_whoop_impact_report(
         conn,
         flight_id="flight-1",
-        flight_user_id=flight_user_id,
-        whoop_user_id=1,
+        user_id=1,
     )
 
-    assert conn.fetchrow_args == ("flight-1", flight_user_id)
+    assert conn.fetchrow_args == ("flight-1", 1)
     assert conn.fetch_args[0] == 1
