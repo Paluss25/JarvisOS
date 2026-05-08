@@ -268,6 +268,8 @@ async def test_cancel_marks_open_flight_cancelled():
     chro_cancel_sql = chro.execute.await_args.args[0]
     assert "status = 'cancelled'" in sport_cancel_sql
     assert "status = 'cancelled'" in chro_cancel_sql
+    assert "$2::text" in sport_cancel_sql
+    assert "$2::text" in chro_cancel_sql
 
 
 def _tool_names(server):

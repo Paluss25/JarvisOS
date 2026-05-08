@@ -27,6 +27,13 @@ EXPERIMENTAL_FALSE = {
 }
 
 
+def _looks_like_icao(token: str) -> bool:
+    if not ICAO_RE.match(token):
+        return False
+    # Avoid classifying title-case flight descriptors such as "Demo" as ICAO.
+    return token.isupper() or token.islower()
+
+
 @dataclass(frozen=True)
 class ParsedFlightCommand:
     command: str
@@ -99,7 +106,7 @@ def parse_flight_command(
     aircraft_type = None
     remaining: list[str] = []
     for token in tokens:
-        if icao is None and ICAO_RE.match(token):
+        if icao is None and aircraft_type is None and _looks_like_icao(token):
             icao = token.upper()
             continue
         if aircraft_type is None and AIRCRAFT_RE.match(token):
@@ -308,7 +315,7 @@ class FlightExposureService:
                 """
                 UPDATE chro.flight_activities
                 SET status = 'cancelled',
-                    notes = CONCAT_WS(E'\n', notes, $2),
+                    notes = CONCAT_WS(E'\n', notes, $2::text),
                     updated_at = now()
                 WHERE id = $1
                 """,
@@ -319,7 +326,7 @@ class FlightExposureService:
             """
             UPDATE flight_exposures
             SET status = 'cancelled',
-                notes = CONCAT_WS(E'\n', notes, $2),
+                notes = CONCAT_WS(E'\n', notes, $2::text),
                 updated_at = now()
             WHERE id = $1
             """,

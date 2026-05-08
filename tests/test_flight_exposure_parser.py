@@ -44,6 +44,18 @@ def test_parse_takeoff_with_icao():
     assert parsed.flight_type == "Handling Qualities"
 
 
+def test_parse_does_not_treat_title_case_four_letter_words_as_icao():
+    parsed = parse_flight_command(
+        "14:15 M-346 Demo Flight per Presidente ETPS",
+        command="decollo",
+        now=_now(),
+    )
+
+    assert parsed.icao is None
+    assert parsed.aircraft_type == "M-346"
+    assert parsed.flight_type == "Demo Flight per Presidente ETPS"
+
+
 def test_parse_accepts_lowercase_icao():
     parsed = parse_flight_command("11:30 lipi M-346 Handling Qualities", command="decollo", now=_now())
 
