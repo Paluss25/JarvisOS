@@ -836,10 +836,124 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         ]
         return _text("\n".join(lines))
 
+    async def _flight_service():
+        import asyncpg
+        from agents.chro.db import resolve_hr_user_id
+        from agents.coh.flight_exposure import FlightExposureService
+
+        sport_url = (
+            os.environ.get("DRHOUSE_SPORT_POSTGRES_URL", "")
+            or os.environ.get("SPORT_POSTGRES_URL", "")
+        )
+        chro_url = (
+            os.environ.get("CHRO_POSTGRES_URL", "")
+            or os.environ.get("CHRO_DATABASE_URL", "")
+            or os.environ.get("JARVIOS_POSTGRES_URL", "")
+        )
+        if not sport_url:
+            raise RuntimeError("DRHOUSE_SPORT_POSTGRES_URL/SPORT_POSTGRES_URL not configured")
+
+        sport_conn = None
+        chro_conn = None
+        try:
+            sport_conn = await asyncpg.connect(sport_url)
+            chro_conn = await asyncpg.connect(chro_url) if chro_url else None
+            default_user_id = resolve_hr_user_id("default")
+            return (
+                FlightExposureService(
+                    sport_conn=sport_conn,
+                    chro_conn=chro_conn,
+                    sport_user_id=os.environ.get("SPORT_USER_ID", default_user_id),
+                    chro_user_id=default_user_id,
+                ),
+                sport_conn,
+                chro_conn,
+            )
+        except Exception:
+            if chro_conn is not None:
+                await chro_conn.close()
+            if sport_conn is not None:
+                await sport_conn.close()
+            raise
+
+    @sdk_tool(
+        "flight_takeoff",
+        "Open a flight exposure window. text accepts the same syntax as /decollo.",
+        {"type": "object", "properties": {"text": {"type": "string"}}, "required": []},
+    )
+    async def flight_takeoff(args: dict) -> dict:
+        from agents.coh.flight_exposure import parse_flight_command
+
+        args = _parse_args(args)
+        service, sport_conn, chro_conn = await _flight_service()
+        try:
+            parsed = parse_flight_command(args.get("text", ""), "decollo")
+            return _text(json.dumps(await service.takeoff(parsed), default=str, ensure_ascii=False))
+        finally:
+            await sport_conn.close()
+            if chro_conn is not None:
+                await chro_conn.close()
+
+    @sdk_tool(
+        "flight_landing",
+        "Close the open flight exposure window. text accepts the same syntax as /atterraggio.",
+        {"type": "object", "properties": {"text": {"type": "string"}}, "required": []},
+    )
+    async def flight_landing(args: dict) -> dict:
+        from agents.coh.flight_exposure import parse_flight_command
+
+        args = _parse_args(args)
+        service, sport_conn, chro_conn = await _flight_service()
+        try:
+            parsed = parse_flight_command(args.get("text", ""), "atterraggio")
+            return _text(json.dumps(await service.landing(parsed), default=str, ensure_ascii=False))
+        finally:
+            await sport_conn.close()
+            if chro_conn is not None:
+                await chro_conn.close()
+
+    @sdk_tool(
+        "flight_status",
+        "Return the open flight exposure, if present.",
+        {"type": "object", "properties": {}, "required": []},
+    )
+    async def flight_status(args: dict) -> dict:
+        service, sport_conn, chro_conn = await _flight_service()
+        try:
+            return _text(json.dumps(await service.status(), default=str, ensure_ascii=False))
+        finally:
+            await sport_conn.close()
+            if chro_conn is not None:
+                await chro_conn.close()
+
+    @sdk_tool(
+        "flight_cancel",
+        "Cancel the open flight exposure.",
+        {"type": "object", "properties": {"reason": {"type": "string"}}, "required": []},
+    )
+    async def flight_cancel(args: dict) -> dict:
+        args = _parse_args(args)
+        service, sport_conn, chro_conn = await _flight_service()
+        try:
+            return _text(json.dumps(await service.cancel(args.get("reason", "")), default=str, ensure_ascii=False))
+        finally:
+            await sport_conn.close()
+            if chro_conn is not None:
+                await chro_conn.close()
+
+    @sdk_tool(
+        "flight_report",
+        "Return WHOOP-based flight impact report for a flight exposure.",
+        {"type": "object", "properties": {"flight_id": {"type": "string"}}, "required": []},
+    )
+    async def flight_report(args: dict) -> dict:
+        return _text(json.dumps({"status": "insufficient_data", "reason": "WHOOP impact report is Phase 2."}))
+
     all_tools = [daily_log, memory_search, memory_get, health_query,
                  get_meals, get_body_measurements, get_daily_nutrition,
                  get_nutrition_goals, get_recent_activities, get_training_plan, get_waist_measurements,
-                 medical_query, lab_query, lab_anomalies, report_issue]
+                 medical_query, lab_query, lab_anomalies, report_issue,
+                 flight_takeoff, flight_landing, flight_status, flight_cancel, flight_report]
     if send_message is not None:
         all_tools.append(send_message)
     # ----- send_telegram_message (originator-authored Telegram feedback) -----

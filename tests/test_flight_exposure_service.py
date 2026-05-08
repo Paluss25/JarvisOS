@@ -1,4 +1,6 @@
 import datetime as dt
+import sys
+import types
 import zoneinfo
 from unittest.mock import AsyncMock
 
@@ -223,3 +225,89 @@ async def test_landing_rejects_missing_open_flight():
 
     assert result["status"] == "error"
     assert result["code"] == "no_open_flight"
+
+
+@pytest.mark.asyncio
+async def test_status_returns_open_flight():
+    open_row = {"id": "sport-flight-1", "takeoff_at": dt.datetime(2026, 5, 7, 11, 30, tzinfo=ROME)}
+    service = FlightExposureService(
+        sport_conn=FakeConn(open_row=open_row),
+        chro_conn=FakeConn(),
+        sport_user_id="75f9",
+        chro_user_id="75f9",
+    )
+
+    result = await service.status()
+
+    assert result["status"] == "open"
+    assert result["flight"]["id"] == "sport-flight-1"
+
+
+@pytest.mark.asyncio
+async def test_cancel_marks_open_flight_cancelled():
+    open_row = {
+        "id": "sport-flight-1",
+        "source_ref": "chro-flight-1",
+        "takeoff_at": dt.datetime(2026, 5, 7, 11, 30, tzinfo=ROME),
+    }
+    sport = FakeConn(open_row=open_row)
+    chro = FakeConn()
+    service = FlightExposureService(
+        sport_conn=sport,
+        chro_conn=chro,
+        sport_user_id="75f9",
+        chro_user_id="75f9",
+    )
+
+    result = await service.cancel("errore inserimento")
+
+    assert result["status"] == "cancelled"
+    sport_cancel_sql = sport.execute.await_args.args[0]
+    chro_cancel_sql = chro.execute.await_args.args[0]
+    assert "status = 'cancelled'" in sport_cancel_sql
+    assert "status = 'cancelled'" in chro_cancel_sql
+
+
+def _tool_names(server):
+    return {entry.name for entry in server._tools}
+
+
+def test_coh_registers_flight_tools(tmp_path):
+    from agents.coh.tools import create_drhouse_mcp_server
+
+    server = create_drhouse_mcp_server(tmp_path)
+
+    names = _tool_names(server)
+    assert "flight_takeoff" in names
+    assert "flight_landing" in names
+    assert "flight_status" in names
+    assert "flight_cancel" in names
+    assert "flight_report" in names
+
+
+@pytest.mark.asyncio
+async def test_flight_tool_closes_sport_connection_when_chro_connect_fails(monkeypatch, tmp_path):
+    from agents.coh.tools import create_drhouse_mcp_server
+
+    closed = []
+
+    class FakeAsyncpgConn:
+        async def close(self):
+            closed.append("sport")
+
+    async def fake_connect(url):
+        if url == "sport-dsn":
+            return FakeAsyncpgConn()
+        raise RuntimeError("chro connect failed")
+
+    monkeypatch.setitem(sys.modules, "asyncpg", types.SimpleNamespace(connect=fake_connect))
+    monkeypatch.setenv("DRHOUSE_SPORT_POSTGRES_URL", "sport-dsn")
+    monkeypatch.setenv("CHRO_POSTGRES_URL", "chro-dsn")
+
+    server = create_drhouse_mcp_server(tmp_path)
+    tool = next(entry for entry in server._tools if entry.name == "flight_status")
+
+    with pytest.raises(RuntimeError, match="chro connect failed"):
+        await tool.fn({})
+
+    assert closed == ["sport"]

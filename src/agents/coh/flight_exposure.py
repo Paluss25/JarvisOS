@@ -287,3 +287,40 @@ class FlightExposureService:
             json.dumps({"landing_raw_command": parsed.raw_command}),
         )
         return {"status": "closed", "sport_id": str(open_row["id"]), "duration": duration}
+
+    async def status(self) -> dict[str, Any]:
+        open_row = await self._open_flight()
+        if not open_row:
+            return {"status": "none_open"}
+        return {"status": "open", "flight": open_row}
+
+    async def cancel(self, reason: str = "") -> dict[str, Any]:
+        open_row = await self._open_flight()
+        if not open_row:
+            return {"status": "error", "code": "no_open_flight"}
+
+        note = reason or "cancelled by user"
+        if self.chro_conn is not None and open_row.get("source_ref"):
+            await self.chro_conn.execute(
+                """
+                UPDATE chro.flight_activities
+                SET status = 'cancelled',
+                    notes = CONCAT_WS(E'\n', notes, $2),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                open_row["source_ref"],
+                note,
+            )
+        await self.sport_conn.execute(
+            """
+            UPDATE flight_exposures
+            SET status = 'cancelled',
+                notes = CONCAT_WS(E'\n', notes, $2),
+                updated_at = now()
+            WHERE id = $1
+            """,
+            open_row["id"],
+            note,
+        )
+        return {"status": "cancelled", "sport_id": str(open_row["id"])}
