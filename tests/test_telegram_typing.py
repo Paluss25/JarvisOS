@@ -3,17 +3,22 @@ import asyncio
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 import os
+from types import SimpleNamespace
+import io
 
 # Add src/ to path so agent_runner module can be imported
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest
+from telegram.error import NetworkError
 
 from agent_runner.interfaces.telegram_bot import (
+    _handle_photo,
     _typing_keepalive_task,
     _run_status_task,
     _TYPING_RENEW_INTERVAL,
 )
+from agent_runner.interfaces import telegram_bot
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +104,46 @@ async def test_keepalive_cancellable():
     task.cancel()
     await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=1.0)
     # No assertion — just verify no hang/error
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_retries_get_file_network_error(monkeypatch):
+    """Photo handler must survive transient Telegram get_file failures."""
+    monkeypatch.setenv("TEST_TELEGRAM_CHAT_ID", "123")
+
+    captured = {}
+
+    async def fake_do_stream_image(update, context, image_bytes, caption):
+        captured["image_bytes"] = image_bytes
+        captured["caption"] = caption
+
+    class FakePhotoFile:
+        async def download_to_memory(self, buf: io.BytesIO):
+            buf.write(b"image-bytes")
+
+    bot = SimpleNamespace(
+        get_file=AsyncMock(side_effect=[NetworkError("temporary telegram outage"), FakePhotoFile()])
+    )
+    context = SimpleNamespace(
+        bot=bot,
+        bot_data={"config": SimpleNamespace(telegram_chat_id_env="TEST_TELEGRAM_CHAT_ID")},
+    )
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=123),
+        message=SimpleNamespace(
+            photo=[SimpleNamespace(file_id="small"), SimpleNamespace(file_id="large")],
+            caption="caption text",
+        ),
+    )
+
+    monkeypatch.setattr(telegram_bot, "_do_stream_image", fake_do_stream_image)
+    monkeypatch.setattr(telegram_bot.asyncio, "sleep", AsyncMock())
+
+    await _handle_photo(update, context)
+
+    assert bot.get_file.await_count == 2
+    bot.get_file.assert_awaited_with("large")
+    assert captured == {"image_bytes": b"image-bytes", "caption": "caption text"}
 
 
 # ---------------------------------------------------------------------------

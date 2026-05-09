@@ -763,6 +763,25 @@ _STALE_TOOL_STATUS_RE = re.compile(
 )
 
 
+async def _telegram_network_retry(coro_fn, *args, attempts: int = 3, base_delay: float = 1.0, **kwargs):
+    for attempt in range(attempts):
+        try:
+            return await coro_fn(*args, **kwargs)
+        except NetworkError as exc:
+            if attempt == attempts - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning(
+                "telegram: transient NetworkError in %s (attempt %d/%d), retrying in %.1fs — %s",
+                getattr(coro_fn, "__name__", coro_fn.__class__.__name__),
+                attempt + 1,
+                attempts,
+                delay,
+                exc,
+            )
+            await asyncio.sleep(delay)
+
+
 def _strip_outer_code_fence(text: str) -> str:
     """Remove a single outer ``` fence if the entire response is wrapped in one."""
     m = _OUTER_FENCE_RE.match(text.strip())
@@ -1081,7 +1100,7 @@ async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not is_authorized(update.effective_chat.id, config.telegram_chat_id_env):
         return
     photo = update.message.photo[-1]
-    photo_file = await context.bot.get_file(photo.file_id)
+    photo_file = await _telegram_network_retry(context.bot.get_file, photo.file_id)
     buf = io.BytesIO()
     await photo_file.download_to_memory(buf)
     await _do_stream_image(update, context, buf.getvalue(), update.message.caption or None)
