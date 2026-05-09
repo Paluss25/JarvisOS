@@ -14,9 +14,10 @@ CFO_BUILTIN_CRONS = [
             "1. Check for any budget deviations flagged in yesterday's log\n"
             "2. If CFO_COST_WORKERS_URL is configured, dispatch cost/ai-cost for yesterday's LLM spend\n"
             "3. Note any anomalies or pending fiscal deadlines\n"
-            "Keep it under 150 words. Flag any HIGH severity items immediately to Jarvis via send_message. "        ),
+            "Keep it under 150 words. Send the summary to COS via send_message(to='cos', message=<your briefing>) "
+            "for the single morning briefing. Flag any HIGH severity items immediately to Jarvis and COS via send_message. "        ),
         "session_id": "heartbeat-morning",
-        "telegram_notify": True,
+        "telegram_notify": False,
         "builtin": True,
     },
     {

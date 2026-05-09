@@ -27,6 +27,8 @@ ROGER_BUILTIN_CRONS = [
             "If WHOOP data exists, use daily_recovery_source_comparison for validation context; "
             "do not promote WHOOP over Garmin automatically. "
             "Send the result to DrHouse via send_message(to='coh', message=<your briefing>). "
+            "Also send a concise version to COS via send_message(to='cos', message=<your briefing>) "
+            "for the single morning briefing. "
             "Also forward a copy to Timothy (CIO) via send_message(to='cio', message=<your briefing>). "        ),
         "session_id": "heartbeat-morning",
         "telegram_notify": False,

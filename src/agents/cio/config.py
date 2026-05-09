@@ -19,10 +19,11 @@ TIMOTHY_BUILTIN_CRONS = [
             "actions from MEMORY.md or DREAMS.md unless they have fresh live verification "
             "or no newer RESOLVED/VERIFIED registry entry contradicts them. "
             "Use infra_check to verify the health of critical services before reporting. "
-            "Be factual and actionable. Flag anything that needs immediate attention."
+            "Be factual and actionable. Send the summary to COS via send_message(to='cos', message=<your briefing>) "
+            "for the single morning briefing. Flag anything that needs immediate attention."
         ),
         "session_id": "heartbeat-morning",
-        "telegram_notify": True,
+        "telegram_notify": False,
         "builtin": True,
     },
     {

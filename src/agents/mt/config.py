@@ -34,10 +34,12 @@ MT_BUILTIN_CRONS = [
         "schedule": "daily@08:40",
         "prompt": (
             "Prepare a short operational morning briefing using today's tasks, calendar, "
-            "and any pending digest items. Keep it concise and actionable."
+            "and any pending digest items. Keep it concise and actionable. "
+            "Send the summary to COS via send_message(to='cos', message=<your briefing>) "
+            "for the single morning briefing."
         ),
         "session_id": "heartbeat-morning",
-        "telegram_notify": True,
+        "telegram_notify": False,
         "builtin": True,
     },
     {

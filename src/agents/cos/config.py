@@ -8,13 +8,17 @@ from agent_runner.config import AgentConfig
 MARK_BUILTIN_CRONS = [
     {
         "name": "morning_briefing",
-        "schedule": "daily@08:25",
+        "schedule": "daily@08:55",
         "prompt": (
-            "Good morning. Review yesterday's routing log. Concise briefing (under 200 words): "
-            "cases routed, any pending escalations, items awaiting human approval, "
-            "routing anomalies or security flags detected. Be direct. "
-            "After producing the briefing, forward a copy to Timothy (CIO) via: "
-            "send_message(to='cio', message=<your briefing>). "        ),
+            "Produce the single morning briefing for Paluss. COS owns the daily user-facing synthesis; "
+            "CEO, CIO, CFO, COH, DOS, MT, EIA feed signals, but you decide what matters today. "
+            "Review yesterday/today memory, routing log, and any morning A2A summaries received from specialists. "
+            "Brief under 250 words with: what matters today, what needs Paluss, cross-domain conflicts, "
+            "blocked decisions, and any high-risk operational or security items. "
+            "Do not paste each specialist report. Deduplicate, rank by importance, and omit routine green checks. "
+            "If there is a strategic signal, note that CEO should handle it; otherwise keep CEO out of the daily briefing. "
+            "After producing the briefing, forward a copy to Timothy (CIO) via send_message(to='cio', message=<your briefing>). "
+        ),
         "session_id": "heartbeat-morning",
         "telegram_notify": True,
         "builtin": True,

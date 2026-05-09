@@ -14,10 +14,11 @@ DRHOUSE_BUILTIN_CRONS = [
             "1. NutritionDirector (DON) is reachable — send_message(to='don', message='ping') and check response. "
             "2. COH database connections (run a health_query to confirm health is accessible). "
             "3. Yesterday's COH activity log — any errors or anomalies? "
-            "Produce a concise status (under 100 words)."
+            "Produce a concise status (under 100 words). "
+            "Send only material issues to COS via send_message(to='cos', message=<status>) for the single morning briefing."
         ),
         "session_id": "heartbeat-morning",
-        "telegram_notify": True,
+        "telegram_notify": False,
         "builtin": True,
     },
     {
@@ -31,10 +32,12 @@ DRHOUSE_BUILTIN_CRONS = [
             "4. Any active health flags or medical notes from MEMORY.md\n"
             "Highlight conflicts between training load and nutrition (e.g. deficit on high-intensity day). "
             "Be directive and concise. "
+            "Send the briefing to COS via send_message(to='cos', message=<your briefing>) "
+            "for the single morning briefing. "
             "After producing the briefing, forward a copy to Timothy (CIO) via: "
             "send_message(to='cio', message=<your briefing>). "        ),
         "session_id": "heartbeat-morning",
-        "telegram_notify": True,
+        "telegram_notify": False,
         "builtin": True,
     },
     {
