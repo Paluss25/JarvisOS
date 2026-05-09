@@ -7,6 +7,20 @@ from agent_runner.config import AgentConfig
 
 CHRO_BUILTIN_CRONS = [
     {
+        "name": "morning_people_signal",
+        "schedule": "daily@08:38",
+        "prompt": (
+            "Daily CHRO signal for COS. Check only for material people/HR items that could affect today's plan: "
+            "new payslip/document uploads, critical leave balance warnings, net-pay anomalies, compliance deadlines, "
+            "or pending HR decisions. Keep it under 80 words. If nothing matters today, send a one-line green check. "
+            "Send the summary to COS via send_message(to='cos', message=<your briefing>) for the single morning briefing. "
+            "Do not send Telegram directly to Paluss from this cron."
+        ),
+        "session_id": "heartbeat-morning-people-signal",
+        "telegram_notify": False,
+        "builtin": True,
+    },
+    {
         "name": "weekly_people_brief",
         "schedule": "weekly@mon@08:00",
         "prompt": (

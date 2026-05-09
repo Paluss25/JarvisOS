@@ -10,6 +10,20 @@ from agent_runner.config import AgentConfig
 
 NUTRITION_BUILTIN_CRONS = [
     {
+        "name": "morning_nutrition_signal",
+        "schedule": "daily@08:32",
+        "prompt": (
+            "Daily nutrition signal for COS. Review yesterday's nutrition memory/logs and today's known nutrition context. "
+            "Report only material items: missed logging, macro/protein risk, stale goal data, unresolved food ambiguity, "
+            "or any nutrition decision needed from Paluss. Keep it under 80 words. If nothing matters today, send a one-line green check. "
+            "Send the summary to COS via send_message(to='cos', message=<your briefing>) for the single morning briefing. "
+            "Do not send Telegram directly to Paluss from this cron."
+        ),
+        "session_id": "heartbeat-morning-nutrition-signal",
+        "telegram_notify": False,
+        "builtin": True,
+    },
+    {
         "name": "nightly_dreaming",
         "schedule": "daily@02:00",
         "prompt": (
