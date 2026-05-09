@@ -67,6 +67,34 @@ def _normalize_chro_sql(sql: str) -> str:
     return normalized
 
 
+def _references_table(sql_lower: str, table: str) -> bool:
+    return bool(re.search(r"\b(?:from|join)\s+" + re.escape(table) + r"\b", sql_lower))
+
+
+def _selects_column(sql_lower: str, column: str) -> bool:
+    select_part = re.split(r"\bfrom\b", sql_lower, maxsplit=1)[0]
+    return bool(
+        re.search(r"(?<![.\w])" + re.escape(column) + r"\b", select_part)
+        or re.search(r"\b\w+\." + re.escape(column) + r"\b", select_part)
+    )
+
+
+def _preflight_query_corrections(sql: str) -> list[str]:
+    sql_lower = _normalize_chro_sql(sql).lower()
+    corrections = []
+    if _references_table(sql_lower, "leave_snapshots") and _selects_column(sql_lower, "remaining_days"):
+        corrections.append(
+            "  'remaining_days' on table 'leave_snapshots' → use 'ferie_remaining' "
+            "(or 'leave_residual_days' for extracted residual leave)"
+        )
+    if _references_table(sql_lower, "leave_snapshots") and _selects_column(sql_lower, "used_days"):
+        corrections.append(
+            "  'used_days' on table 'leave_snapshots' → use 'ferie_used' "
+            "(or 'leave_used_ytd_days' for year-to-date extracted leave)"
+        )
+    return corrections
+
+
 try:
     from claude_agent_sdk import create_sdk_mcp_server, tool as sdk_tool
     _SDK_AVAILABLE = True
@@ -521,7 +549,8 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
         "query_db",
         "Execute a read-only SELECT query against the human_res PostgreSQL database. "
         "Only SELECT statements are allowed. Use schema_db first when you are unsure about columns. "
-        "Use live columns from schema_db; expense_items includes amount_eur, currency, description, metadata, reimbursed, and employer_reference where available.",
+        "Use live columns from schema_db; leave_snapshots uses ferie_remaining/ferie_used or leave_residual_days/leave_used_ytd_days, not remaining_days/used_days. "
+        "expense_items includes amount_eur, currency, description, metadata, reimbursed, and employer_reference where available.",
         {
             "query": str,
             "params": {"type": "array", "items": {}, "default": []},
@@ -541,6 +570,13 @@ def create_chro_mcp_server(workspace_path: Path, redis_a2a=None):
             return _text("No query provided.")
         if not re.match(r'\s*SELECT\b', sql, re.IGNORECASE):
             return _text("query_db only accepts SELECT statements.")
+        corrections = _preflight_query_corrections(sql)
+        if corrections:
+            return {"content": [{"type": "text", "text": (
+                "Column name error — use the correct names:\n" +
+                "\n".join(corrections) +
+                "\n\nCall schema_db(table='leave_snapshots') for the live column list."
+            )}], "is_error": True}
         try:
             rows = await _pg_query(sql, params or None)
             return {"content": [{"type": "text", "text": json.dumps(rows, default=str, indent=2)}]}

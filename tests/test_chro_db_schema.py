@@ -4,7 +4,7 @@ import pytest
 
 from agents.chro import db
 from agents.chro.config import CHRO_BUILTIN_CRONS
-from agents.chro.tools import _normalize_chro_sql
+from agents.chro.tools import _normalize_chro_sql, create_chro_mcp_server
 
 
 class _FakeAcquire:
@@ -83,6 +83,22 @@ def test_query_db_normalizes_legacy_schema_qualifiers():
     assert normalized.count("FROM payslips") == 2
 
 
+@pytest.mark.asyncio
+async def test_query_db_preflights_leave_snapshot_column_aliases(tmp_path):
+    server = create_chro_mcp_server(tmp_path)
+    query_db = next(tool for tool in server._tools if tool.name == "query_db")
+
+    result = await query_db.fn({
+        "query": "SELECT snapshot_date, remaining_days, used_days FROM leave_snapshots ORDER BY snapshot_date DESC LIMIT 1",
+        "params": [],
+    })
+
+    assert result["is_error"] is True
+    text = result["content"][0]["text"]
+    assert "'remaining_days' on table 'leave_snapshots' → use 'ferie_remaining'" in text
+    assert "'used_days' on table 'leave_snapshots' → use 'ferie_used'" in text
+
+
 def test_net_pay_anomaly_cron_uses_migrated_columns():
     prompt = _cron("net_pay_anomaly_alert")["prompt"]
 
@@ -90,3 +106,12 @@ def test_net_pay_anomaly_cron_uses_migrated_columns():
     assert "ORDER BY COALESCE(period_to" in prompt
     assert "human_res.payslips" not in prompt
     assert "chro.payslips" not in prompt
+
+
+def test_weekly_people_brief_uses_live_leave_columns():
+    prompt = _cron("weekly_people_brief")["prompt"]
+
+    assert "ferie_remaining" in prompt
+    assert "rol_remaining" in prompt
+    assert "remaining_days" not in prompt
+    assert "used_days" not in prompt

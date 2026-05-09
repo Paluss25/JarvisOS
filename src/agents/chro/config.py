@@ -26,7 +26,7 @@ CHRO_BUILTIN_CRONS = [
         "prompt": (
             "Weekly People Brief — Monday morning HR summary for Paluss.\n"
             "Produce a structured Telegram message covering:\n"
-            "1. Ferie e ROL: remaining days/hours this year — query leave_snapshots for the most recent snapshot\n"
+            "1. Ferie e ROL: query leave_snapshots for the most recent snapshot using ferie_remaining and rol_remaining\n"
             "2. Ultimo cedolino: net pay, gross pay, IRPEF, INPS — query payslips using COALESCE(net_pay, net_amount), COALESCE(gross_pay, gross_amount), COALESCE(irpef_withheld, tax_amount), COALESCE(inps_employee, contribution_amount); order by COALESCE(period_to, month/year end date) DESC LIMIT 1\n"
             "3. TFR accantonato YTD: sum of tfr_accrued since Jan 1 of this year\n"
             "4. Anomalie: any payslip where COALESCE(net_pay, net_amount) varied more than 5% vs the previous month\n"
