@@ -292,7 +292,9 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         "  activity_fit_files: id, activity_id, user_id, source_path, file_sha256, manufacturer, product, serial_number, time_created, imported_at, raw_summary_json. "
         "  activity_fit_sessions, activity_fit_laps, activity_fit_records, activity_fit_fields: Garmin FIT session/lap/record/field data linked by activity_id and fit_file_id. "
         "  daily_fit_files, daily_fit_fields, daily_wellness_records, daily_stress_records, daily_respiration_records, daily_sleep_levels, daily_hrv_values, daily_skin_temp_overnight: Garmin daily fitness FIT data linked by date and user_id. "
-        "  daily_fitness_enriched (VIEW — use for daily recovery/sleep/HRV queries): date, user_id, daily_fit_file_count, body_battery_am, body_battery_pm, stress_avg, stress_max, hrv_overnight_avg, hrv_status, sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, rhr_overnight, steps, distance_km, active_kcal, active_min, data_quality, min_wellness_hr, avg_wellness_hr, skin_average_deviation_c, skin_average_7_day_deviation_c, skin_nightly_value_c. CRITICAL: the HRV column is hrv_overnight_avg — NEVER use hrv_overnight (does not exist), NEVER use hrv_overnight_ms, NEVER use hrv_overnight_status. Sleep duration column is sleep_duration_min — NEVER use sleep_total_min or total_sleep_min. Status column is hrv_status. rhr_overnight exists. Always alias hrv_overnight_avg in SELECT. "
+        "  daily_fitness_enriched (VIEW — use for Garmin daily recovery/sleep/HRV queries): date, user_id, daily_fit_file_count, body_battery_am, body_battery_pm, stress_avg, stress_max, hrv_overnight_avg, hrv_status, sleep_duration_min, sleep_score, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, rhr_overnight, steps, distance_km, active_kcal, active_min, data_quality, min_wellness_hr, avg_wellness_hr, skin_average_deviation_c, skin_average_7_day_deviation_c, skin_nightly_value_c. CRITICAL: recovery_score does not exist on daily_fitness_enriched; use daily_recovery_observations.recovery_score or daily_recovery_source_comparison.whoop_recovery_score for WHOOP recovery. The HRV column is hrv_overnight_avg — NEVER use hrv_overnight (does not exist), NEVER use hrv_overnight_ms, NEVER use hrv_overnight_status. Sleep duration column is sleep_duration_min — NEVER use sleep_total_min or total_sleep_min. Status column is hrv_status. rhr_overnight exists. Always alias hrv_overnight_avg in SELECT. "
+        "  daily_recovery_observations: date, user_id, source, recovery_score, rhr_overnight, hrv_overnight_avg, sleep_duration_min, sleep_deep_min, sleep_rem_min, sleep_light_min, sleep_awake_min, sleep_score, data_quality, spo2_percentage, skin_temp_celsius, strain, avg_hr, max_hr, steps, distance_km, active_kcal, active_min. "
+        "  daily_recovery_source_comparison: date, user_id, garmin_hrv_overnight_avg, whoop_hrv_overnight_avg, hrv_delta_ms, garmin_rhr_overnight, whoop_rhr_overnight, rhr_delta_bpm, garmin_sleep_duration_min, whoop_sleep_duration_min, sleep_duration_delta_min, garmin_sleep_score, whoop_sleep_score, sleep_score_delta, whoop_recovery_score, whoop_day_strain, comparison_status. "
         "  CRITICAL activities schema: activities has type and date; name does not exist and start_time does not exist. Use date for ordering/filtering activity start day. "
         "  whoop_workouts: workout_id, user_id, whoop_user_id, v1_id, sport_name, start_at, end_at, timezone_offset, score_state, strain, average_heart_rate, max_heart_rate, kilojoule, distance_meter, altitude_gain_meter, raw_json, imported_at, updated_at. CRITICAL: use workout_id; id does not exist. "
         "  whoop_sync_runs: id, user_id, date_from, date_to, started_at, completed_at, status, recoveries_seen, sleeps_seen, cycles_seen, workouts_seen, error_message. CRITICAL: source does not exist; items_synced does not exist. To estimate synced items, sum recoveries_seen + sleeps_seen + cycles_seen + workouts_seen. "
@@ -391,6 +393,17 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
             corrections.append(
                 "  'items_synced' on table 'whoop_sync_runs' → use recoveries_seen, sleeps_seen, cycles_seen, workouts_seen "
                 "(or sum them as items_synced)"
+            )
+        if _references_table(sql_lower, "whoop_sync_runs") and (
+            _selects_column(sql_lower, "finished_at")
+            or re.search(r"\border\s+by\s+finished_at\b", sql_lower)
+            or re.search(r"\bwhere\b.*(?<![.\w])finished_at\b", sql_lower)
+        ):
+            corrections.append("  'finished_at' on table 'whoop_sync_runs' → use 'completed_at'")
+        if _references_table(sql_lower, "daily_fitness_enriched") and _selects_column(sql_lower, "recovery_score"):
+            corrections.append(
+                "  'recovery_score' on table 'daily_fitness_enriched' → use "
+                "'daily_recovery_observations' or 'daily_recovery_source_comparison'"
             )
         if corrections:
             return {"content": [{"type": "text", "text": (
