@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from claude_agent_sdk import StreamEvent
 from src.agent_runner import AgentConfig
-from src.agent_runner.client import BaseAgentClient
+from src.agent_runner.client import BaseAgentClient, _build_system_prompt
 
 
 @pytest.fixture
@@ -61,6 +61,15 @@ def test_base_agent_client_init(config, tmp_path):
     assert client.name == "TestAgent"
     assert client.config.id == "test"
     assert client._sdk is None
+
+
+def test_system_prompt_includes_global_factual_evidence_contract():
+    """Every agent must receive the shared guardrail against unsupported claims."""
+    prompt = _build_system_prompt({"soul": "You are a test agent."})
+
+    assert "Factual Evidence Contract" in prompt
+    assert "Do not state patterns, trends, streaks, totals, causes, or status as fact" in prompt
+    assert "If evidence is unavailable, say that it is unverified" in prompt
 
 
 def test_base_agent_client_tracks_tool_use_stream_events(config):

@@ -40,6 +40,24 @@ _STREAM_TIMEOUT = 480   # seconds — fallback default; per-agent override via A
 _IMAGE_TIMEOUT = 120    # seconds — generous for large vision requests
 _MARGIN_S = 30          # AGENT_MAX_TURN_S must be >= STREAM_TIMEOUT + this margin
 
+_FACTUAL_EVIDENCE_CONTRACT = """\
+You must ground operational claims in the actual state visible through tools,
+explicit user-provided data, or quoted workspace memory that is still current.
+
+Do not state patterns, trends, streaks, totals, causes, or status as fact unless
+you have checked the relevant source data in the current turn or the prompt
+provides exact evidence for that claim. This includes phrases such as
+"consecutive days", "driver", "confirmed", "resolved", "open", "clean",
+"under/over target", "root cause", and similar status language.
+
+When evidence exists, include the relevant scope in the answer: date range,
+row count, source/tool, or concrete values. When evidence is partial, say what
+was verified and what was not. If evidence is unavailable, say that it is unverified
+and present any interpretation as a hypothesis, not as a fact.
+
+If challenged by the user, re-check the source data before correcting yourself.
+Do not defend or elaborate an unsupported claim."""
+
 
 class BaseAgentClient:
     """Persistent Claude SDK subprocess connection.
@@ -729,6 +747,7 @@ def _sdk_tool_from_spec(spec: ToolSpec, sdk_tool):
 def _build_system_prompt(ctx: dict) -> str:
     """Assemble the full system prompt from workspace context dict."""
     sections = [
+        ("factual_evidence_contract", "Factual Evidence Contract"),
         ("soul", "Identity & Soul"),
         ("memory_guard", "Memory Freshness Guard"),
         ("open_loops", "Open Loop Registry"),
@@ -746,6 +765,7 @@ def _build_system_prompt(ctx: dict) -> str:
         ("architecture", "Technical Architecture"),
     ]
     parts = []
+    ctx = {"factual_evidence_contract": _FACTUAL_EVIDENCE_CONTRACT, **ctx}
     for key, heading in sections:
         if ctx.get(key):
             parts.append(f"## {heading}\n\n{ctx[key]}")
