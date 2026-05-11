@@ -44,6 +44,32 @@ _AGENT_TIMEOUTS: dict[str, float] = {
     "dos": 240.0,   # DirectorOfSport: training plan generation + DB writes
 }
 
+_AGENT_ALIASES: dict[str, str] = {
+    "jarvis": "ceo",
+    "ceo": "ceo",
+    "roger": "dos",
+    "chief": "dos",
+    "chief_of_sport": "dos",
+    "drhouse": "coh",
+    "dr_house": "coh",
+    "coh": "coh",
+    "timothy": "cio",
+    "cio": "cio",
+    "warren": "cfo",
+    "cfo": "cfo",
+    "mark": "cos",
+    "cos": "cos",
+    "nutrition-director": "don",
+    "nutrition_director": "don",
+    "don": "don",
+    "emailintel": "email_intelligence_agent",
+    "email-intelligence": "email_intelligence_agent",
+    "email_intelligence": "email_intelligence_agent",
+    "email_intelligence_agent": "email_intelligence_agent",
+    "mt": "mt",
+    "chro": "chro",
+}
+
 # Async chain loop guard. The tool refuses to dispatch a new async send when
 # ``hop_count >= MAX_HOPS``, so an unbounded CEO→CIO→COS→… cascade cannot
 # build up. Override per-deployment via env (e.g. set lower for testing).
@@ -68,6 +94,11 @@ def _truncate(s: str | None, limit: int) -> str | None:
     if not s:
         return None
     return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def _resolve_agent_alias(agent_id: str) -> str:
+    key = (agent_id or "").strip().lower()
+    return _AGENT_ALIASES.get(key, agent_id)
 
 
 def _build_continuation_envelope(
@@ -300,6 +331,7 @@ def create_send_message_tool(
             return "Error: 'to' (target agent ID) is required."
         if not message:
             return "Error: 'message' is required."
+        to = _resolve_agent_alias(to)
 
         # Mutual exclusion: async mode IS request/response, just decoupled
         # from the sender's turn. wait_response=False is the legacy

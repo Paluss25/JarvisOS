@@ -63,6 +63,13 @@ def _text(s: str) -> dict:
     return {"content": [{"type": "text", "text": str(s)}]}
 
 
+def _contains_pattern(value: str) -> str:
+    value = (value or "").strip()
+    if "%" in value or "_" in value:
+        return value
+    return f"%{value}%"
+
+
 try:
     from claude_agent_sdk import create_sdk_mcp_server, tool as sdk_tool
     _SDK_AVAILABLE = True
@@ -841,7 +848,7 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         if not pname:
             return _text("parameter_name is required.")
         params = {
-            "parameter_name": pname,
+            "parameter_name": _contains_pattern(pname),
             "user_id": "paluss",
             "limit": _to_int(args.get("limit")) or 50,
         }

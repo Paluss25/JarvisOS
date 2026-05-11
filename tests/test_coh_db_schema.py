@@ -126,6 +126,41 @@ def test_health_tool_describes_lab_public_schema(tmp_path):
     assert "coh.lab" not in combined
 
 
+@pytest.mark.asyncio
+async def test_lab_query_uses_contains_match_for_short_parameter_names(monkeypatch, tmp_path):
+    server = create_drhouse_mcp_server(tmp_path)
+    lab_query = next(tool for tool in server._tools if tool.name == "lab_query")
+    captured = {}
+
+    class _Resp:
+        is_success = True
+
+        def json(self):
+            return []
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, params):
+            captured["params"] = params
+            return _Resp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+
+    await lab_query.fn({"parameter_name": "HDL"})
+
+    assert captured["params"]["parameter_name"] == "%HDL%"
+
+
 def test_health_tool_describes_whoop_schema(tmp_path):
     server = create_drhouse_mcp_server(tmp_path)
 

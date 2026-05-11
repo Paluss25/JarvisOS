@@ -76,14 +76,14 @@ class HealthCoachAgent:
             if user_id is not None:
                 row = await conn.fetchrow(
                     "SELECT total_calories, total_protein FROM daily_summaries "
-                    "WHERE summary_date = $1 AND user_id = $2",
+                    "WHERE date = $1 AND user_id = $2",
                     today,
                     user_id,
                 )
             else:
                 row = await conn.fetchrow(
                     "SELECT total_calories, total_protein FROM daily_summaries "
-                    "WHERE summary_date = $1 ORDER BY id DESC LIMIT 1",
+                    "WHERE date = $1",
                     today,
                 )
             totals = dict(row) if row else {}
@@ -91,17 +91,16 @@ class HealthCoachAgent:
             # Active nutrition goal
             if user_id is not None:
                 goal_row = await conn.fetchrow(
-                    "SELECT calories_target, protein_target FROM nutrition_goals "
+                    "SELECT target_calories AS calories_target, target_protein AS protein_target FROM nutrition_goals "
                     "WHERE active_from <= $1 AND (active_to IS NULL OR active_to >= $1) "
-                    "AND user_id = $2 ORDER BY id DESC LIMIT 1",
+                    "ORDER BY active_from DESC LIMIT 1",
                     today,
-                    user_id,
                 )
             else:
                 goal_row = await conn.fetchrow(
-                    "SELECT calories_target, protein_target FROM nutrition_goals "
+                    "SELECT target_calories AS calories_target, target_protein AS protein_target FROM nutrition_goals "
                     "WHERE active_from <= $1 AND (active_to IS NULL OR active_to >= $1) "
-                    "ORDER BY id DESC LIMIT 1",
+                    "ORDER BY active_from DESC LIMIT 1",
                     today,
                 )
             goals = dict(goal_row) if goal_row else {}
