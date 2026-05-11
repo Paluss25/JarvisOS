@@ -94,3 +94,11 @@ def test_parse_italian_experimental_false():
     assert parsed.experimental is False
     assert parsed.experimental_provided is True
     assert parsed.flight_type == "Handling Qualities"
+
+
+def test_parse_landing_accepts_icao_before_time():
+    parsed = parse_flight_command("LIMF 14:25", command="atterraggio", now=_now())
+
+    assert parsed.event_time == dt.datetime(2026, 5, 7, 14, 25, tzinfo=ROME)
+    assert parsed.icao == "LIMF"
+    assert parsed.flight_type is None

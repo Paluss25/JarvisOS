@@ -117,6 +117,10 @@ def parse_flight_command(
     aircraft_type = None
     remaining: list[str] = []
     for token in tokens:
+        parsed_time = _parse_time(token, now)
+        if parsed_time is not None:
+            event_time = parsed_time
+            continue
         if icao is None and aircraft_type is None and _looks_like_icao(token):
             icao = token.upper()
             continue

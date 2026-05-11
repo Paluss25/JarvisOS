@@ -78,3 +78,24 @@ async def test_stream_to_agent_keeps_normal_final_response_after_tools():
 
     sent_text = update.message.reply_text.await_args_list[-1].args[0]
     assert sent_text == "Tutto fatto: SOUL.md e TOOLS.md aggiornati."
+
+
+@pytest.mark.asyncio
+async def test_stream_to_agent_replaces_pre_tool_progress_without_final_response():
+    agent = FakeAgent(
+        chunks=["Re-verifico ora, con prova fresca e controllo schema."],
+        stats={
+            "tool_calls": 4,
+            "mutating_tool_calls": 1,
+            "last_tool_name": "send_message",
+            "text_after_last_tool_chars": 0,
+        },
+    )
+    update = _telegram_update()
+
+    await _stream_to_agent(update, _telegram_context(agent), "hai verificato?")
+
+    sent_text = update.message.reply_text.await_args_list[-1].args[0]
+    assert "Turno concluso senza riepilogo finale" in sent_text
+    assert "send_message" in sent_text
+    assert "Re-verifico ora" not in sent_text

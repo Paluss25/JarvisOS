@@ -143,3 +143,36 @@ async def test_query_raises_when_not_connected(config):
         client = BaseAgentClient(config=config, system_prompt="s", options=MagicMock())
     with pytest.raises(RuntimeError, match="not connected"):
         await client.query("hello")
+
+
+def test_base_agent_client_tracks_text_after_last_tool(config):
+    with patch("src.agent_runner.client.DailyLogger"):
+        client = BaseAgentClient(
+            config=config,
+            system_prompt="sys",
+            options=MagicMock(),
+        )
+
+    client._reset_turn_stats()
+    text_msg = StreamEvent()
+    text_msg.event = {
+        "type": "content_block_delta",
+        "delta": {"type": "text_delta", "text": "Prima verifico."},
+    }
+    tool_msg = StreamEvent()
+    tool_msg.event = {
+        "type": "content_block_start",
+        "content_block": {"type": "tool_use", "name": "health_query"},
+    }
+    final_text_msg = StreamEvent()
+    final_text_msg.event = {
+        "type": "content_block_delta",
+        "delta": {"type": "text_delta", "text": "Risultato finale."},
+    }
+
+    assert client._process_message(text_msg, []) is False
+    assert client._process_message(tool_msg, []) is False
+    assert client._process_message(final_text_msg, []) is False
+
+    stats = client.get_last_turn_stats()
+    assert stats["text_after_last_tool_chars"] == len("Risultato finale.")

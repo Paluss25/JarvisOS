@@ -861,7 +861,9 @@ def _closure_guard_content(content: str, agent: Any) -> str:
         return content or "(no response)"
 
     stripped = content.strip()
-    if stripped and not _is_stale_tool_status_only(stripped):
+    after_tool_known = "text_after_last_tool_chars" in stats
+    after_tool_chars = int(stats.get("text_after_last_tool_chars") or 0)
+    if stripped and not _is_stale_tool_status_only(stripped) and not (after_tool_known and after_tool_chars <= 0):
         return content
 
     last_tool = str(stats.get("last_tool_name") or "unknown")

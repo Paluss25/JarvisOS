@@ -153,12 +153,14 @@ class BaseAgentClient:
             "tool_failures": 0,
             "mutating_tool_calls": 0,
             "last_tool_name": "",
+            "text_after_last_tool_chars": 0,
         }
 
     def _record_tool_call(self, name: str) -> None:
         name = str(name or "").strip()
         self._last_turn_stats["tool_calls"] = int(self._last_turn_stats.get("tool_calls", 0)) + 1
         self._last_turn_stats["last_tool_name"] = name
+        self._last_turn_stats["text_after_last_tool_chars"] = 0
         readonly_names = {
             "Read",
             "Glob",
@@ -380,6 +382,10 @@ class BaseAgentClient:
                 if delta.get("type") == "text_delta":
                     text = delta.get("text", "")
                     if text:
+                        if int(self._last_turn_stats.get("tool_calls", 0)) > 0:
+                            self._last_turn_stats["text_after_last_tool_chars"] = int(
+                                self._last_turn_stats.get("text_after_last_tool_chars", 0)
+                            ) + len(text)
                         text_parts.append(text)
                         return False
         elif hasattr(msg, "content") and msg.content:
