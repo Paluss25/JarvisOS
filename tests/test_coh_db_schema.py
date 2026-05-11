@@ -289,6 +289,41 @@ async def test_health_query_preflights_whoop_start_time_alias(tmp_path):
     assert "'start_time' on table 'whoop_workouts' → use 'start_at'" in text
 
 
+@pytest.mark.asyncio
+async def test_health_query_preflights_flights_table_alias(tmp_path):
+    server = create_drhouse_mcp_server(tmp_path)
+    health_query = next(tool for tool in server._tools if tool.name == "health_query")
+
+    result = await health_query.fn({
+        "database": "nutrition",
+        "query": "SELECT * FROM flights ORDER BY takeoff_at DESC LIMIT 1",
+        "params": [],
+    })
+
+    assert result["is_error"] is True
+    text = result["content"][0]["text"]
+    assert "'flights' table does not exist" in text
+    assert "flight_exposures" in text
+    assert "database='sport'" in text
+
+
+@pytest.mark.asyncio
+async def test_health_query_preflights_flight_exposures_database(tmp_path):
+    server = create_drhouse_mcp_server(tmp_path)
+    health_query = next(tool for tool in server._tools if tool.name == "health_query")
+
+    result = await health_query.fn({
+        "database": "nutrition",
+        "query": "SELECT id, takeoff_at FROM flight_exposures ORDER BY takeoff_at DESC LIMIT 1",
+        "params": [],
+    })
+
+    assert result["is_error"] is True
+    text = result["content"][0]["text"]
+    assert "flight_exposures lives in database='sport'" in text
+    assert "not database='nutrition'" in text
+
+
 def test_health_query_prompt_mentions_flight_exposures():
     server = create_drhouse_mcp_server(Path("/tmp/coh"))
     health_tool = next(entry for entry in server._tools if entry.name == "health_query")

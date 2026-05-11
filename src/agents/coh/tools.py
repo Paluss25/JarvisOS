@@ -354,6 +354,16 @@ def create_drhouse_mcp_server(workspace_path: Path, redis_a2a=None):
         for wrong, (correct, table_hint) in _COLUMN_ALIASES.items():
             if re.search(r"\b" + re.escape(wrong) + r"\b", sql_lower):
                 corrections.append(f"  '{wrong}' → '{correct}' (table: {table_hint})")
+        if _references_table(sql_lower, "flights"):
+            corrections.append(
+                "  'flights' table does not exist — use 'flight_exposures' with database='sport' "
+                "(flight exposure data lives in sport.public.flight_exposures)"
+            )
+        if database != "sport" and _references_table(sql_lower, "flight_exposures"):
+            corrections.append(
+                "  flight_exposures lives in database='sport', not database='nutrition'"
+            )
+
         # Context-aware: meal_id is a real column on meal_items but NOT on meals.
         # Two wrong patterns we want to catch:
         #   (a) explicit qualification to wrong table: `meals.meal_id` / `m.meal_id` when alias `m` → meals
