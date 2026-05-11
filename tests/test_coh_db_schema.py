@@ -1,5 +1,7 @@
 """Tests for COH health DB schema compatibility."""
 
+from pathlib import Path
+
 import pytest
 
 from agents.coh import db
@@ -250,3 +252,16 @@ async def test_health_query_preflights_whoop_start_time_alias(tmp_path):
     assert result["is_error"] is True
     text = result["content"][0]["text"]
     assert "'start_time' on table 'whoop_workouts' → use 'start_at'" in text
+
+
+def test_health_query_prompt_mentions_flight_exposures():
+    server = create_drhouse_mcp_server(Path("/tmp/coh"))
+    health_tool = next(entry for entry in server._tools if entry.name == "health_query")
+
+    assert "flight_exposures" in health_tool.description
+    assert "takeoff_at" in health_tool.description
+    assert "landing_at" in health_tool.description
+    assert "daily_recovery_observations" in health_tool.description
+    assert "whoop_api_v2" in health_tool.description
+    assert "FLIGHT_USER_ID" in health_tool.description
+    assert "SPORT_USER_ID" in health_tool.description
